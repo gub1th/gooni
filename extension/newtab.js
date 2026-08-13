@@ -3,25 +3,42 @@
  * this file is the chrome half — read the configured app URL, point the iframe
  * at it, and decide nothing on its own.
  *
- * Note the sensing path is not touched anywhere here. This is a new surface
- * next to the popup, not a change to what the extension records — and the
- * framed app is on its own origin, so it is recorded exactly like any other
- * tab, which is correct: time spent on the ambient home is real browser time.
+ * The sensing path is not touched anywhere here, and one consequence is worth
+ * stating plainly rather than leaving to be rediscovered: a new tab parked on
+ * the ambient home records NO interval. The sensor reads the ACTIVE TAB's URL,
+ * which on this surface is `chrome-extension://<id>/newtab.html`, and the
+ * scrubber drops every non-http(s) scheme. The iframe's inner origin is never
+ * seen by it. So time spent here is real browser time that the sensor is blind
+ * to — a gap, not a feature, and not one this branch fixes, because what the
+ * extension records is deliberately out of bounds for it.
  */
 
 import { loadConfig } from "./src/config.js";
 import {
+  IFRAME_ALLOW,
   LOAD_TIMEOUT_MS,
   frameBlockedBy,
   frameFailure,
   normalizeAppUrl,
+  probeVerdict,
   resolveAppUrl,
 } from "./src/newtab.js";
 
 const storage = { get: (keys) => chrome.storage.local.get(keys) };
 const $ = (id) => document.getElementById(id);
 
+/**
+ * How long an unreachable verdict waits for the frame to prove it wrong.
+ *
+ * The probe can finish before a cached paint does, so "not painted yet" at the
+ * instant the probe fails is not the same claim as "not painting at all".
+ */
+const PAINT_GRACE_MS = 1500;
+
 let timer = null;
+/** Bumped per mount, so a slow probe from a previous attempt can't rule on this one. */
+let mountToken = 0;
+let framePainted = false;
 
 function showFailure(spec) {
   const f = frameFailure(spec);
@@ -39,62 +56,70 @@ function clearFailure() {
   $("failure").classList.remove("shown");
 }
 
-/**
- * Called once the frame reports a load. Two things can be true at that point:
- * the app painted, or Chrome painted its blocked-frame error page and fired
- * `load` for it. Only the headers can tell them apart, so ask — but stay silent
- * if we can't read them (no host permission for a custom URL), because a failed
- * probe is not evidence of a failed frame.
- */
-async function verifyFramed(url) {
-  // Asked FIRST rather than letting the fetch fail: without the host
-  // permission the request is a CORS failure, and Chrome logs those to the
-  // console whatever the caller does with the rejection. A local dev frontend
-  // would print a scary red error on every single tab open, about a probe that
-  // is allowed to come back unknown.
-  let allowed = false;
-  try {
-    allowed = await chrome.permissions.contains({
-      origins: [new URL(url).origin + "/*"],
-    });
-  } catch {
-    return;
-  }
-  if (!allowed) return;
-
-  let res;
-  try {
-    res = await fetch(url, { method: "GET", cache: "no-store" });
-  } catch {
-    return;
-  }
-  const blocked = frameBlockedBy(res.headers);
-  if (blocked) showFailure({ reason: "blocked", url, note: blocked });
+/** Resolve true as soon as the frame reports a load, or false after `ms`. */
+function waitForPaint(frame, ms) {
+  if (framePainted) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const settle = (painted) => {
+      clearTimeout(graceTimer);
+      frame.removeEventListener("load", onLoad);
+      resolve(painted);
+    };
+    const onLoad = () => settle(true);
+    const graceTimer = setTimeout(() => settle(framePainted), ms);
+    frame.addEventListener("load", onLoad);
+  });
 }
 
 /**
- * Reachability, run alongside the frame load rather than after it.
+ * Ask the app two questions in ONE request where we're allowed to: is anything
+ * answering, and do its headers forbid framing.
  *
- * It has to be alongside, because the frame's own `load` event fires for
- * Chrome's "refused to connect" page exactly as it does for the app — so a
- * dead frontend clears the timeout, tells us nothing, and leaves the tab
- * showing Chrome's error page instead of ours. Chrome's page is not a blank
- * tab, but it names neither Gooni nor the setting you have to change, and it
- * offers no way to reach the options page.
+ * Asking about the host permission FIRST rather than letting the fetch fail:
+ * without it the request is a CORS failure, and Chrome logs those to the
+ * console whatever the caller does with the rejection. A local dev frontend
+ * would print a scary red error on every single tab open, about a probe that is
+ * allowed to come back unknown.
  *
- * `no-cors` on purpose: an opaque response still proves something answered, so
- * a missing host permission can't masquerade as an outage.
+ * The fallback is `no-cors`, which answers only the first question — an opaque
+ * response still proves something answered, so a missing host permission can't
+ * masquerade as an outage. `blocked` stays null there, which is the honest
+ * answer: a probe we couldn't read is not evidence of a failed frame.
+ *
+ * `HEAD` because the headers are the whole payload we want; a served body is
+ * downloaded once already, by the frame.
  */
-async function probeReachable(url) {
+async function probeApp(url) {
+  let readable = false;
+  try {
+    readable = await chrome.permissions.contains({
+      origins: [new URL(url).origin + "/*"],
+    });
+  } catch {
+    readable = false;
+  }
+
+  if (readable) {
+    try {
+      const res = await fetch(url, { method: "HEAD", cache: "no-store" });
+      return { reachable: true, blocked: frameBlockedBy(res.headers) };
+    } catch {
+      return { reachable: false, blocked: null };
+    }
+  }
+
   try {
     await fetch(url, { mode: "no-cors", cache: "no-store" });
-    return true;
+    return { reachable: true, blocked: null };
   } catch {
-    return false;
+    return { reachable: false, blocked: null };
   }
 }
 
 async function mount() {
+  const token = ++mountToken;
+  framePainted = false;
+
   const cfg = await loadConfig(storage);
 
   // A saved-but-unusable value is reported with what was actually typed, not
@@ -112,26 +137,60 @@ async function mount() {
   clearTimeout(timer);
   // The timeout only catches a STALL — a load that neither paints nor errors.
   // Everything else is settled by the probe below.
-  timer = setTimeout(() => showFailure({ reason: "timeout", url }), LOAD_TIMEOUT_MS);
+  timer = setTimeout(() => {
+    if (token === mountToken) showFailure({ reason: "timeout", url });
+  }, LOAD_TIMEOUT_MS);
 
   frame.addEventListener(
     "load",
     () => {
+      if (token !== mountToken) return;
       clearTimeout(timer);
-      verifyFramed(url);
+      framePainted = true;
     },
     { once: true },
   );
 
+  // Set BEFORE the src: `allow` is read at navigation, so a delegation applied
+  // afterwards grants the already-loading document nothing. One owner for the
+  // permission list — the page reads the constant the test guards, rather than
+  // repeating it as an HTML literal that can drift away from it silently.
+  frame.setAttribute("allow", IFRAME_ALLOW);
   frame.src = url;
 
-  if (!(await probeReachable(url))) {
-    clearTimeout(timer);
-    showFailure({ reason: "unreachable", url });
+  // Alongside the frame load, not after it: the frame's own `load` event fires
+  // for Chrome's "refused to connect" page exactly as it does for the app, so a
+  // dead frontend clears the timeout, tells us nothing, and leaves the tab
+  // showing Chrome's error page instead of ours. Chrome's page is not a blank
+  // tab, but it names neither Gooni nor the setting you have to change, and it
+  // offers no way to reach the options page.
+  const probe = await probeApp(url);
+  if (token !== mountToken) return;
+
+  if (!probe.reachable && !probe.blocked) {
+    // Give a cached paint the chance to settle it before we call it dead.
+    await waitForPaint(frame, PAINT_GRACE_MS);
+    if (token !== mountToken) return;
   }
+
+  const verdict = probeVerdict({ ...probe, framePainted });
+  if (!verdict) return;
+  clearTimeout(timer);
+  showFailure({ reason: verdict, url, note: probe.blocked || undefined });
 }
 
-$("retry").addEventListener("click", () => mount());
+/**
+ * Nothing above may reject unhandled. `loadConfig` awaits chrome.storage, which
+ * fails outright when the extension context is invalidated mid-reload — and an
+ * unhandled rejection there means the iframe never gets a src, leaving exactly
+ * the black rectangle with no message and no Retry that this page exists to
+ * make impossible.
+ */
+function mountSafely() {
+  mount().catch(() => showFailure({ reason: "config", url: "" }));
+}
+
+$("retry").addEventListener("click", mountSafely);
 $("openOptions").addEventListener("click", () => chrome.runtime.openOptionsPage());
 
-mount();
+mountSafely();

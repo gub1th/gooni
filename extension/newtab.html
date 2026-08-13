@@ -68,11 +68,14 @@
     </style>
   </head>
   <body>
-    <iframe
-      id="app"
-      allow="microphone; autoplay; clipboard-write"
-      title="Gooni"
-    ></iframe>
+    <!--
+      No `allow` here on purpose: newtab.js sets it from IFRAME_ALLOW before it
+      assigns src, so the permission list has ONE owner and the test that guards
+      voice guards the value the page actually uses. A literal here could be
+      narrowed or dropped and the mic would die on the new tab with every test
+      still green.
+    -->
+    <iframe id="app" title="Gooni"></iframe>
 
     <div id="failure">
       <p id="failureTitle"></p>

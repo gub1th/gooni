@@ -6,6 +6,7 @@ import {
   frameBlockedBy,
   frameFailure,
   normalizeAppUrl,
+  probeVerdict,
   resolveAppUrl,
 } from "../src/newtab.js";
 import { DEFAULT_APP_URL, CONFIG_KEYS, loadConfig } from "../src/config.js";
@@ -120,4 +121,67 @@ test("a blocked frame quotes the directive — the header is the thing you go an
   const blocked = frameBlockedBy(headers({ "X-Frame-Options": "DENY" }));
   const f = frameFailure({ reason: "blocked", url: DEFAULT_APP_URL, note: blocked });
   assert.match(f.detail, /x-frame-options/i);
+});
+
+test("a second CSP header still blocks — Headers.get joins duplicates with a comma", () => {
+  // Two Content-Security-Policy headers arrive as one comma-joined string, so
+  // the blocking directive opens the SECOND policy and is at the start of no
+  // ";"-delimited piece. Missing it puts Chrome's blocked-frame page on screen
+  // instead of the sentence this function exists to produce.
+  assert.match(
+    frameBlockedBy(
+      headers({
+        "content-security-policy":
+          "default-src 'self'; img-src *, frame-ancestors 'self'; script-src 'self'",
+      }),
+    ),
+    /frame-ancestors/i,
+  );
+  // Every policy applies, so the strictest wins: a permissive one cannot vouch
+  // for a stricter one that follows it.
+  assert.match(
+    frameBlockedBy(
+      headers({ "content-security-policy": "frame-ancestors *, frame-ancestors 'self'" }),
+    ),
+    /frame-ancestors 'self'/i,
+  );
+  // ...and a directive that merely starts with the same letters is not it.
+  assert.equal(
+    frameBlockedBy(headers({ "content-security-policy": "frame-ancestors-legacy 'self'" })),
+    null,
+  );
+  // A bare `frame-ancestors` names no source at all — that denies everyone.
+  assert.match(
+    frameBlockedBy(headers({ "content-security-policy": "frame-ancestors" })),
+    /frame-ancestors/i,
+  );
+});
+
+test("a painted frame outranks an unreachable probe — never tear down a working app", () => {
+  // The probe races the load by design and can lose a fight it had no business
+  // entering (frame served from cache, probe hits a dropped network). Acting on
+  // that would replace a surface the user may be typing into with an error.
+  assert.equal(probeVerdict({ reachable: false, blocked: null, framePainted: true }), null);
+  assert.equal(
+    probeVerdict({ reachable: false, blocked: null, framePainted: false }),
+    "unreachable",
+  );
+  assert.equal(probeVerdict({ reachable: true, blocked: null, framePainted: false }), null);
+});
+
+test("a blocked frame is the one verdict a painted frame cannot overrule", () => {
+  // Chrome fires `load` for its own blocked-frame error page, so "painted" here
+  // means the opposite of working.
+  assert.equal(
+    probeVerdict({ reachable: true, blocked: "X-Frame-Options: deny", framePainted: true }),
+    "blocked",
+  );
+});
+
+test("unreadable settings say so rather than naming a URL that was never tried", () => {
+  // chrome.storage can reject mid-reload; the page must still speak.
+  const f = frameFailure({ reason: "config", url: "" });
+  assert.match(f.title, /settings/i);
+  assert.ok(f.detail);
+  assert.equal(f.url, "(no URL configured)");
 });

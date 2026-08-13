@@ -368,10 +368,14 @@ hearing about a dead frontend.
 
 **The microphone is delegated explicitly.** The ambient home is voice-first, and
 a cross-origin iframe gets no microphone unless the embedder hands it one, so
-the frame carries `allow="microphone; autoplay; clipboard-write"`. Without it
-the wave renders and simply never hears anything.
+the frame carries `microphone; autoplay; clipboard-write`. Without it the wave
+renders and simply never hears anything. The list lives in `src/newtab.js` as
+`IFRAME_ALLOW` and is applied by `newtab.js` before the frame's `src` is set
+(`allow` is read at navigation) — deliberately *not* as an attribute in
+`newtab.html`, so there is one owner and the test that guards voice guards the
+value the page actually uses.
 
-### Two known behaviours — not bugs
+### Three known behaviours — not bugs
 
 **Chrome focuses the address bar on a new tab.** Keystrokes go there, not into
 the capture box, until you click into the page once. This is Chrome's own
@@ -386,6 +390,14 @@ practice: you sign in once in the new tab even if you're already signed in
 elsewhere, and preferences that live in `localStorage` (theme, voice mode) are
 tracked separately for the two. Both persist normally within their own
 partition.
+
+**The sensor does not see this tab.** Time parked on the ambient home records
+**no interval**. The sensor reads the *active tab's* URL, which here is
+`chrome-extension://<id>/newtab.html`, and `scrub.js` drops every non-http(s)
+scheme — the iframe's inner origin is never seen. So the browser sensor
+undercounts by however long the new tab sits open. That is a real gap, stated
+rather than papered over: closing it means changing what the extension records,
+which is a separate decision from putting the app on the new tab.
 
 ## Tests
 

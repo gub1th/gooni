@@ -94,17 +94,48 @@ export function frameBlockedBy(headers) {
   if (xfo === "deny" || xfo === "sameorigin") return `X-Frame-Options: ${xfo}`;
 
   const csp = String(headers?.get("content-security-policy") || "");
-  const directive = csp
-    .split(";")
+  // Split on BOTH separators. A response can carry the header twice, and
+  // `Headers.get` joins those with ", " — so the second policy's first
+  // directive is not at the start of any ";"-delimited piece and a
+  // `;`-only split walks straight past it. Source lists are space-separated,
+  // never comma-separated, so nothing legitimate is cut here.
+  const directives = csp
+    .split(/[;,]/)
     .map((part) => part.trim())
-    .find((part) => part.toLowerCase().startsWith("frame-ancestors"));
-  if (!directive) return null;
+    .filter((part) => /^frame-ancestors(\s|$)/i.test(part));
+  if (!directives.length) return null;
 
-  const sources = directive.split(/\s+/).slice(1).map((s) => s.toLowerCase());
-  // `*` permits any embedder; anything else is an allowlist that cannot name a
-  // chrome-extension:// origin, so it excludes us however it is spelled.
-  if (sources.includes("*")) return null;
-  return `Content-Security-Policy: ${directive}`;
+  // EVERY policy applies (a browser enforces their intersection), so the
+  // strictest wins: one permissive `frame-ancestors *` cannot vouch for a
+  // second policy that names an allowlist.
+  for (const directive of directives) {
+    const sources = directive.split(/\s+/).slice(1).map((s) => s.toLowerCase());
+    // `*` permits any embedder; anything else is an allowlist that cannot name
+    // a chrome-extension:// origin, so it excludes us however it is spelled.
+    if (!sources.includes("*")) return `Content-Security-Policy: ${directive}`;
+  }
+  return null;
+}
+
+/**
+ * What the probe's answer means for the page, given what the frame has done.
+ *
+ * The rule that matters: an already-painted frame WINS over an unreachable
+ * verdict. The probe and the frame load race by design, and the probe can lose
+ * a fight it had no business entering — the frame painting from HTTP cache
+ * while a `no-store` probe hits a dropped network, or any transient reset
+ * inside the load window. Tearing down a painted app for that would destroy
+ * whatever the user had already typed into the capture box and replace a
+ * working surface with an error panel.
+ *
+ * `blocked` is exempt, and deliberately so: a blocked frame FIRES `load` for
+ * Chrome's own error page, so "painted" there means the opposite of working.
+ * That is the one verdict the frame's own signal cannot be trusted against.
+ */
+export function probeVerdict({ reachable, blocked, framePainted }) {
+  if (blocked) return "blocked";
+  if (!reachable && !framePainted) return "unreachable";
+  return null;
 }
 
 const REASONS = {
@@ -127,6 +158,15 @@ const REASONS = {
     title: "Gooni refused to be framed",
     detail:
       "The app sent a header that forbids embedding, so the new tab can't show it. Open it in a normal tab instead.",
+  },
+  // Reached when the settings themselves can't be read — chrome.storage rejects
+  // while the extension is being reloaded or updated. There is no URL to name
+  // because we never got as far as knowing which one to try, and saying so is
+  // better than naming the default we didn't actually attempt.
+  config: {
+    title: "Gooni's settings couldn't be read",
+    detail:
+      "The extension couldn't load its own configuration, so it doesn't know which frontend to open. This usually means it was mid-reload — Retry, or reload the extension.",
   },
 };
 
