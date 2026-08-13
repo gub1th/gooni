@@ -3,7 +3,7 @@ import { Mic, StickyNote } from "lucide-react";
 import { FONT, frostInk } from "../../ui";
 import { speakText, isVoiceMode, setVoiceMode, stopSpeaking, primeAudio } from "../../services/speech";
 import { MorphLine, type MorphRect } from "./MorphLine";
-import { LimboCards } from "./LimboCards";
+import { LimboCards, MAX_CARDS } from "./LimboCards";
 import { LogDots, hasLoggedToday } from "./LogDots";
 import { dismissFill, isFillDismissed } from "./dailyFill";
 import { NotePeek } from "./NotePeek";
@@ -96,7 +96,7 @@ function isGlowing(m: LogMessage): boolean {
 }
 
 function energyFor(count: number): number {
-  return Math.min(1, 0.14 + count * 0.28);
+  return Math.min(1, 0.14 + Math.min(count, MAX_CARDS) * 0.28);
 }
 
 function mmss(ms: number): string {

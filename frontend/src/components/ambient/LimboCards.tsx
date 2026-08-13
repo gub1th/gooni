@@ -12,7 +12,7 @@ import type { LogMessage, SignalPreviewSignal } from "../../services/api";
 // quick to kill: Promise or Dismiss. Capped so a busy log can't wallpaper the
 // calm home. Nothing pending → renders null.
 
-const MAX_CARDS = 3;
+export const MAX_CARDS = 3;
 
 /** Gap between the sticky header's bottom edge and the first card. */
 const LANE_GAP = 12;
