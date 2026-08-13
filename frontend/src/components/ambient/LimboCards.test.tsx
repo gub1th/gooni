@@ -13,7 +13,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LimboCards, LANE_TOP } from "./LimboCards";
-import { HEADER_H } from "../shell/AppHeader";
+import { HEADER_H, HEADER_Z } from "../shell/AppHeader";
 import type { LogMessage } from "../../services/api";
 
 vi.mock("./TracedOutline", () => ({
@@ -51,19 +51,36 @@ describe("limbo lane placement", () => {
     expect(LANE_TOP).toBeGreaterThan(HEADER_H);
   });
 
-  it("keeps the header on top — the lane never outranks it", async () => {
+  it("keeps the header on top — the lane never outranks it", () => {
     const { container } = render(
       <LimboCards items={[glow(1, "call mum")]} onPromote={() => {}} onDismiss={() => {}} />,
     );
     const lane = container.firstElementChild as HTMLElement;
-    const { z } = await import("../../ui");
-    expect(Number(lane.style.zIndex)).toBeLessThan(z.overlay + 5);
+    // HEADER_Z is imported, not re-derived: dropping the header's own z has to
+    // fail here rather than leave the test agreeing with a stale literal.
+    expect(Number(lane.style.zIndex)).toBeLessThan(HEADER_Z);
   });
 
   it("caps the cards and counts the rest — a correct read makes this MORE likely", () => {
     const items = [1, 2, 3, 4, 5].map((i) => glow(i, `commitment ${i}`));
-    render(<LimboCards items={items} onPromote={() => {}} onDismiss={() => {}} />);
+    render(<LimboCards items={items} total={5} onPromote={() => {}} onDismiss={() => {}} />);
     expect(screen.getAllByText(/^commitment/)).toHaveLength(3);
     expect(screen.getByText("+2 more waiting")).toBeInTheDocument();
+  });
+
+  it("counts the overflow off the TOTAL, not the fetched page", () => {
+    // The read is capped (50 rows); the backlog is not. Counting off `items`
+    // would say "+47" on a 200-glow backlog — a bounded number presented as
+    // the whole truth.
+    const items = [1, 2, 3, 4, 5].map((i) => glow(i, `commitment ${i}`));
+    render(<LimboCards items={items} total={200} onPromote={() => {}} onDismiss={() => {}} />);
+    expect(screen.getAllByText(/^commitment/)).toHaveLength(3);
+    expect(screen.getByText("+197 more waiting")).toBeInTheDocument();
+  });
+
+  it("never reports fewer waiting than it was handed", () => {
+    const items = [1, 2, 3, 4].map((i) => glow(i, `commitment ${i}`));
+    render(<LimboCards items={items} total={0} onPromote={() => {}} onDismiss={() => {}} />);
+    expect(screen.getByText("+1 more waiting")).toBeInTheDocument();
   });
 });

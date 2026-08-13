@@ -669,7 +669,12 @@ export async function fetchMessageLog(opts: { limit?: number; beforeId?: number 
 // the log client-side bounded the promotable set by recency of chatter, so a
 // pending commitment older than the tail was stranded with no surface that
 // could promote or dismiss it.
-export async function fetchGlowingMessages(opts: { limit?: number } = {}): Promise<LogMessage[]> {
+// `total` is every pending glow, NOT `items.length` — the rows are capped by
+// `limit` and the lane's "+N more waiting" line reports the total, so a count
+// derived from the page would be a capped claim presented as complete.
+export type GlowingMessages = { items: LogMessage[]; total: number };
+
+export async function fetchGlowingMessages(opts: { limit?: number } = {}): Promise<GlowingMessages> {
   const params = new URLSearchParams();
   if (opts.limit) params.set("limit", String(opts.limit));
   const qs = params.toString();

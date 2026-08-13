@@ -43,15 +43,23 @@ function cadenceLabel(s: SignalPreviewSignal): string | null {
 
 export function LimboCards({
   items,
+  total,
   onPromote,
   onDismiss,
 }: {
   items: LogMessage[];
+  /**
+   * Every pending glow, not just the fetched page. `items` is capped by the
+   * read's limit, so counting the overflow off it would understate a backlog
+   * bigger than that limit — a bounded number presented as the whole truth.
+   */
+  total?: number;
   onPromote: (m: LogMessage) => void;
   onDismiss: (m: LogMessage) => void;
 }) {
   const shown = items.slice(0, MAX_CARDS);
-  const overflow = items.length - shown.length;
+  const pending = Math.max(total ?? items.length, items.length);
+  const overflow = pending - shown.length;
 
   return (
     <div

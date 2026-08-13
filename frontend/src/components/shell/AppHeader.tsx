@@ -24,6 +24,16 @@ import type { ApiNote } from "../../services/api";
 
 export const HEADER_H = 52;
 
+/**
+ * The header outranks every other fixed sibling on the surface, `LimboCards`
+ * included: a lane that started inside this band was clipped, and raising it
+ * over the header would only trade a clipped card for a covered header. It is
+ * exported so the things that must stay UNDER it compare against this number
+ * rather than re-deriving the offset — a second copy is how `top: 24` and
+ * `TOP = 64` drifted apart.
+ */
+export const HEADER_Z = z.overlay + 5;
+
 function HeaderDate() {
   const label = new Date()
     .toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })
@@ -66,7 +76,7 @@ export function AppHeader({
         left: 68,
         right: 0,
         height: HEADER_H,
-        zIndex: z.overlay + 5,
+        zIndex: HEADER_Z,
         display: "flex",
         alignItems: "center",
         gap: 16,

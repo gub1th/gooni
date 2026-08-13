@@ -84,7 +84,8 @@ def main() -> int:
     if buried.id in tail_ids:
         fails.append("setup is not adversarial — buried glow still inside the log tail")
 
-    rows = messages_glowing(db=db)
+    payload = messages_glowing(db=db)
+    rows = payload["items"]
     ids = [r["id"] for r in rows]
 
     if buried.id not in ids:
@@ -99,6 +100,8 @@ def main() -> int:
         fails.append("unflagged message leaked into the pending read")
     if len(ids) != 2:
         fails.append(f"expected exactly the 2 pending rows, got {len(ids)}")
+    if payload["total"] != 2:
+        fails.append(f"total counted the wrong set: {payload['total']} (expected 2)")
     if ids != sorted(ids, reverse=True):
         fails.append(f"not newest-first: {ids}")
     if rows and rows[0].get("source") != "web":
@@ -110,13 +113,37 @@ def main() -> int:
     bare = _msg("water the plants")
     bare.has_actionable_signal = True
     db.commit()
-    if bare.id not in [r["id"] for r in messages_glowing(db=db)]:
+    if bare.id not in [r["id"] for r in messages_glowing(db=db)["items"]]:
         fails.append("flagged message with a null preview treated as non-pending")
 
     # The cap is a display concern, but the read has to be able to serve more
     # than MAX_CARDS so `+N more waiting` can be honest.
-    if len(messages_glowing(limit=1, db=db)) != 1:
+    if len(messages_glowing(limit=1, db=db)["items"]) != 1:
         fails.append("limit not honoured")
+
+    # ── the count is over the BACKLOG, not over the page ──────────────────
+    # `total` drives the lane's "+N more waiting" line. Bound it by `limit`
+    # and a 200-glow backlog reports "+47" — a capped number presented as the
+    # whole truth. Build a backlog strictly larger than the requested limit.
+    backlog_limit = 5
+    backlog = [_msg(f"pending backlog {i}", signal="pending") for i in range(backlog_limit * 3)]
+    pending_total = 3 + len(backlog)  # buried + recent + bare, then the backlog
+
+    capped = messages_glowing(limit=backlog_limit, db=db)
+    if len(capped["items"]) != backlog_limit:
+        fails.append(f"page not filled to the limit: got {len(capped['items'])}")
+    if capped["total"] != pending_total:
+        fails.append(f"total bounded by the limit: {capped['total']} (expected {pending_total})")
+    print(f"[overflow count] page={len(capped['items'])} total={capped['total']}")
+
+    # ...and a glow that gets dismissed leaves BOTH numbers, page and total.
+    backlog[-1].signal_preview = _glow("dismissed", backlog[-1].content)
+    db.commit()
+    after = messages_glowing(limit=backlog_limit, db=db)
+    if after["total"] != pending_total - 1:
+        fails.append(f"dismissed glow still counted: {after['total']} (expected {pending_total - 1})")
+    if backlog[-1].id in [r["id"] for r in after["items"]]:
+        fails.append("dismissed glow still served in the page")
 
     db.close()
     os.unlink(_tmp.name)

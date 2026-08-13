@@ -128,6 +128,7 @@ export function AmbientHome({
 
   const [vp, setVp] = useState({ w: 1200, h: 800 });
   const [limbo, setLimbo] = useState<LogMessage[]>([]);
+  const [limboTotal, setLimboTotal] = useState(0);
   const [boxMode, setBoxMode] = useState(false);
   const [logSheet, setLogSheet] = useState(false);
   // The daily fill, offered in TODAY until it is put away for the day. The
@@ -205,9 +206,10 @@ export function AmbientHome({
       // busy day's chatter vanished from the home for good — never promoted,
       // never dismissed. The server now answers the actual question; the
       // client-side `isGlowing` stays as the belt-and-braces check.
-      const rows = await fetchGlowingMessages({ limit: 50 });
-      const glowing = rows.filter(isGlowing);
+      const { items, total } = await fetchGlowingMessages({ limit: 50 });
+      const glowing = items.filter(isGlowing);
       setLimbo(glowing);
+      setLimboTotal(Math.max(total, glowing.length));
       energyRef.current = energyFor(glowing.length);
     } catch {
       /* ambient surface — never throw at the user */
@@ -632,12 +634,17 @@ export function AmbientHome({
     }
   }
 
+  function dropFromLimbo(id: number) {
+    setLimbo((prev) => prev.filter((x) => x.id !== id));
+    setLimboTotal((t) => Math.max(0, t - 1));
+  }
+
   async function onPromote(m: LogMessage) {
-    setLimbo((prev) => prev.filter((x) => x.id !== m.id));
+    dropFromLimbo(m.id);
     try { await promoteMessage(m.id); } finally { void reload(); void loadCommitments(); }
   }
   async function onDismiss(m: LogMessage) {
-    setLimbo((prev) => prev.filter((x) => x.id !== m.id));
+    dropFromLimbo(m.id);
     try { await dismissMessageGlow(m.id); } finally { void reload(); }
   }
 
@@ -793,7 +800,7 @@ export function AmbientHome({
           nothing to do with notes/memories/calendar/the log sheet, and the
           panel slides in over a home that stays mounted. */}
       {!covered && !logSheet && (
-        <LimboCards items={limbo} onPromote={onPromote} onDismiss={onDismiss} />
+        <LimboCards items={limbo} total={limboTotal} onPromote={onPromote} onDismiss={onDismiss} />
       )}
 
 
