@@ -232,6 +232,47 @@ def messages_log(
     return out
 
 
+@router.get("/messages/glowing")
+def messages_glowing(limit: int = 50, db: Session = Depends(get_db)):
+    """Every message whose glow is still PENDING — the ambient home's limbo
+    lane read. Newest first.
+
+    Deliberately NOT a slice of `/messages/log`: the lane used to be fed by
+    filtering the newest 40 log rows client-side, so a pending glow that fell
+    past the tail of recent chatter had no surface left that could reach it —
+    it sat `pending` in the DB forever, never promoted and never dismissed.
+    Pendingness, not recency, is the question, so it is the query.
+
+    `signal_preview` is JSON text, so the LIKE is only a PREFILTER; the
+    authoritative check is the parse below (same rule the FE's `isGlowing`
+    applies: flagged, and status pending or absent)."""
+    from ..db.models import Message
+
+    limit = max(1, min(limit, 300))
+    rows = (
+        db.query(Message, Conversation.source)
+        .join(Conversation, Message.conversation_id == Conversation.id)
+        .filter(Message.has_actionable_signal.is_(True))
+        .filter(
+            (Message.signal_preview.is_(None))
+            | (Message.signal_preview.like('%"pending"%'))
+        )
+        .order_by(Message.id.desc())
+        .limit(limit)
+        .all()
+    )
+    out = []
+    for m, source in rows:
+        d = _serialize_message(m)
+        preview = d.get("signal_preview")
+        status = (preview or {}).get("status", "pending")
+        if status != "pending":
+            continue
+        d["source"] = source
+        out.append(d)
+    return out
+
+
 def _serialize_tool_call(t) -> dict:
     duration_ms = None
     if t.started_at and t.finished_at:

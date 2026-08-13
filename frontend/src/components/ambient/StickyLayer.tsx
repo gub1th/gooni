@@ -1,6 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { FONT, frost } from "../../ui";
+import { LANE_TOP } from "./LimboCards";
 import {
   createStickyNote,
   deleteNote,
@@ -28,7 +29,11 @@ const MIN_H = 96;
 const MAX_W = 560;
 const MAX_H = 480;
 const M = 12; // viewport margin
-const TOP = 64; // keep clear of the top glow-card lane (LimboCards)
+// Keep clear of the sticky header AND the glow-card lane below it. Derived,
+// not guessed: the lane owns where it starts, so a header-height change moves
+// both in step (this used to be a hardcoded 64 measured against a lane that
+// hardcoded 24).
+const TOP = LANE_TOP;
 const NAV_BAND = 220; // vertical half-height of the open-nav panel
 const NAV_OPEN_X = 240; // right edge of the nav panel when open
 const NAV_STRIP_X = 40; // always-live left summon strip + grip

@@ -32,7 +32,7 @@ import {
   dismissMessageGlow,
   fetchCalendarEvents,
   fetchFocusDashboard,
-  fetchMessageLog,
+  fetchGlowingMessages,
   promoteMessage,
   sendConversationMessage,
   updateFocusReminder,
@@ -200,7 +200,12 @@ export function AmbientHome({
 
   const reload = useCallback(async () => {
     try {
-      const rows = await fetchMessageLog({ limit: 40 });
+      // Pendingness, not recency: this used to scrape the newest 40 log rows
+      // and filter them here, so a pending glow that fell past the tail of a
+      // busy day's chatter vanished from the home for good — never promoted,
+      // never dismissed. The server now answers the actual question; the
+      // client-side `isGlowing` stays as the belt-and-braces check.
+      const rows = await fetchGlowingMessages({ limit: 50 });
       const glowing = rows.filter(isGlowing);
       setLimbo(glowing);
       energyRef.current = energyFor(glowing.length);
@@ -784,7 +789,12 @@ export function AmbientHome({
 
       <StickyLayer ref={stickyRef} vp={vp} center={{ cx: rect.cx, cy: rect.cy, w: boxW }} hidden={covered || logSheet} />
 
-      <LimboCards items={limbo} onPromote={onPromote} onDismiss={onDismiss} />
+      {/* Home furniture, same as the stickies: a pending-commitment card has
+          nothing to do with notes/memories/calendar/the log sheet, and the
+          panel slides in over a home that stays mounted. */}
+      {!covered && !logSheet && (
+        <LimboCards items={limbo} onPromote={onPromote} onDismiss={onDismiss} />
+      )}
 
 
       {/* hero zone = the wave's bounding rectangle. Box the wave morphs into +

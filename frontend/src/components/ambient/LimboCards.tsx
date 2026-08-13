@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Check, X } from "lucide-react";
 import { FONT, z } from "../../ui";
+import { HEADER_H } from "../shell/AppHeader";
 import { TracedOutline } from "./TracedOutline";
 import { GREEN } from "./wavePath";
 import type { LogMessage, SignalPreviewSignal } from "../../services/api";
@@ -12,6 +13,23 @@ import type { LogMessage, SignalPreviewSignal } from "../../services/api";
 // calm home. Nothing pending → renders null.
 
 const MAX_CARDS = 3;
+
+/** Gap between the sticky header's bottom edge and the first card. */
+const LANE_GAP = 12;
+
+/**
+ * Where the lane starts, in px from the top of the viewport. The lane is
+ * `position: fixed` and the header (also fixed, and one layer ABOVE this) is
+ * the thing it has to clear — the header must stay on top, so the lane starts
+ * below it rather than outranking it. Exported because `StickyLayer` reserves
+ * the same band; two hardcoded guesses about where this lane begins is how the
+ * old `top: 24` / `TOP = 64` pair drifted apart.
+ *
+ * The style below reads the published `--gooni-header-h` (the runtime truth,
+ * set by `__root.tsx`); this constant is the same number for the JS-side math
+ * that can't take a CSS calc.
+ */
+export const LANE_TOP = HEADER_H + LANE_GAP;
 
 function cadenceLabel(s: SignalPreviewSignal): string | null {
   switch (s.cadence) {
@@ -38,7 +56,9 @@ export function LimboCards({
   return (
     <div
       style={{
-        position: "fixed", top: 24, left: "50%", transform: "translateX(-50%)",
+        position: "fixed",
+        top: `calc(var(--gooni-header-h, ${HEADER_H}px) + ${LANE_GAP}px)`,
+        left: "50%", transform: "translateX(-50%)",
         zIndex: z.overlay, display: "flex", flexDirection: "column", gap: 10,
         width: "min(440px, 92vw)", fontFamily: FONT, pointerEvents: "none",
       }}

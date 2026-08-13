@@ -664,6 +664,20 @@ export async function fetchMessageLog(opts: { limit?: number; beforeId?: number 
   return res.json();
 }
 
+// Every message whose glow is still PENDING, newest first — the ambient home's
+// limbo lane. Distinct from `fetchMessageLog` on purpose: filtering the tail of
+// the log client-side bounded the promotable set by recency of chatter, so a
+// pending commitment older than the tail was stranded with no surface that
+// could promote or dismiss it.
+export async function fetchGlowingMessages(opts: { limit?: number } = {}): Promise<LogMessage[]> {
+  const params = new URLSearchParams();
+  if (opts.limit) params.set("limit", String(opts.limit));
+  const qs = params.toString();
+  const res = await apiFetch(`${BASE}/messages/glowing${qs ? `?${qs}` : ""}`);
+  if (!res.ok) throw new Error("Failed to fetch pending glows");
+  return res.json();
+}
+
 // Unified activity stream (GET /activity) — the "true log": one recency-ordered
 // feed merging chats + notes + promise events + trackables (Whoop/LeetCode ride
 // in as trackables). Paginate back in time with `before` = the prior page's last
