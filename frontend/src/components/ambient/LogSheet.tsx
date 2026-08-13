@@ -157,9 +157,18 @@ export function labelFor(it: ActivityItem): { label: string; color: string } {
  * copy froze the first version on screen for as long as the sheet stayed
  * mounted — which is all day, since it never remounts.
  *
- * So a known key REPLACES its row rather than being discarded, in place, and
- * the sort only runs when something actually moved (JS sort is stable, so equal
- * timestamps keep their order either way). Pure, so the rule is testable.
+ * So a known key REPLACES its row rather than being discarded, in place.
+ *
+ * And ANY change re-sorts, replacements included — `items` is the paging SPINE
+ * (`loadOlder` takes its cursor from the last row's `at`), so it has to stay in
+ * chronological order after every mutation, not only after an append. A key
+ * being stable does not make its `at` stable: `note-{id}` carries `updated_at`
+ * and `promise-{id}` carries `resolved_at`, so editing a note or closing a
+ * promise genuinely moves a loaded row. Replacing the OLDEST such row in place
+ * without re-sorting hands `loadOlder` a near-present cursor, which returns
+ * nothing new, latches `hasMore` false, and kills paging for the session.
+ * A no-op merge still returns `prev` untouched, and the sort is stable, so
+ * equal timestamps keep their order. Pure, so the rule is testable.
  */
 export function mergeNewest(prev: ActivityItem[], rows: ActivityItem[], seen: Set<string>): ActivityItem[] {
   if (prev.length === 0) {
@@ -175,7 +184,7 @@ export function mergeNewest(prev: ActivityItem[], rows: ActivityItem[], seen: Se
     return next;
   });
   const fresh = rows.filter((r) => !seen.has(r.key));
-  if (fresh.length === 0) return changed ? merged : prev;
+  if (fresh.length === 0 && !changed) return prev;
   fresh.forEach((r) => seen.add(r.key));
   return [...fresh, ...merged].sort((a, b) => (a.at < b.at ? 1 : -1));
 }

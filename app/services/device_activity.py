@@ -78,6 +78,23 @@ OPEN_GAP = timedelta(minutes=5)
 # afternoon; six lines would be a worse description of the same fact.
 CLUSTER_GAP = timedelta(minutes=60)
 
+# The most interval rows ONE sensor's derivation will pull into Python for ONE
+# read. Not a tuning knob for what the log says — a bound on what it costs to
+# say it.
+#
+# The gap rule is a forward scan, so unlike every other activity source this one
+# cannot page with `ORDER BY … DESC LIMIT n` (see `_interval_opens`); it reads a
+# WINDOW. That is affordable at the usual 3-day window (~2.6k rows at the
+# measured ~860 intervals/day), and it is the feed's 31-day floor — a real case,
+# reached by paging across a stretch with no other activity in it — that would
+# otherwise materialise ~27k rows per table per page.
+#
+# Truncation is at the OLD edge (the newest N survive), because the recent span
+# is the one the page actually shows and the dropped span is the one the NEXT
+# page's own window covers. Both tables are capped independently: either can be
+# the dense one, and a quiet browser is no reason to starve the app scan.
+MAX_SCAN_INTERVALS = 10_000
+
 # ── the phrase ───────────────────────────────────────────────────────────────
 
 # Shortcuts device pings store as a raw "{subject} {event}" trackable name
@@ -225,14 +242,35 @@ def _interval_opens(db: Session, model, name_col, *, start, end, layer, label_fn
 
     Runs anchored before `start` are dropped at the end; they belong to the
     older page, where their first open is inside the window.
+
+    The scan is capped at `MAX_SCAN_INTERVALS` rows, taken from the NEW edge and
+    reversed for the forward pass. When the cap bites, the window's own start is
+    raised to the oldest surviving interval PLUS the same reach-back grace, so a
+    predecessor that was truncated away can never be mistaken for absence and
+    manufacture a fake "opened" at the truncation boundary — the exact failure
+    the reach-back exists to prevent, which a row cap could otherwise reintroduce
+    through a side door. It costs the first `lookback` of the surviving span,
+    which the next page's window covers, and it says so in the log rather than
+    reading as complete coverage.
     """
     lookback = OPEN_GAP + CLUSTER_GAP
-    rows = (
+    newest_first = (
         db.query(model.id, name_col, model.started_at, model.ended_at)
         .filter(model.started_at >= start - lookback, model.started_at < end)
-        .order_by(model.started_at.asc())
+        .order_by(model.started_at.desc())
+        .limit(MAX_SCAN_INTERVALS + 1)
         .all()
     )
+    capped = len(newest_first) > MAX_SCAN_INTERVALS
+    rows = list(reversed(newest_first[:MAX_SCAN_INTERVALS]))
+    if capped and rows:
+        start = max(start, rows[0][2] + lookback)
+        print(
+            f"[device_activity] {layer} scan hit MAX_SCAN_INTERVALS "
+            f"({MAX_SCAN_INTERVALS}); opens before {start.isoformat()} are not "
+            f"derived on this read — an older page covers that span"
+        )
+
     opens = opens_from_intervals(rows, since=start - CLUSTER_GAP)
     return [
         {

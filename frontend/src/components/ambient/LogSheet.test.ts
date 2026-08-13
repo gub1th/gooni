@@ -136,6 +136,39 @@ test("a re-fetched row updates in place; the key dedup still stops duplicates", 
   expect(withNew.map((r) => r.key)).toEqual(["device-app-9", "device-app-7"]);
 });
 
+/**
+ * `items` is the paging SPINE — `loadOlder` reads its cursor off the last row —
+ * so an in-place replacement must not be allowed to leave it out of order. A
+ * stable key does not mean a stable `at`: a note carries `updated_at` and a
+ * promise carries `resolved_at`, so editing or closing a LOADED row genuinely
+ * moves it to the top of the stream under the same key.
+ */
+test("a replaced row that moved in time is re-sorted, so paging keeps its cursor", () => {
+  const item = (over: Partial<ActivityItem> & { key: string; at: string }): ActivityItem =>
+    ({ kind: "note", text: "a note", ...over }) as ActivityItem;
+
+  const seen = new Set<string>();
+  const loaded = mergeNewest(
+    [],
+    [
+      item({ key: "device-app-1", kind: "device", text: "opened cursor", at: "2026-08-12T09:00:00Z" }),
+      item({ key: "note-1", at: "2026-08-12T08:00:00Z" }),
+    ],
+    seen,
+  );
+  expect(loaded[loaded.length - 1].key).toBe("note-1");
+
+  // He edits the OLDEST loaded row. It comes back on the newest-page poll under
+  // the same key with `at` jumped to now.
+  const after = mergeNewest(loaded, [item({ key: "note-1", at: "2026-08-12T12:00:00Z" })], seen);
+
+  expect(after.map((r) => r.key)).toEqual(["note-1", "device-app-1"]);
+  expect(after[after.length - 1].at).toBe(
+    "2026-08-12T09:00:00Z",
+  );
+  expect(after).toHaveLength(2);
+});
+
 test("a device row is not mistaken for a logged measurement", () => {
   // `logged` (accent green) is a real measurement Daniel entered. A device row
   // is telemetry — same feed, different claim, and the colours have to say so.

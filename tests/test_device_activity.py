@@ -389,6 +389,50 @@ def main():
         f"one 40 days back does not: {sorted(beyond)}",
     )
 
+    # ── the scan cap ─────────────────────────────────────────────────────────
+    #
+    # The forward gap rule reads a WINDOW rather than paging, so a 31-day floor
+    # over a dense sensor is tens of thousands of rows per read. The cap bounds
+    # that — but a row cap is exactly the kind of thing that reintroduces the
+    # fake `opened` at a boundary, because a truncated predecessor is
+    # indistinguishable from no predecessor at all.
+    print("\nscan cap")
+
+    cap_t0 = T0 - timedelta(days=60)
+    filler = [
+        _app(f"cap-f{i}", app="Filler", start=cap_t0 + timedelta(minutes=i), seconds=60)
+        for i in range(20)
+    ]
+    # A genuine open, hours after the filler stops.
+    filler.append(_app("cap-kept", app="Kept", start=cap_t0 + timedelta(minutes=300), seconds=600))
+    app_activity_service.ingest_batch(db, filler)
+
+    cap_window = dict(start=cap_t0 - timedelta(minutes=10), end=cap_t0 + timedelta(hours=8))
+    uncapped = {it["text"] for it in device_activity.device_opens(db, **cap_window)}
+    check(
+        {"opened filler", "opened kept"} <= uncapped,
+        f"uncapped, both names open exactly once: {sorted(uncapped)}",
+    )
+
+    real_cap = device_activity.MAX_SCAN_INTERVALS
+    device_activity.MAX_SCAN_INTERVALS = 5
+    try:
+        capped = {it["text"] for it in device_activity.device_opens(db, **cap_window)}
+    finally:
+        device_activity.MAX_SCAN_INTERVALS = real_cap
+
+    check(
+        "opened kept" in capped,
+        f"the cap truncates at the OLD edge — the recent span a page shows is "
+        f"still complete: {sorted(capped)}",
+    )
+    check(
+        "opened filler" not in capped,
+        f"and the row it truncated INTO is not reported as an opening: a "
+        f"predecessor that was cut is not evidence that there wasn't one "
+        f"{sorted(capped)}",
+    )
+
     db.close()
     print()
     if _failures:
