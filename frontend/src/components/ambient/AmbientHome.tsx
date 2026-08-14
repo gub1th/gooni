@@ -11,6 +11,7 @@ import { StickyLayer, type StickyHandle } from "./StickyLayer";
 import { TodayList, type SessionRow, type TodayRow } from "./TodayList";
 import { useHomeChromeStore } from "../../stores/useHomeChromeStore";
 import { LogSheet } from "./LogSheet";
+import { CurrentActivityLine } from "./CurrentActivityLine";
 import { ink } from "./ambientInk";
 import { emptyRetained, mergeTodayRows, retainTicked } from "./todayRows";
 import {
@@ -77,6 +78,7 @@ const MIN_UTTERANCE = 2; // ignore stray one-char finals / noise
 // Momentum's vertical rhythm, as fractions of the viewport. Pinning each group
 // to its own fraction (rather than stacking them in flow under the wave) is
 // what keeps the wave at true centre however long the line or the list runs.
+const ACTIVITY_Y = 0.40; // "currently doing" line, above the wave
 const WAVE_Y = 0.47;
 const TODAY_Y = 0.66;
 // What the ROWS may claim before they scroll instead of growing. Without a cap
@@ -876,6 +878,15 @@ export function AmbientHome({
           opacity: stageHidden ? 0 : 1, transition: "opacity 220ms ease",
         }}
       >
+        <div
+          style={{
+            position: "absolute", top: `${ACTIVITY_Y * 100}%`, left: "50%", transform: "translate(-50%, -50%)",
+            width: "min(560px, 84vw)",
+          }}
+        >
+          <CurrentActivityLine />
+        </div>
+
         <div
           style={{
             position: "absolute", top: `${TODAY_Y * 100}%`, left: "50%", transform: "translateX(-50%)",

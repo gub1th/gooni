@@ -23,3 +23,11 @@ def get_activity(
 ):
     before_dt = activity_service.parse_before(before)
     return activity_service.build_activity_feed(db, before=before_dt, limit=limit)
+
+
+@router.get("/activity/now")
+def get_current_activity(db: Session = Depends(get_db)):
+    """The ambient home's "currently doing" line: newest still-fresh interval
+    from each attention sensor (desktop app, browser tab). Null fields when
+    nothing recent (idle > 10min or no data)."""
+    return activity_service.current_activity(db)

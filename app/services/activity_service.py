@@ -422,3 +422,50 @@ def build_activity_feed(
         items = [it for it in items if it["at"] < before]
     items.sort(key=lambda it: it["at"], reverse=True)
     return items[:limit]
+
+
+# How stale the newest interval's `ended_at` can be before "currently doing X"
+# stops being true. Every interval is already CLOSED (both sensors only ever
+# flush finished spans), so this is standing in for "did the sensor just close
+# one" — a gap past this reads as idle rather than a live, ongoing activity.
+CURRENT_ACTIVITY_IDLE_GAP = timedelta(minutes=10)
+
+
+def _current_interval(db: Session, model, name_col) -> dict | None:
+    row = db.query(model).order_by(model.started_at.desc()).first()
+    if row is None or row.ended_at is None or row.started_at is None:
+        return None
+    now = datetime.utcnow()
+    if now - row.ended_at > CURRENT_ACTIVITY_IDLE_GAP:
+        return None
+    return {
+        "name": getattr(row, name_col),
+        "started_at": row.started_at.isoformat(),
+        "duration_sec": max(0.0, (now - row.started_at).total_seconds()),
+    }
+
+
+def current_activity(db: Session) -> dict:
+    """The single most recent still-fresh interval from each attention sensor —
+    the read behind the ambient home's "currently doing" line. Read-only, no
+    Trackable, no scoring: just the newest closed interval's name + a duration
+    extended to `now` (the sensor closes a span on every switch, so the newest
+    row IS the current one until it goes stale past
+    `CURRENT_ACTIVITY_IDLE_GAP`). Two indexed `ORDER BY started_at DESC LIMIT 1`
+    queries, no joins, no aggregation.
+    """
+    from ..db.models import AppInterval, BrowserInterval
+
+    app_row = _current_interval(db, AppInterval, "app")
+    browser_row = db.query(BrowserInterval).order_by(BrowserInterval.started_at.desc()).first()
+    browser = None
+    if browser_row is not None and browser_row.ended_at is not None:
+        now = datetime.utcnow()
+        if now - browser_row.ended_at <= CURRENT_ACTIVITY_IDLE_GAP:
+            browser = {
+                "host": browser_row.host,
+                "path": browser_row.path,
+                "started_at": browser_row.started_at.isoformat(),
+                "duration_sec": max(0.0, (now - browser_row.started_at).total_seconds()),
+            }
+    return {"app": app_row, "browser": browser}
