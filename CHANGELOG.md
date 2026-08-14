@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.232.0 — 2026-08-14 (minor)
+
+- feat(device): browser + desktop activity as `opened X` rows in the log and timeline (#472)
+
 ## 0.231.1 — 2026-08-13 (patch)
 
 - fix(ambient): limbo lane clears the header, stands down off home, reads pending (#471)
