@@ -118,23 +118,31 @@ export function frameBlockedBy(headers) {
 }
 
 /**
- * What the probe's answer means for the page, given what the frame has done.
+ * What the probe's answer means for the page.
  *
- * The rule that matters: an already-painted frame WINS over an unreachable
- * verdict. The probe and the frame load race by design, and the probe can lose
- * a fight it had no business entering — the frame painting from HTTP cache
- * while a `no-store` probe hits a dropped network, or any transient reset
- * inside the load window. Tearing down a painted app for that would destroy
- * whatever the user had already typed into the capture box and replace a
- * working surface with an error panel.
+ * **`framePainted` is deliberately not consulted.** It looks like the obvious
+ * guard — don't tear down a surface that already painted — and it was written
+ * that way once. It is wrong here, because it contradicts the premise the whole
+ * alongside-the-load design rests on: Chrome fires the iframe's `load` event for
+ * its OWN "refused to connect" page exactly as it does for the app. So against
+ * a dead frontend the sequence is always the same — the error page commits in
+ * milliseconds, `load` fires, "painted" is true — and a rule that yields to it
+ * yields to Chrome's error page. The failure panel could then never appear for
+ * the most ordinary failure it exists to report, which is acceptance criterion
+ * 3 defeated by its own guard. `blocked` was already exempt for exactly this
+ * reason; `unreachable` has the identical problem, so it is exempt too and the
+ * distinction is gone.
  *
- * `blocked` is exempt, and deliberately so: a blocked frame FIRES `load` for
- * Chrome's own error page, so "painted" there means the opposite of working.
- * That is the one verdict the frame's own signal cannot be trusted against.
+ * The cost is real and accepted: a frame that painted from HTTP cache while the
+ * probe hit a dropped network shows the panel over a surface that was working.
+ * Two things make that the better trade. A wrong or dead `appUrl` is PERMANENT
+ * and hits every tab open, while a cache-plus-blip race is transient — and the
+ * panel is not a dead end, it carries Retry and Open settings. Deciding the
+ * other way optimises the transient case by breaking the permanent one.
  */
-export function probeVerdict({ reachable, blocked, framePainted }) {
+export function probeVerdict({ reachable, blocked }) {
   if (blocked) return "blocked";
-  if (!reachable && !framePainted) return "unreachable";
+  if (!reachable) return "unreachable";
   return null;
 }
 

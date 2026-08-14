@@ -158,23 +158,31 @@ test("a second CSP header still blocks — Headers.get joins duplicates with a c
   );
 });
 
-test("a painted frame outranks an unreachable probe — never tear down a working app", () => {
-  // The probe races the load by design and can lose a fight it had no business
-  // entering (frame served from cache, probe hits a dropped network). Acting on
-  // that would replace a surface the user may be typing into with an error.
-  assert.equal(probeVerdict({ reachable: false, blocked: null, framePainted: true }), null);
+test("an unreachable host reports unreachable even though the frame 'painted'", () => {
+  // The regression this pins: `framePainted` used to suppress this verdict, on
+  // the reasonable-sounding rule that a painted frame should never be torn down.
+  // Against a dead host that rule can only ever fire — Chrome commits its
+  // "refused to connect" page in milliseconds and fires `load` for it, exactly
+  // as it does for the app — so the panel could never appear for the most
+  // ordinary failure it exists to report. A painted frame is not evidence of a
+  // working app, so the verdict does not consult it.
+  assert.equal(probeVerdict({ reachable: false, blocked: null, framePainted: true }), "unreachable");
   assert.equal(
     probeVerdict({ reachable: false, blocked: null, framePainted: false }),
     "unreachable",
   );
   assert.equal(probeVerdict({ reachable: true, blocked: null, framePainted: false }), null);
+  // And a reachable host stays silent however the frame is doing.
+  assert.equal(probeVerdict({ reachable: true, blocked: null, framePainted: true }), null);
 });
 
-test("a blocked frame is the one verdict a painted frame cannot overrule", () => {
-  // Chrome fires `load` for its own blocked-frame error page, so "painted" here
-  // means the opposite of working.
+test("blocked outranks unreachable — the precise sentence wins over the generic one", () => {
   assert.equal(
     probeVerdict({ reachable: true, blocked: "X-Frame-Options: deny", framePainted: true }),
+    "blocked",
+  );
+  assert.equal(
+    probeVerdict({ reachable: false, blocked: "X-Frame-Options: deny", framePainted: false }),
     "blocked",
   );
 });

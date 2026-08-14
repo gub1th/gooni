@@ -28,14 +28,6 @@ import {
 const storage = { get: (keys) => chrome.storage.local.get(keys) };
 const $ = (id) => document.getElementById(id);
 
-/**
- * How long an unreachable verdict waits for the frame to prove it wrong.
- *
- * The probe can finish before a cached paint does, so "not painted yet" at the
- * instant the probe fails is not the same claim as "not painting at all".
- */
-const PAINT_GRACE_MS = 1500;
-
 let timer = null;
 /** Bumped per mount, so a slow probe from a previous attempt can't rule on this one. */
 let mountToken = 0;
@@ -57,21 +49,6 @@ function showFailure(spec) {
 
 function clearFailure() {
   $("failure").classList.remove("shown");
-}
-
-/** Resolve true as soon as the frame reports a load, or false after `ms`. */
-function waitForPaint(frame, ms) {
-  if (framePainted) return Promise.resolve(true);
-  return new Promise((resolve) => {
-    const settle = (painted) => {
-      clearTimeout(graceTimer);
-      frame.removeEventListener("load", onLoad);
-      resolve(painted);
-    };
-    const onLoad = () => settle(true);
-    const graceTimer = setTimeout(() => settle(framePainted), ms);
-    frame.addEventListener("load", onLoad);
-  });
 }
 
 /**
@@ -178,13 +155,10 @@ async function mount() {
   if (token !== mountToken) return;
   probeState = probe;
 
-  if (!probe.reachable && !probe.blocked) {
-    // Give a cached paint the chance to settle it before we call it dead.
-    await waitForPaint(frame, PAINT_GRACE_MS);
-    if (token !== mountToken) return;
-  }
-
-  const verdict = probeVerdict({ ...probe, framePainted });
+  // Note what is NOT here: a wait for the frame to paint first. Against a dead
+  // host Chrome's error page paints immediately, so waiting only guarantees the
+  // thing being waited for and then suppresses the verdict — see probeVerdict.
+  const verdict = probeVerdict(probe);
   if (!verdict) {
     // No verdict means the frame painted or something answered — either way the
     // stall timer's question is answered, so it is disarmed rather than left to
