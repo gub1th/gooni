@@ -1,10 +1,14 @@
 """Unified activity stream — the "true log" substrate (PRD note #397).
 
 Merges the heterogeneous signals of Daniel's day into ONE recency-ordered
-feed: chat messages (every channel), notes, promise lifecycle events, and
-trackable measurements (which is how Whoop / LeetCode land too, since they
-store as trackable entries). Query-time union — NO new table — each source
-is over-fetched then k-way merged by timestamp in Python.
+feed: chat messages (every channel), notes, promise lifecycle events,
+trackable measurements (which is how Whoop / LeetCode and the iOS Shortcuts
+device pings land too, since they store as trackable entries), and the
+`opened X` rows DERIVED from the two attention sensors — browser tab focus and
+frontmost macOS app (see device_activity, which owns the shared 5-minute gap
+rule and the shared phrasing so all three device layers read as one
+vocabulary). Query-time union — NO new table — each source is over-fetched then
+k-way merged by timestamp in Python.
 
 The point of the union is that ONE stream powers two consumers: the always-on
 activity rail on the ambient home AND the pre-reply context feed (the
@@ -24,48 +28,12 @@ can't take down the whole feed (same posture as recent_activity.py).
 
 from __future__ import annotations
 
-import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
 from ..common import stale_day_label as _stale_day_label
-
-
-# Shortcuts device pings store as a raw "{subject} {event}" trackable name
-# ("instagram open", "office arrive") with a meaningless per-ping +1 count.
-# Rephrase the common verbs into a sentence and drop the count. MIRROR of
-# frontend FocusStream.formatEventLabel — keep the two in sync. Unknown shapes
-# pass through untouched (the device vocab is open-ended server-side).
-# Match BASE and past forms: iOS Shortcuts sends the imperative ("instagram
-# open", "office arrive"), not past tense. `opened?`/`locked?` only reach
-# "opene"/"locke"+d, so the bare verbs slipped through untouched — hence
-# `(?:ed)?` on the consonant-final stems.
-_EVENT_VERB = re.compile(
-    r"^(.*?)\s+(arrived?|left|leave|open(?:ed)?|closed?|unlock(?:ed)?|lock(?:ed)?|charging|plugged)$",
-    re.IGNORECASE,
-)
-
-
-def _event_phrase(name: str) -> str:
-    s = (name or "").strip()
-    m = _EVENT_VERB.match(s)
-    if not m:
-        return s
-    subject, verb = m.group(1).strip(), m.group(2).lower()
-    if verb.startswith("arriv"):
-        return f"arrived at {subject}"
-    if verb in ("left", "leave"):
-        return f"left {subject}"
-    if verb.startswith("open"):
-        return f"opened {subject}"
-    if verb.startswith("close"):
-        return f"closed {subject}"
-    if verb.startswith("unlock"):
-        return f"unlocked {subject}"
-    if verb.startswith("lock"):
-        return f"locked {subject}"
-    return s
+from .device_activity import event_phrase as _event_phrase
 
 
 def _utc(dt: datetime | None) -> datetime | None:
@@ -321,6 +289,96 @@ def _trackables(db: Session, before_naive, limit: int) -> list[dict]:
     return out
 
 
+# The FEWEST local days one page of the feed derives device rows for.
+#
+# The other sources page by `ORDER BY … DESC LIMIT n`, which the gap rule can't
+# use: deciding whether an interval is an OPEN needs the interval BEFORE it, and
+# "before" is the direction a DESC-limited query throws away. So this source
+# derives whole LOCAL DAYS (see device_activity) and the page SELECTS which ones
+# — three at a minimum, which covers the ordinary read cheaply.
+_DEVICE_MIN_DAYS = 3
+
+
+def _page_reach(items: list[dict], limit: int, before) -> datetime | None:
+    """The naive-UTC timestamp this page's NON-device sources reach back to.
+
+    That is the `limit`-th newest of them (the oldest that can survive the
+    merge), or simply the oldest they returned when they returned fewer than
+    `limit` — in which case the next cursor lands exactly there. `None` when
+    they returned nothing at all: there is no step to follow, and the caller
+    falls back to the absolute floor.
+
+    Why a derived source needs this at all: the paging cursor is the merged
+    page's OLDEST item, and the other sources can push it back further in ONE
+    STEP than a fixed lookback covers. Away from the machine for five days, the
+    newest note is eight days old and page 2 asks `before = now-8d` — so unless
+    the day set follows the step, every device row in the skipped span is
+    derived by no page at all.
+
+    The `before` guard is applied here as well as after the merge, because a
+    promise's effective ts is recomputed in Python and can land newer than the
+    cursor; counting one of those would make the reach look shallower than the
+    page's real step.
+    """
+    ats = sorted(
+        (
+            it["at"]
+            for it in items
+            if it.get("at") is not None and (before is None or it["at"] < before)
+        ),
+        reverse=True,
+    )
+    if not ats:
+        return None
+    at = ats[limit - 1] if len(ats) >= limit else ats[-1]
+    return at.replace(tzinfo=None)
+
+
+def _device(db: Session, before_naive, limit: int, *, reach=None) -> list[dict]:
+    from ..common import local_day_of, local_now
+    from . import device_activity
+
+    end = before_naive or datetime.utcnow()
+    try:
+        tz = local_now(db).tzinfo
+        end_day = local_day_of(end, tz)
+        # `reach` is how far this page's other sources actually extend back;
+        # None means nothing bounds the step, so the set opens to the absolute
+        # floor rather than to a few days that could sit inside the jump.
+        floor_day = end_day - timedelta(days=device_activity.MAX_DERIVED_DAYS - 1)
+        if reach is None:
+            start_day = floor_day
+        else:
+            start_day = min(local_day_of(reach, tz), end_day - timedelta(days=_DEVICE_MIN_DAYS - 1))
+        start_day = max(start_day, floor_day)
+        opens = device_activity.device_opens(db, start_day=start_day, end_day=end_day)
+    except Exception as e:  # pragma: no cover — defensive
+        print(f"[activity] device opens failed: {e}")
+        return []
+
+    # A day window reaches past the cursor by design — the run's count describes
+    # the DAY, not the page. Rows newer than the cursor belong to a newer page.
+    out: list[dict] = []
+    for it in opens:
+        if before_naive is not None and it["at"] >= before_naive:
+            continue
+        out.append({
+            "key": it["key"],
+            "kind": "device",
+            "at": _utc(it["at"]),
+            "text": it["text"],
+            "name": it["name"],
+            # The LAYER, not a Trackable source — these rows have no Trackable.
+            # The frontend renders every device layer identically (the Shortcuts
+            # rows included), so this exists to make a row's origin greppable,
+            # not to make it look different.
+            "source": it["layer"],
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
 def build_activity_feed(
     db: Session,
     before: datetime | None = None,
@@ -351,6 +409,11 @@ def build_activity_feed(
         items += _promises(db, before_naive, limit)
     if "trackable" not in skip:
         items += _trackables(db, before_naive, limit)
+    if "device" not in skip:
+        # Derived LAST, and that ordering is load-bearing: the device window has
+        # to know how far back this page will actually reach, which is a fact
+        # about what the other sources just returned.
+        items += _device(db, before_naive, limit, reach=_page_reach(items, limit, before))
 
     # drop anything undated, then k-way merge by the normalized UTC ts
     items = [it for it in items if it.get("at") is not None]

@@ -868,6 +868,22 @@ def _serialize_reminder(
 STREAM_DEFAULT_DAYS = 7
 STREAM_MAX_DAYS = 60
 
+# How many LOCAL DAYS of a stream window the DEVICE derivation covers.
+#
+# Thought cards are read as cards — one row each, bounded by how many were
+# written. Device rows are DERIVED from raw attention intervals, so their cost
+# scales with how much the sensors recorded rather than with how many rows come
+# out: a busy day is ~900 intervals per sensor, and `days` is caller-controlled
+# up to STREAM_MAX_DAYS, so an unbounded derivation would materialise tens of
+# thousands of rows for one request on a small VM.
+#
+# So the device half of the window is bounded independently, and stated here
+# rather than applied silently: a stream longer than this still returns every
+# thought card in it, and its `opened X` rows stop at the last
+# DEVICE_STREAM_DAYS. The only in-repo caller (the day timeline) asks for one
+# day; raise it if a surface ever needs device rows deeper than a week.
+DEVICE_STREAM_DAYS = 7
+
 
 def stream(
     db: Session,
@@ -940,10 +956,37 @@ def stream(
         for b, tp in rows
     ]
 
-    # Shortcuts device events (already tz-aware in value_json.at), clustered.
-    from . import event_service  # local import — avoids a module-load cycle
+    # Device events, all three layers, in ONE vocabulary:
+    #   - iOS Shortcuts pings (already tz-aware in value_json.at), clustered
+    #   - browser hosts and macOS apps, reduced to `opened X` by the shared
+    #     5-minute gap rule (device_activity.OPEN_GAP)
+    # The two interval sensors emit the same `{type:'event', label, kind, at,
+    # count}` card the Shortcuts pings do — the timeline renders one row shape
+    # and never has to know which sensor a row came from. They derive in LOCAL
+    # DAYS, which is the window this whole function already works in, so the
+    # tail is simply the newest DEVICE_STREAM_DAYS of the requested range.
+    from . import device_activity, event_service  # local imports — module-load cycle
+
+    device_first = max(start_date, end_date - timedelta(days=DEVICE_STREAM_DAYS - 1))
 
     items.extend(event_service.list_recent_events(db, start=start_date, end=end_date))
+    items.extend(
+        {
+            "type": "event",
+            # `phrase` is the sentence WITHOUT the count — the timeline renders
+            # `×count` itself, so `text` would print it twice ("opened reddit ×8
+            # ×8"). Read from device_activity rather than rebuilt here: the verb
+            # is written in exactly one place, which is the whole reason that
+            # module owns the vocabulary.
+            "label": open_row["phrase"],
+            "kind": open_row["layer"],
+            "at": _iso(open_row["at"]),
+            "count": open_row["count"],
+        }
+        for open_row in device_activity.device_opens(
+            db, start_day=device_first, end_day=end_date
+        )
+    )
 
     items.sort(key=lambda it: _sort_key(it.get("at")), reverse=True)
     return {

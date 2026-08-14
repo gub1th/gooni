@@ -13,18 +13,25 @@
  *   - the focus-cam sidecar's whole lifetime, including a clean stop on quit.
  */
 
-const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, shell, nativeImage, screen, dialog } = require("electron");
+const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, shell, nativeImage, screen, dialog, powerMonitor } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
-const { spawn } = require("node:child_process");
+const { spawn, execFile } = require("node:child_process");
 
 const configModule = require("./config");
 const { SidecarSupervisor, describe, isUnhealthy } = require("./sidecar");
 const { buildMenuTemplate, summarize } = require("./traymenu");
 const { GooniApi } = require("./api");
 const tokenModule = require("./token");
+const { AppFocusTracker } = require("./appfocus");
+const { AppReporter } = require("./appreporter");
+const { AppSensor } = require("./appsensor");
+const { queryFrontmost } = require("./frontmost");
+const { createJsonStore } = require("./jsonstore");
 
 const SIDECAR_LOG = "sidecar.log";
+const APP_SENSOR_STATE = "app-sensor.json";
+const APP_SENSOR_OPEN = "app-sensor-open.json";
 
 let config = configModule.defaults();
 let configPath = "";
@@ -32,6 +39,7 @@ let tray = null;
 let mainWindow = null;
 let captureWindow = null;
 let sidecar = null;
+let appSensor = null;
 let api = null;
 let harvestedToken = "";
 let quitting = false;
@@ -108,6 +116,64 @@ function createSidecar() {
   });
   sidecar.configure(config.sidecar);
   sidecar.start();
+}
+
+// ── frontmost-app sensor ─────────────────────────────────────────────────────
+
+/**
+ * A durable JSON file under userData — atomic writes, loud corruption. The
+ * rules live in jsonstore.js, chrome-free so they are testable.
+ *
+ * TWO of them, and the split is the point: the buffer changes only when rows
+ * are added or delivered, while the open-interval anchor is rewritten on every
+ * poll. See AppReporter's header for why sharing one file made a long outage
+ * write the whole backlog to disk every few seconds. Both are atomic — the
+ * anchor's write is tiny, so freshness costs nothing here.
+ */
+function jsonStore(name) {
+  return createJsonStore({ dir: userDataDir(), name });
+}
+
+function createAppSensor() {
+  const reporter = new AppReporter({
+    store: jsonStore(APP_SENSOR_STATE),
+    openStore: jsonStore(APP_SENSOR_OPEN),
+    getBaseUrl: () => config.apiUrl,
+    getToken: () => currentToken().token,
+  });
+  appSensor = new AppSensor({
+    tracker: new AppFocusTracker({}),
+    reporter,
+    queryFrontmost: () => queryFrontmost({ execFileImpl: execFile }),
+    // Seconds since the last keyboard/mouse input, machine-wide. This is the
+    // whole reason a frontmost-app poll doesn't credit lunch to whatever was on
+    // screen — see AppSensor's header.
+    getIdleSeconds: () => powerMonitor.getSystemIdleTime(),
+    idleSec: config.appSensor.idleSec,
+    pollMs: config.appSensor.pollMs,
+    flushMs: config.appSensor.flushMs,
+    onStatus: () => refreshTray(),
+    log: (text) => console.log(`[gooni] app sensor: ${text}`),
+  });
+
+  if (config.appSensor.enabled) appSensor.start();
+}
+
+/**
+ * Sleep and lock are the two ways attention ends that no poll can observe after
+ * the fact. Both are delivered BEFORE the machine goes away, so the interval
+ * closes with a real end time instead of being salvaged on the next launch.
+ *
+ * Registered ONCE and dispatched through the module-level `appSensor`, not from
+ * inside createAppSensor — a config reload builds a new sensor, and re-adding
+ * listeners each time would leave every previous one attached, firing suspend
+ * at a sensor that has already stopped.
+ */
+function registerPowerEvents() {
+  powerMonitor.on("suspend", () => appSensor?.onSuspend());
+  powerMonitor.on("lock-screen", () => appSensor?.onLock());
+  powerMonitor.on("resume", () => appSensor?.onResume());
+  powerMonitor.on("unlock-screen", () => appSensor?.onResume());
 }
 
 // ── windows ──────────────────────────────────────────────────────────────────
@@ -325,12 +391,14 @@ function refreshTray() {
   if (!tray) return;
   const status = sidecar ? sidecar.status() : { state: "stopped", restarts: 0 };
   const { source } = currentToken();
-  const summary = summarize({ config, sidecar: status, tokenSource: source });
+  const sensorStatus = appSensor ? appSensor.status() : null;
+  const summary = summarize({ config, sidecar: status, tokenSource: source, appSensor: sensorStatus });
 
   const template = buildMenuTemplate({
     config,
     sidecar: status,
     tokenSource: source,
+    appSensor: sensorStatus,
     // Unpackaged, the OS registration is deliberately skipped (see
     // applyLaunchAtLogin), so the checkbox reflects the stored preference —
     // otherwise it would silently uncheck itself every dev run.
@@ -433,6 +501,13 @@ async function reloadConfig() {
     await sidecar.restart();
   }
 
+  // The sensor reads its cadence at construction, so a changed knob needs a new
+  // one. Stopping FLUSHES first, so a reload can't strand buffered attention.
+  if (JSON.stringify(before.appSensor) !== JSON.stringify(config.appSensor)) {
+    await appSensor?.stop();
+    createAppSensor();
+  }
+
   if (mainWindow && (before.apiUrl !== config.apiUrl || before.appUrl !== config.appUrl)) {
     // `additionalArguments` is fixed at window creation, and that is how the
     // preload learns the API base — so a changed apiUrl needs a NEW window, not
@@ -512,6 +587,8 @@ if (!app.requestSingleInstanceLock()) {
 
     registerIpc();
     createSidecar();
+    registerPowerEvents();
+    createAppSensor();
     createMainWindow();
     createCaptureWindow();
 
@@ -529,7 +606,9 @@ if (!app.requestSingleInstanceLock()) {
     console.log(
       `[gooni] backend=${config.apiUrl} app=${config.appUrl} hotkey=${config.hotkey}${
         hotkeyOk ? "" : " (UNAVAILABLE)"
-      } token=${currentToken().source} ${describe(sidecar.status())}`
+      } token=${currentToken().source} ${describe(sidecar.status())} app-sensor=${
+        config.appSensor.enabled ? `on (${config.appSensor.pollMs}ms)` : "off"
+      }`
     );
 
     // Hidden at login, visible when you launched it yourself.
@@ -565,6 +644,14 @@ if (!app.requestSingleInstanceLock()) {
     e.preventDefault();
     quitting = true;
     globalShortcut.unregisterAll();
+    try {
+      // Close the open interval with a REAL end time and hand over the buffer.
+      // Skipping this is what turns every clean quit into a salvaged, truncated
+      // row on the next launch.
+      await appSensor?.stop();
+    } catch (err) {
+      console.error("[gooni] app sensor stop failed:", err?.message);
+    }
     try {
       await sidecar?.stop();
     } catch (err) {

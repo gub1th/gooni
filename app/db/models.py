@@ -959,3 +959,74 @@ class BrowserInterval(Base):
 
 
 Index("ix_browser_intervals_host_started", BrowserInterval.host, BrowserInterval.started_at)
+
+
+class AppInterval(Base):
+    """One stretch of DESKTOP attention: a single macOS application was
+    frontmost from `started_at` to `ended_at`. Written by the Electron shell's
+    frontmost-app sensor (`desktop/src/appfocus.js`), which buffers locally and
+    POSTs batches to /app/intervals.
+
+    The OS twin of BrowserInterval, and deliberately its OWN table rather than a
+    `source` discriminator on that one. The two sensors share a shape, not a
+    vocabulary: `host` is a hostname and `app` is an application name, and every
+    existing browser read — the extension popup's per-host ranking, the SQL
+    `summarize` fold, `GET /browser/intervals` — would have to grow a source
+    filter it currently doesn't need, with a silent wrong answer (an app listed
+    as a visited domain) as the cost of missing one. A table each keeps the
+    browser reads exactly as honest as they were, and the shared parts —
+    validation limits, the `client_id` idempotency boundary, the per-row
+    SAVEPOINT insert — are shared as CODE (`interval_ingest.py`), which is the
+    part worth not duplicating.
+
+    RAW SENSOR DATA ONLY, same as BrowserInterval: not a Trackable, not
+    attributed to any Topic/Promise. Surfacing an `opened <app>` row in the
+    activity feed is presentation over this substrate, not attribution — no
+    percentage, no judgement, no binding to a commitment.
+
+    Privacy: the app NAME is what the OS reports as frontmost. `title` (the
+    window title) is optional and is NOT collected by the shell today — the
+    column exists because a window title is the only thing that could ever
+    distinguish "Cursor on gooni" from "Cursor on something private", and that
+    is a decision to make deliberately rather than a column to add in a panic.
+
+    Idempotency: `client_id` is minted by the shell when the interval CLOSES and
+    survives every retry — the same UNIQUE-index dedup boundary the browser
+    sensor and WaProcessedId use.
+    """
+
+    __tablename__ = "app_intervals"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(String, nullable=False, unique=True, index=True)
+
+    # Frontmost application name as the OS reports it, lowercased ("cursor",
+    # "google chrome"). Lowercase because the Shortcuts device vocabulary is
+    # lowercase (`event_service._norm`) and the two render side by side.
+    app = Column(String, nullable=False, index=True)
+    # Window title. Nullable and currently always NULL — see the class docstring.
+    title = Column(Text, nullable=True)
+
+    # Naive UTC, matching the rest of the codebase's datetime storage.
+    started_at = Column(DateTime, nullable=False, index=True)
+    ended_at = Column(DateTime, nullable=False)
+    # Recomputed server-side from started/ended — the client's arithmetic is
+    # never trusted, only its clock readings.
+    duration_sec = Column(Float, nullable=False)
+
+    # Why the interval closed: app_change | idle | locked | suspended |
+    # shutdown | unobserved | truncated — the full set the shell can stamp
+    # (`desktop/src/appfocus.js`) and the one `app_activity_service._END_REASONS`
+    # accepts. `truncated` marks an interval closed at a heartbeat rather than a
+    # real end event (the shell was killed, or the machine slept, mid-interval);
+    # `unobserved` marks one the sensor closed itself because the frontmost
+    # query went blind, which is a WEDGED sensor rather than a crash salvage.
+    # Both carry the `truncated` flag, so this column is what tells them apart.
+    end_reason = Column(String, nullable=True)
+    truncated = Column(Boolean, nullable=False, default=False)
+
+    source = Column(String, nullable=False, default="desktop_shell", index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+Index("ix_app_intervals_app_started", AppInterval.app, AppInterval.started_at)

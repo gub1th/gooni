@@ -28,6 +28,7 @@ load_dotenv(os.path.join(_ROOT, ".env"))
 from app.db.database import SessionLocal, engine  # noqa: E402
 from app.db.models import Base, BrowserInterval  # noqa: E402
 from app.services import browser_activity_service as bas  # noqa: E402
+from app.services import interval_ingest  # noqa: E402
 
 T0 = datetime(2026, 8, 8, 17, 0, 0)
 
@@ -92,14 +93,18 @@ def main() -> int:
     # naming them — and the extension deletes exactly those ids from its
     # buffer, so the intervals are gone and reported as delivered.
     bas.ingest_batch(db, [_iv("racer")])
-    _real_existing = bas._existing_client_ids
-    bas._existing_client_ids = lambda s, ids: _real_existing(s, ids) - {"racer"}
+    # The pre-filter lives in interval_ingest (shared with the desktop app
+    # sensor), so that is where it gets hidden from.
+    _real_existing = interval_ingest.existing_client_ids
+    interval_ingest.existing_client_ids = (
+        lambda s, model, ids: _real_existing(s, model, ids) - {"racer"}
+    )
     try:
         r5 = bas.ingest_batch(
             db, [_iv("pre-collision"), _iv("racer"), _iv("post-collision")]
         )
     finally:
-        bas._existing_client_ids = _real_existing
+        interval_ingest.existing_client_ids = _real_existing
 
     check(r5["duplicates"] == 1, f"collision not counted as a duplicate: {r5}")
     check(

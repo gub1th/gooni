@@ -5,6 +5,7 @@ App-level (same dir as main.py): relative imports stay at main.py depth.
 import hashlib
 import os
 import re
+from datetime import datetime as _datetime, timedelta as _timedelta, timezone as _timezone
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -76,6 +77,30 @@ def local_today(db: Session):
     rolled to tomorrow and a log/lookup keyed to it lands on the wrong day.
     """
     return local_now(db).date()
+
+
+def local_day_bounds(tz, day) -> tuple:
+    """One LOCAL calendar day → its `[start, end)` in naive UTC (the storage
+    convention).
+
+    Midnights are computed IN the zone, per day, rather than by applying one
+    fixed offset across a range: a DST switch inside the range moves one
+    boundary by an hour, and a fixed offset then misfiles every row on the wrong
+    side of it — the same class of bug `tests/test_focus_due_bucket.py` pins for
+    due dates. THE shared owner of that rule: the browser summary's day buckets
+    and the device-row derivation both read it, so a day means one thing.
+    """
+    start_local = _datetime(day.year, day.month, day.day, tzinfo=tz)
+    end_local = start_local + _timedelta(days=1)
+    return (
+        start_local.astimezone(_timezone.utc).replace(tzinfo=None),
+        end_local.astimezone(_timezone.utc).replace(tzinfo=None),
+    )
+
+
+def local_day_of(naive_utc, tz):
+    """Which LOCAL calendar day a naive-UTC stored timestamp falls on."""
+    return naive_utc.replace(tzinfo=_timezone.utc).astimezone(tz).date()
 
 
 def stale_day_label(today, subject) -> str:

@@ -100,8 +100,26 @@ export function eventTime(ev: CalendarEvent): string {
   return `${h12}:${String(m).padStart(2, "0")}${suffix}`;
 }
 
-function labelFor(it: ActivityItem): { label: string; color: string } {
+/**
+ * The amber `device` row — one treatment for all three sensors.
+ *
+ * The phone's iOS Shortcuts pings arrive as a `trackable` with source
+ * `shortcuts` (each ping is a real +1 on a real Trackable). The browser and the
+ * desktop shell arrive as `device`, DERIVED from their raw attention intervals
+ * with no Trackable anywhere — high-cardinality names would have minted
+ * hundreds of them and flooded the log matrix, so the feed is where the two
+ * meet, not the Trackable table.
+ *
+ * That is a storage distinction, not a reading one: "opened hinge" from the
+ * phone and "opened cursor" from the Mac are the same fact about the day and
+ * must look the same. One constant, used by both arms, so they cannot drift.
+ */
+const DEVICE_ROW = { label: "device", color: "rgba(230,190,140,0.6)" };
+
+export function labelFor(it: ActivityItem): { label: string; color: string } {
   switch (it.kind) {
+    case "device":
+      return DEVICE_ROW;
     case "message":
       return it.role === "assistant"
         ? { label: "gooni", color: frostInk.accent }
@@ -119,13 +137,56 @@ function labelFor(it: ActivityItem): { label: string; color: string } {
       const src = it.source ?? "manual";
       if (src === "whoop" || src === "leetcode" || src === "derived")
         return { label: "synced", color: "rgba(150,180,255,0.5)" };
-      if (src === "shortcuts")
-        return { label: "device", color: "rgba(230,190,140,0.6)" };
+      if (src === "shortcuts") return DEVICE_ROW;
       return { label: "logged", color: frostInk.accent };
     }
     default:
       return { label: "", color: ink(0.42) };
   }
+}
+
+/**
+ * Fold a freshly-polled page into the rows already on screen.
+ *
+ * The key dedup is what stops a row appearing twice once paging has walked past
+ * it, so it stays — but a key is NOT a promise that the row is finished. A
+ * device run anchors at its FIRST open by design (a row saying "opened cursor"
+ * belongs at the moment it was opened), so its key and its `at` are stable for
+ * the whole run while its text keeps growing: `opened cursor` becomes
+ * `opened cursor ×8` as the day's opens chain into it. Dropping the re-fetched
+ * copy froze the first version on screen for as long as the sheet stayed
+ * mounted — which is all day, since it never remounts.
+ *
+ * So a known key REPLACES its row rather than being discarded, in place.
+ *
+ * And ANY change re-sorts, replacements included — `items` is the paging SPINE
+ * (`loadOlder` takes its cursor from the last row's `at`), so it has to stay in
+ * chronological order after every mutation, not only after an append. A key
+ * being stable does not make its `at` stable: `note-{id}` carries `updated_at`
+ * and `promise-{id}` carries `resolved_at`, so editing a note or closing a
+ * promise genuinely moves a loaded row. Replacing the OLDEST such row in place
+ * without re-sorting hands `loadOlder` a near-present cursor, which returns
+ * nothing new, latches `hasMore` false, and kills paging for the session.
+ * A no-op merge still returns `prev` untouched, and the sort is stable, so
+ * equal timestamps keep their order. Pure, so the rule is testable.
+ */
+export function mergeNewest(prev: ActivityItem[], rows: ActivityItem[], seen: Set<string>): ActivityItem[] {
+  if (prev.length === 0) {
+    rows.forEach((r) => seen.add(r.key));
+    return rows;
+  }
+  const byKey = new Map(rows.map((r) => [r.key, r]));
+  let changed = false;
+  const merged = prev.map((it) => {
+    const next = byKey.get(it.key);
+    if (!next || (next.text === it.text && next.at === it.at)) return it;
+    changed = true;
+    return next;
+  });
+  const fresh = rows.filter((r) => !seen.has(r.key));
+  if (fresh.length === 0 && !changed) return prev;
+  fresh.forEach((r) => seen.add(r.key));
+  return [...fresh, ...merged].sort((a, b) => (a.at < b.at ? 1 : -1));
 }
 
 /** `chat` keeps BOTH sides of a turn — a half-transcript isn't a log. */
@@ -170,14 +231,8 @@ export function LogSheet({
         const rows = await fetchActivity({ limit: PAGE });
         if (cancelled) return;
         setItems((prev) => {
-          if (prev.length === 0) {
-            seen.current = new Set(rows.map((r) => r.key));
-            return rows;
-          }
-          const fresh = rows.filter((r) => !seen.current.has(r.key));
-          if (fresh.length === 0) return prev;
-          fresh.forEach((r) => seen.current.add(r.key));
-          return [...fresh, ...prev].sort((a, b) => (a.at < b.at ? 1 : -1));
+          if (prev.length === 0) seen.current = new Set();
+          return mergeNewest(prev, rows, seen.current);
         });
       } catch {
         /* transient — keep last good */
