@@ -35,6 +35,16 @@
     <label for="baseUrl">Gooni base URL</label>
     <input id="baseUrl" type="text" placeholder="http://localhost:8000" />
 
+    <label for="appUrl">Gooni app URL (new tab page)</label>
+    <input id="appUrl" type="text" placeholder="https://gubith.com" />
+    <p class="hint">
+      The frontend the new tab frames — a different host from the backend above,
+      so it gets its own field. Point it at <code>http://localhost:5173</code>
+      to work against a local <code>npm run dev</code> frontend. If it can't be
+      loaded the new tab says so and names the URL it tried; it never sits
+      blank.
+    </p>
+
     <label for="password">Gooni password</label>
     <input id="password" type="password" placeholder="exchanged for a token, never stored" />
     <p class="hint">

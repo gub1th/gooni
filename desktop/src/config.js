@@ -19,8 +19,18 @@ const path = require("node:path");
 const DEFAULTS = Object.freeze({
   /** The Gooni backend. Deployed, on purpose. See the file header. */
   apiUrl: "https://gooni-bot.fly.dev",
-  /** The web frontend the shell window loads. */
-  appUrl: "https://gooni.vercel.app",
+  /**
+   * The web frontend the shell window loads. The CUSTOM DOMAIN, not the Vercel
+   * project URL (`gooni-sigma.vercel.app`, which also serves Gooni) — a project
+   * URL is a deployment detail that changes when the project is renamed or
+   * moved, and this is a baked-in default.
+   *
+   * It used to read `gooni.vercel.app`, which is an unrelated third party's
+   * project — so this shipped pointing the shell window at a stranger's site.
+   * Kept byte-identical to the browser extension's `DEFAULT_APP_URL`, which
+   * frames the same surface as Chrome's new tab.
+   */
+  appUrl: "https://gubith.com",
   /** Global capture hotkey. Electron accelerator syntax. */
   hotkey: "CommandOrControl+Shift+Space",
   launchAtLogin: true,

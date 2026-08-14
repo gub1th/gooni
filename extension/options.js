@@ -7,7 +7,13 @@
  * would be a second copy of the credential for no benefit.
  */
 
-import { CONFIG_KEYS, DEFAULT_BASE_URL, loadConfig } from "./src/config.js";
+import {
+  CONFIG_KEYS,
+  DEFAULT_APP_URL,
+  DEFAULT_BASE_URL,
+  loadConfig,
+} from "./src/config.js";
+import { normalizeAppUrl } from "./src/newtab.js";
 import { SCRUB_SEGMENTS } from "./src/scrub.js";
 import { formatLastFlush } from "./src/status.js";
 
@@ -27,6 +33,7 @@ const fromLines = (s) =>
 async function render() {
   const cfg = await loadConfig(storage);
   $("baseUrl").value = cfg.baseUrl || DEFAULT_BASE_URL;
+  $("appUrl").value = cfg.appUrl || DEFAULT_APP_URL;
   $("enabled").checked = cfg.enabled;
   $("scrubSegments").value = toLines(cfg.scrub.segments);
   await renderStatus();
@@ -86,7 +93,18 @@ $("save").addEventListener("click", async () => {
     return;
   }
 
+  // Rejected at save time rather than at tab-open time: the new tab does report
+  // a bad URL clearly, but the person who can fix it is standing right here.
+  const appUrlRaw = $("appUrl").value.trim();
+  const appUrl = appUrlRaw ? normalizeAppUrl(appUrlRaw) : DEFAULT_APP_URL;
+  if (!appUrl) {
+    $("saveMsg").textContent =
+      "settings NOT saved: the app URL needs a full http:// or https:// address";
+    return;
+  }
+
   const patch = {
+    [CONFIG_KEYS.appUrl]: appUrl,
     [CONFIG_KEYS.baseUrl]: baseUrl,
     [CONFIG_KEYS.enabled]: $("enabled").checked,
     [CONFIG_KEYS.scrubSegments]: fromLines($("scrubSegments").value),
