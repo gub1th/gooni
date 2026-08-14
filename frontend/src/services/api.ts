@@ -725,6 +725,19 @@ export async function fetchActivity(
   return res.json();
 }
 
+// The ambient home's "currently doing" line — newest still-fresh interval
+// from each attention sensor. Null fields when idle/no data.
+export interface CurrentActivity {
+  app: { name: string; started_at: string; duration_sec: number } | null;
+  browser: { host: string; path: string | null; started_at: string; duration_sec: number } | null;
+}
+
+export async function fetchCurrentActivity(): Promise<CurrentActivity> {
+  const res = await apiFetch(`${BASE}/activity/now`);
+  if (!res.ok) throw new Error("Failed to fetch current activity");
+  return res.json();
+}
+
 // Full per-turn processing trace (orchestrator steps + tool-call audit +
 // paired user utterance + post-turn reflexion), keyed to the assistant
 // message. Powers the ambient recent-chat ribbon's audit panel.
