@@ -923,6 +923,10 @@ export function AmbientHome({
           style={{
             position: "absolute", top: `${ACTIVITY_Y * 100}%`, left: "50%", transform: "translate(-50%, -50%)",
             width: STAGE_W,
+            // the line wears a pill now, so it is an INLINE element that has to
+            // be centred by its slot — it can no longer centre itself by being
+            // a full-width block with centred text
+            display: "flex", justifyContent: "center",
           }}
         >
           <CurrentActivityLine />

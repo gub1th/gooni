@@ -44,6 +44,25 @@ export interface SessionRow {
   label: string;
 }
 
+/**
+ * Whether the longer-term bucket shows rows that carry NO due date.
+ *
+ * Off since the 2026-08-15 captain review: the bucket had filled with ~19
+ * dateless commitments from weeks back and rendered as `UNDATED (19)` under
+ * every day's list — "i dont see much value in undated tbh for now". A bucket
+ * nobody opens is the log dot again: a permanent signal you stop reading.
+ *
+ * It HIDES, it does not delete. Every one of those promises is still active in
+ * the database and still reachable through quickfind, `/promises` and the MCP
+ * surface; this is a render rule on one surface, which is why it is a flag here
+ * rather than a filter at the fetch or a state change on the rows.
+ *
+ * DATED longer-term rows are untouched. That bucket is load-bearing — `+ add`
+ * defaults every new task to today, so without a visible `Later` the day's list
+ * quietly becomes a dumping ground and stops meaning today.
+ */
+export const SHOW_UNDATED_LATER = false;
+
 /** `Sep 1` for a dated longer-term row; empty when the stamp will not parse. */
 function laterDueLabel(dueAt: string): string {
   const d = new Date(dueAt);
@@ -105,6 +124,13 @@ export function TodayList({
         ...active.filter((r) => r.item.id !== runningId),
       ];
   const runningIsPinned = runningId != null && ordered[0]?.item.id === runningId;
+
+  // The longer-term bucket, minus the dateless rows when they are hidden. The
+  // COUNT is derived from what is actually shown rather than taken from the
+  // prop: `(19)` beside three visible rows is a claim about the section that
+  // opening it disproves.
+  const laterShown = SHOW_UNDATED_LATER ? laterRows : laterRows.filter((r) => r.due_at);
+  const laterShownCount = SHOW_UNDATED_LATER ? laterCount : laterShown.length;
 
   return (
     <div
@@ -204,15 +230,19 @@ export function TodayList({
           weeks out (`due_is_default: false`). Hardcoding either word makes the
           label a lie half the time, which is the exact failure the rename was
           meant to fix, so it reads the rows instead. Each row shows its own due
-          date when it has one, so the bucket explains itself either way. */}
-      {laterCount > 0 && (
+          date when it has one, so the bucket explains itself either way.
+          The derivation STAYS while `SHOW_UNDATED_LATER` is off, even though
+          only the `Later` branch is reachable: the flag is the thing that is
+          expected to move, and a label hardcoded to match today's flag value is
+          a lie waiting for it to flip back. */}
+      {laterShownCount > 0 && (
         <ListSection
-          label={laterRows.every((r) => !r.due_at) ? "Undated" : "Later"}
-          count={laterCount}
+          label={laterShown.every((r) => !r.due_at) ? "Undated" : "Later"}
+          count={laterShownCount}
           open={laterOpen}
           onToggle={() => setLaterOpen((o) => !o)}
         >
-          {laterRows.map((r) => (
+          {laterShown.map((r) => (
             <span key={r.id} style={{ fontSize: 14.5, color: ink(0.5), lineHeight: 1.35 }}>
               {r.content}
               {r.due_at && (

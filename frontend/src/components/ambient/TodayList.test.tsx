@@ -175,19 +175,32 @@ test("a paused running row offers resume rather than pause", () => {
   expect(props.onTogglePause).toHaveBeenCalled();
 });
 
-// The bucket's LABEL is derived from the rows, not hardcoded. Pass 8 asked for
-// `undated` on the premise that these rows carry no due date; that is true of
-// some data and false of others (the dev DB's three are explicit deadlines three
-// weeks out), so either hardcoded word is a lie half the time — the exact
-// failure the rename set out to fix. Both branches are pinned here.
-test("the later bucket says `undated` only when the rows really are", () => {
+// DATELESS longer-term rows are hidden (`SHOW_UNDATED_LATER`, captain review
+// 2026-08-15): the bucket had filled with ~19 of them and rendered as a
+// permanent `UNDATED (19)` under every day. Hidden, not deleted — the rows are
+// still handed to the component, it just does not draw them, which is what
+// makes this a render rule rather than a data change.
+test("dateless longer-term rows are not drawn, and the bucket goes with them", () => {
   renderList();
 
-  const later = screen.getByText("Undated");
+  expect(screen.queryByText("Undated")).not.toBeInTheDocument();
+  expect(screen.queryByText("Later")).not.toBeInTheDocument();
   expect(screen.queryByText("book the flights")).not.toBeInTheDocument();
-  fireEvent.click(later);
-  expect(screen.getByText("book the flights")).toBeInTheDocument();
-  expect(screen.getByText("call mum")).toBeInTheDocument();
+  expect(screen.queryByText("call mum")).not.toBeInTheDocument();
+});
+
+// The count must describe what OPENING the section shows. The prop still
+// carries the server's whole longer-term total, so a section rendering three
+// rows under `(19)` is a claim its own contents disprove.
+test("the later count counts only the rows that are drawn", () => {
+  const due = "2026-09-01T05:17:29+00:00";
+  const dated = { ...reminder(8, "book the flights"), due_at: due, due_is_default: false };
+  renderList({ laterCount: 3, laterRows: [dated, reminder(9, "call mum"), reminder(10, "wash car")] });
+
+  // scoped to the bucket's own button — `Completed` carries a count too
+  expect(screen.getByRole("button", { name: /Later\s*\(1\)/ })).toBeInTheDocument();
+  fireEvent.click(screen.getByText("Later"));
+  expect(screen.queryByText("call mum")).not.toBeInTheDocument();
 });
 
 test("dated longer-term rows read as `later`, and each shows its own date", () => {
