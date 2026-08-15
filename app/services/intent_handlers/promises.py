@@ -8,7 +8,11 @@ Handles the single `promises` emit from extract_signals. Three kinds:
              gutter dot. No auto-created Promise, no dispatch fork.
   complete → find_active_match → transition kept   (acts on an EXISTING
              row — closure friction should stay zero, so these remain
-             automatic)
+             automatic, but only on a CONFIDENT match: see
+             promise_service.CLOSE_MATCH_THRESHOLD. Anything short of
+             that lands in failed_promise_actions as a question, never
+             as a flipped lifecycle — there is no undo path in the UI,
+             so a wrong auto-close is a silent lie in the record.)
   break    → find_active_match → transition broken
 
 Note-save path doesn't have a source_message_id, so promises are skipped
@@ -99,7 +103,9 @@ def _handle_transition(sp: dict, kind: str, ctx, result, promise_service) -> Non
         result.failed_promise_actions.append({
             "kind": kind,
             "match": match,
-            "candidates": ambiguous,  # non-empty means "which one?"
+            # 2 candidates = "which one?"; 1 (near_miss) = "did you mean?";
+            # empty = an honest no-match.
+            "candidates": ambiguous,
         })
         return
 

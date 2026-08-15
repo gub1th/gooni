@@ -253,6 +253,14 @@ def _build_ack(routed: "RouterResult") -> str | None:
                 f"\"{_trim(c.get('text'))}\"" for c in cands[:2]
             )
             parts.append(f"which one to {verb} for \"{match}\"? {cand_texts}")
+        elif len(cands) == 1:
+            # Near miss — plausible but under the auto-close bar. Ask; do
+            # NOT report it as "no match" (there is a real candidate) and
+            # do NOT act (the whole point of the bar).
+            parts.append(
+                f"{verb} \"{_trim(cands[0].get('text'))}\" for \"{match}\", sir? "
+                "not certain enough to do it myself"
+            )
         else:
             # Surface no-match misses so wrong-shape extractions don't go
             # silent. Don't claim Gooni "tried" — be honest about the miss.
@@ -663,6 +671,16 @@ def _build_just_extracted_block(routed: "RouterResult") -> str:
             lines.append(
                 f"- AMBIGUOUS promise {verb} for \"{match}\" — candidates: "
                 f"{cand_str}. ASK Daniel which one before doing anything."
+            )
+        elif len(cands) == 1:
+            c = cands[0]
+            score = c.get("score")
+            score_str = f"{score:.2f}" if isinstance(score, (int, float)) else "?"
+            lines.append(
+                f"- Promise {verb} NOT done for \"{match}\" — closest active "
+                f"commitment is \"{c.get('text')}\" (#{c.get('id')}, {score_str}), "
+                "under the auto-close bar. Nothing changed: ASK whether that's "
+                "the one before claiming anything was closed."
             )
         else:
             lines.append(
