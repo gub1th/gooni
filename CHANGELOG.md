@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.238.0 — 2026-08-15 (minor)
+
+- feat(chat): wire the ranked action horizon into the chat prompt (#483)
+
 ## 0.237.0 — 2026-08-15 (minor)
 
 - feat(orchestrator): loosen the CAPTURE persona, add asymmetric value (#482)
