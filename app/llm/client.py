@@ -211,7 +211,7 @@ class LLMClient:
         placed in the cached system-prompt prefix; memory_context = the
         volatile per-turn blocks. See prompts.system_prompt.
         """
-        messages = [{"role": "system", "content": system_prompt(memory_context, static_context)}]
+        messages = [{"role": "system", "content": system_prompt(memory_context, static_context, db=db)}]
         if history:
             messages.extend(history)
         messages.append({"role": "user", "content": message})
@@ -318,7 +318,7 @@ class LLMClient:
     ) -> tuple[str, dict]:
         """Generate a response that includes an image. Uses gpt-4o for vision."""
         vision_model = "gpt-4o"
-        messages = [{"role": "system", "content": vision_prompt(memory_context)}]
+        messages = [{"role": "system", "content": vision_prompt(memory_context, db=db)}]
         if history:
             messages.extend(history)
 

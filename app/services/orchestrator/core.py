@@ -692,24 +692,24 @@ class Orchestrator:
             )
 
         # State-grounded openers — fixes T1 of segment #209 where "Yo" got
-        # a scolding guess instead of a state-grounded reply. Bot channels
-        # only (web has its own UI showing this state).
+        # a scolding guess instead of a state-grounded reply. ALL channels,
+        # web included: the UI shows this state to Daniel, but the MODEL
+        # still needs it in-context to ground its replies.
         state_block = ""
         just_extracted_block = ""
         time_block = ""
-        if source != "web":
-            try:
-                state_block = _build_state_block(db)
-            except Exception as e:
-                print(f"[state_block] build failed: {e}")
-            try:
-                just_extracted_block = _build_just_extracted_block(routed)
-            except Exception as e:
-                print(f"[just_extracted_block] build failed: {e}")
-            try:
-                time_block = _build_time_block(db)
-            except Exception as e:
-                print(f"[time_block] build failed: {e}")
+        try:
+            state_block = _build_state_block(db)
+        except Exception as e:
+            print(f"[state_block] build failed: {e}")
+        try:
+            just_extracted_block = _build_just_extracted_block(routed)
+        except Exception as e:
+            print(f"[just_extracted_block] build failed: {e}")
+        try:
+            time_block = _build_time_block(db)
+        except Exception as e:
+            print(f"[time_block] build failed: {e}")
 
         # ReAct PLAN step REMOVED (audit 2026-06-10). It was a serial
         # gpt-4o-mini call whose state_summary arg was hardcoded "" — the
