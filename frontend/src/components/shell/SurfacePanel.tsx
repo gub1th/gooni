@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { z } from "../../ui";
-import { ink } from "../ambient/ambientInk";
 import { RAIL_LANE } from "../ambient/IconRail";
 
 // A non-home surface is a PANEL THAT SLIDES IN over a home that stays put —
@@ -103,21 +102,15 @@ export function SurfacePanel({
         }
       }}
     >
-      {/* THE LEFT EDGE READS AS A LAYER, NOT A SEAM.
-          It used to be a 1px hairline between two surfaces painting the SAME
-          void colour, and a line with identical ground either side reads as a
-          crack in one surface rather than the boundary of two. A short
-          gradient falloff gives the edge depth instead — not a drop shadow,
-          which the 2026-08-02 pass ruled out, but light catching a lifted
-          edge. Non-interactive so it cannot intercept the content beneath. */}
-      <div
-        aria-hidden
-        style={{
-          position: "absolute", left: 0, top: 0, bottom: 0, width: 20,
-          pointerEvents: "none", zIndex: 1,
-          background: `linear-gradient(to right, ${ink(0.09)}, ${ink(0.02)} 45%, transparent)`,
-        }}
-      />
+      {/* THE LEFT EDGE IS BARE. It carried a 20px ink gradient meant to read as
+          light catching a lifted edge; on screen it read as a vertical shadow
+          line hanging beside the icon rail — an artifact, not depth (captain
+          review, 2026-08-15). Nothing replaces it: the rail is a floating
+          frosted pill and the panel is a full-bleed surface, so the two are
+          already distinct, and the seam the gradient was patching was the
+          earlier 1px hairline, which is also gone. Do not put a border, shadow
+          or gradient back here — the 2026-08-02 no-bloom rule covers this edge
+          too. */}
       {children}
     </div>
     </div>
