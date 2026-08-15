@@ -11,6 +11,10 @@ interface MemoryBrainProps {
   // /memories route where the brain shows everything Gooni remembers.
   title?: string;
   subtitle?: string;
+  // The full set the graph MODAL expands into on brain click — the inline
+  // strip stays capped (readability), the modal doesn't have to be. Falls
+  // back to `memories` when the caller has nothing wider to offer.
+  allMemories?: ApiMemory[];
 }
 
 interface BubblePos {
@@ -74,9 +78,11 @@ export function MemoryBrain({
   memories,
   title = "memories from this note",
   subtitle = 'Click a bubble to peek. Click "view memory" to jump to the memory page.',
+  allMemories,
 }: MemoryBrainProps) {
   const navigate = useNavigate();
   const [selected, setSelected] = useState<ApiMemory | null>(null);
+  const [graphOpen, setGraphOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const layout = useMemo(() => computeLayout(memories), [memories]);
@@ -102,6 +108,14 @@ export function MemoryBrain({
   if (memories.length === 0) return null;
 
   const BRAIN_SIZE = 56;
+  // NeuralBrain's rendered button is NOT square at this `size` — its own
+  // wrap is 64x72 (a bit taller than wide) scaled by size/64, plus 12px of
+  // button padding. The wrapper below used to be a plain BRAIN_SIZE² box,
+  // shorter than the button it centers — so the button clipped against this
+  // stage's `overflow: hidden` at the bottom. Sizing the wrapper to the
+  // button's real footprint is what stops that.
+  const brainOuterW = BRAIN_SIZE + 12;
+  const brainOuterH = BRAIN_SIZE * 1.125 + 12;
 
   return (
     <div
@@ -181,10 +195,10 @@ export function MemoryBrain({
           left: "50%",
           bottom: 6,
           transform: "translateX(-50%)",
-          width: BRAIN_SIZE, height: BRAIN_SIZE,
+          width: brainOuterW, height: brainOuterH,
           display: "flex", alignItems: "center", justifyContent: "center",
         }}>
-          <NeuralBrain size={BRAIN_SIZE} />
+          <NeuralBrain size={BRAIN_SIZE} onClick={() => setGraphOpen(true)} />
         </div>
 
         {/* Bubbles. Positioned absolute relative to the 720x170 stage, mapped
@@ -300,6 +314,220 @@ export function MemoryBrain({
             </div>
           </div>
         )}
+      </div>
+
+      {graphOpen && (
+        <MemoryGraphModal
+          memories={allMemories ?? memories}
+          onClose={() => setGraphOpen(false)}
+          navigate={navigate}
+        />
+      )}
+    </div>
+  );
+}
+
+// Full-screen graph view, opened by clicking the brain — the same bubble
+// layout blown up to the whole viewport, with room for every memory rather
+// than the inline strip's capped 12. Restores a click affordance the brain
+// button carried ("Visualize notes" title, an `onClick` prop it never
+// received) that had gone dead: nothing wired it to anything.
+function MemoryGraphModal({
+  memories,
+  onClose,
+  navigate,
+}: {
+  memories: ApiMemory[];
+  onClose: () => void;
+  navigate: ReturnType<typeof useNavigate>;
+}) {
+  const [selected, setSelected] = useState<ApiMemory | null>(null);
+  const layout = useMemo(() => computeLayout(memories), [memories]);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const W = 900;
+  const H = 560;
+  const cx = W / 2;
+  const cy = H - 90;
+  const BRAIN_SIZE = 88;
+  const brainOuterW = BRAIN_SIZE + 12;
+  const brainOuterH = BRAIN_SIZE * 1.125 + 12;
+
+  return (
+    <div
+      role="dialog"
+      aria-label="Memory graph"
+      style={{
+        position: "fixed", inset: 0, zIndex: 200,
+        background: "rgba(0,0,0,0.6)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontFamily: FONT,
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        style={{
+          position: "relative",
+          width: "min(94vw, 960px)",
+          height: "min(88vh, 640px)",
+          background: ctok.card,
+          border: `1px solid ${ctok.hairline}`,
+          borderRadius: 16,
+          overflow: "hidden",
+          display: "flex", flexDirection: "column",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px" }}>
+          <div>
+            <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: ctok.text }}>memory graph</p>
+            <p style={{ margin: "2px 0 0", fontSize: 11.5, color: ctok.muted }}>
+              {memories.length} memor{memories.length === 1 ? "y" : "ies"} · click a node to peek
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              background: "none", border: "none", cursor: "pointer",
+              color: ctok.muted, fontSize: 20, lineHeight: 1, padding: 4,
+            }}
+          >×</button>
+        </div>
+
+        <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
+          <svg
+            width="100%" height="100%"
+            viewBox={`0 0 ${W} ${H}`}
+            preserveAspectRatio="xMidYMid meet"
+            style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
+          >
+            {memories.map((m, i) => {
+              const pos = layout.get(m.id);
+              if (!pos) return null;
+              const tx = cx + Math.cos(pos.angle) * pos.radius * 3.4;
+              const ty = cy + Math.sin(pos.angle) * pos.radius * 2.2;
+              const accent = paletteFor(m.type).accent;
+              return (
+                <line
+                  key={m.id}
+                  x1={cx} y1={cy} x2={tx} y2={ty}
+                  stroke={accent} strokeWidth={1} strokeDasharray="3 3"
+                  style={{ animation: `memory-line-pulse 3.2s ease-in-out infinite ${i * 0.15}s` }}
+                />
+              );
+            })}
+          </svg>
+          <style>{`
+            @keyframes memory-line-pulse {
+              0%, 100% { opacity: 0.30; }
+              50%      { opacity: 0.55; }
+            }
+          `}</style>
+
+          <div style={{
+            position: "absolute", left: "50%", bottom: 40, transform: "translateX(-50%)",
+            width: brainOuterW, height: brainOuterH,
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <NeuralBrain size={BRAIN_SIZE} />
+          </div>
+
+          {memories.map((m) => {
+            const pos = layout.get(m.id);
+            if (!pos) return null;
+            const tx = cx + Math.cos(pos.angle) * pos.radius * 3.4;
+            const ty = cy + Math.sin(pos.angle) * pos.radius * 2.2;
+            const palette = paletteFor(m.type);
+            const isSelected = selected?.id === m.id;
+            return (
+              <button
+                key={m.id}
+                onClick={() => setSelected(isSelected ? null : m)}
+                style={{
+                  position: "absolute",
+                  left: `${(tx / W) * 100}%`,
+                  top: `${(ty / H) * 100}%`,
+                  transform: "translate(-50%, -50%)",
+                  padding: "5px 11px",
+                  borderRadius: 999,
+                  background: palette.bg,
+                  color: palette.fg,
+                  border: `1px solid ${isSelected ? palette.accent : palette.border}`,
+                  boxShadow: isSelected ? `0 0 0 3px ${palette.accent}33` : "none",
+                  fontFamily: FONT, fontSize: 11.5, fontWeight: 500,
+                  cursor: "pointer",
+                  maxWidth: 200,
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                  display: "inline-flex", alignItems: "center", gap: 5,
+                }}
+                title={m.content}
+              >
+                <span style={{ fontSize: 9.5, opacity: 0.7, textTransform: "uppercase", letterSpacing: 0.4 }}>{m.type}</span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {m.content.length > 32 ? m.content.slice(0, 32) + "…" : m.content}
+                </span>
+              </button>
+            );
+          })}
+
+          {selected && (
+            <div
+              style={{
+                position: "absolute", left: "50%", bottom: brainOuterH + 60, transform: "translateX(-50%)",
+                width: 320, maxWidth: "90%", background: ctok.sheet,
+                borderRadius: 12, border: `1px solid ${ctok.hairline}`,
+                padding: "12px 14px", zIndex: 5,
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                <span style={{
+                  display: "inline-flex", alignItems: "center", gap: 4,
+                  fontSize: 10, fontWeight: 600,
+                  color: paletteFor(selected.type).fg,
+                  background: paletteFor(selected.type).bg,
+                  border: `1px solid ${paletteFor(selected.type).border}`,
+                  padding: "2px 8px", borderRadius: 999,
+                  textTransform: "uppercase", letterSpacing: 0.4,
+                }}>
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: paletteFor(selected.type).accent }} />
+                  {selected.type}
+                </span>
+                <button
+                  onClick={() => setSelected(null)}
+                  style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", color: ctok.muted, fontSize: 16, lineHeight: 1, padding: 2 }}
+                  aria-label="Close peek"
+                >×</button>
+              </div>
+              <div style={{ fontSize: 13, color: ctok.text, lineHeight: 1.5, marginBottom: 10 }}>
+                {selected.content}
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <div style={{ fontSize: 10.5, color: ctok.muted }}>conf {Math.round(selected.confidence * 100)}%</div>
+                <button
+                  onClick={() => {
+                    onClose();
+                    navigate({ to: "/", search: { view: "memories", focus: selected.id } });
+                  }}
+                  style={{
+                    fontSize: 11.5, fontWeight: 600, fontFamily: FONT,
+                    padding: "5px 12px", borderRadius: 999,
+                    background: ctok.text, color: ctok.card, border: "none", cursor: "pointer",
+                  }}
+                >
+                  view memory →
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

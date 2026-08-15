@@ -268,8 +268,9 @@ export function MemoriesView({ focusId }: { focusId?: number }) {
                 (the component itself returns null when memories.length === 0). */}
             <MemoryBrain
               memories={memories.filter((m) => m.is_active).slice(0, 12)}
+              allMemories={memories.filter((m) => m.is_active)}
               title={filter === "all" ? "what gooni remembers" : `${filter} memories`}
-              subtitle="Click a bubble to peek. Same content as the table below — surfaced visually so the shape of your memory is at-a-glance."
+              subtitle="Click a bubble to peek. Same content as the table below — surfaced visually so the shape of your memory is at-a-glance. Click the brain for the full graph."
             />
 
             {/* Search */}

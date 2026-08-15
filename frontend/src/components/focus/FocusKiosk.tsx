@@ -2,6 +2,7 @@ import { FONT } from "../../ui";
 import { GooniAsleep } from "./GooniAsleep";
 import { FOCUS_PALETTES } from "./focusPalette";
 import { FocusExpanded } from "./FocusExpanded";
+import { FocusHistory } from "./FocusHistory";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
 import { useFocusSessionStore } from "../../stores/useFocusSessionStore";
 
@@ -39,6 +40,7 @@ export function FocusKiosk() {
             }}
           >
             focus starts from a task
+            <FocusHistory pal={pal} />
           </div>
         </>
       )}
