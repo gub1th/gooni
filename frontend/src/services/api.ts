@@ -1785,6 +1785,83 @@ export async function fetchFocusDashboard(): Promise<FocusDashboard> {
   return res.json();
 }
 
+// ── Attribution — what a commitment's sessions actually observed ─────────────
+// The read side of timer-as-attribution: a named task plus a bounded window
+// means every device interval inside the window belongs to that Promise by
+// construction. Derived server-side from durable session windows, so a sensor
+// batch that flushed hours late attributes exactly as a prompt one does.
+
+/** One name (host or app) the sensors saw inside a commitment's focus windows. */
+export interface AttributedName {
+  /** raw host / app name, as stored */
+  name: string;
+  /** display form — `www.leetcode.com` → `leetcode`; apps pass through */
+  label: string;
+  seconds: number;
+  /** distinct intervals that overlapped, counted once each however many windows they span */
+  intervals: number;
+}
+
+export interface AttributedLayer {
+  observed_sec: number;
+  top: AttributedName[];
+  /** seconds in the tail below `top` — shown so a head never reads as the whole */
+  other_sec: number;
+}
+
+export interface AttributedDay {
+  date: string;
+  /** the TIMER's number — never recomputed from what the sensors saw */
+  focused_minutes: number;
+  /** false → windows are the day's envelope, so attributed seconds are an upper bound */
+  precise: boolean;
+  truncated: boolean;
+  browser: AttributedLayer & {
+    /**
+     * Share of the focus window ANY interval on this layer covered, or null
+     * when there is no window to divide by. A claim about the SENSOR, not the
+     * human: 0 is what an uninstalled extension looks like, and that is not
+     * the same statement as "no browsing happened".
+     */
+    coverage: number | null;
+  };
+  app: AttributedLayer & { coverage: number | null };
+}
+
+export interface AttributedPromise {
+  promise_id: number;
+  title: string;
+  /** false when the Promise has been deleted since — its minutes still count */
+  promise_exists: boolean;
+  state: string | null;
+  focused_minutes: number;
+  precise: boolean;
+  truncated: boolean;
+  days: AttributedDay[];
+  browser: AttributedLayer;
+  app: AttributedLayer;
+}
+
+export interface FocusAttribution {
+  start: string;
+  end: string;
+  promises: AttributedPromise[];
+  /** caps that bit on this read — surfaced rather than silently truncating */
+  warnings: string[];
+}
+
+export async function fetchFocusAttribution(
+  opts: { days?: number; end?: string; promiseId?: number } = {},
+): Promise<FocusAttribution> {
+  const q = new URLSearchParams();
+  if (opts.days != null) q.set("days", String(opts.days));
+  if (opts.end) q.set("end", opts.end);
+  if (opts.promiseId != null) q.set("promise_id", String(opts.promiseId));
+  const res = await apiFetch(`${BASE}/focus/attribution?${q}`);
+  if (!res.ok) throw new Error("Failed to fetch focus attribution");
+  return res.json();
+}
+
 // ── Focus reminder/promise CRUD (rail add / edit / delete) ──────────────────
 // The rail sections are backed by Promise rows served through the focus adapter
 // (the `reminders` table was dropped in `b8f3d1c07a45`); the returned

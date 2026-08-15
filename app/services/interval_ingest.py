@@ -22,8 +22,11 @@ exactly one copy of:
    rather than silently clamped — a sensor reporting a 16-hour "focus session"
    is broken, and quietly trimming it hides the breakage.
 
-Nothing here writes a Trackable or binds attention to a Topic/Promise. That
-stays out of scope for both sensors (see BrowserInterval / AppInterval).
+Nothing here writes a Trackable or binds attention to a Topic/Promise, and
+nothing here ever should. Attribution is `focus_attribution`, derived at READ
+time from focus-session windows — precisely because rule 1 above means an
+interval can arrive hours after it was measured, so "what is running right now"
+is not a fact about the row being stored (see BrowserInterval / AppInterval).
 """
 
 from __future__ import annotations
