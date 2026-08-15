@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.236.0 — 2026-08-15 (minor)
+
+- feat(orchestrator): feed device activity into the chat context (#478)
+
 ## 0.235.1 — 2026-08-15 (patch)
 
 - fix(desktop): make the Electron window daily-drivable (#477)
