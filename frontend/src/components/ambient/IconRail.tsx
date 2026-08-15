@@ -18,6 +18,18 @@ import { FONT, frost, z } from "../../ui";
 const INK = "rgb(var(--gooni-ink, 244 245 244)";
 const ACCENT = "rgba(74,222,128,0.9)";
 
+/**
+ * The lane the rail owns at the left edge — the shell reserves it, the header
+ * starts after it, and the sliding panel stops clear of it.
+ *
+ * Exported because four places were spelling `68` independently, and one of
+ * them (the header's centred quickfind) has to reason about HALF of it: the
+ * header's own centre is offset from the viewport's by exactly this lane, which
+ * is why the search bar had been sitting 16px left of the wave it is supposed
+ * to line up with, drifting further whenever the date string changed length.
+ */
+export const RAIL_LANE = 68;
+
 interface NavItem {
   label: string;
   Icon: LucideIcon;

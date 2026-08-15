@@ -18,4 +18,5 @@ contextBridge.exposeInMainWorld("gooniCapture", {
   resize: (height) => ipcRenderer.send("capture:resize", height),
   onOpened: (fn) => ipcRenderer.on("capture:opened", (_e, state) => fn(state)),
   onClosed: (fn) => ipcRenderer.on("capture:closed", () => fn()),
+  onTheme: (fn) => ipcRenderer.on("capture:theme", (_e, theme) => fn(theme)),
 });

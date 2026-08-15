@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { z } from "../../ui";
 import { ink } from "../ambient/ambientInk";
+import { RAIL_LANE } from "../ambient/IconRail";
 
 // A non-home surface is a PANEL THAT SLIDES IN over a home that stays put —
 // not a window dropped on a void.
@@ -69,7 +70,7 @@ export function SurfacePanel({
       data-surface-clip
       style={{
         position: "fixed",
-        left: 68,
+        left: RAIL_LANE,
         top: "calc(var(--gooni-bar-h, 0px) + var(--gooni-header-h, 0px))",
         right: 0,
         bottom: 0,

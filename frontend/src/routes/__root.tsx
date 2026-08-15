@@ -21,7 +21,7 @@ import { PasswordGate } from "../components/PasswordGate";
 import { Sidebar } from "../components/notes/Sidebar";
 // ONE app nav: the persistent IconRail pill. The hover-summoned SummonedNav it
 // replaced was deleted with the widget system it hosted.
-import { IconRail } from "../components/ambient/IconRail";
+import { IconRail, RAIL_LANE } from "../components/ambient/IconRail";
 import { useFocusCamControl } from "../components/focus/useFocusCamControl";
 import { SurfacePanel } from "../components/shell/SurfacePanel";
 import { AppHeader, HEADER_H } from "../components/shell/AppHeader";
@@ -364,6 +364,16 @@ function AppShell() {
         style={{
           display: "flex",
           height: "100vh",
+          // BORDER-BOX, or the header's reserved lane is added ON TOP of a
+          // full-viewport height: `100vh + 52` is 52px of document overflow on
+          // every surface. Invisible under macOS overlay scrollbars, which is
+          // how it survived — but the desktop shell renders classic ones, so
+          // the app opened with a permanent vertical scrollbar tracking nothing
+          // and 11px narrower than the window. The wave measures
+          // `window.innerWidth` (which counts the scrollbar) while everything
+          // laid out counts the 11px less, so it also put the notch and the
+          // wave permanently out of alignment.
+          boxSizing: "border-box",
           overflow: "hidden",
           // The void is the app's ground; views float on it as sheets.
           background: isImmersive ? "var(--gooni-bg, #FFFFFF)" : "var(--gooni-void, #000000)",
@@ -371,7 +381,7 @@ function AppShell() {
           // Reserve a permanent left lane for the persistent IconRail so nothing
           // underlaps it. STATIC (not hover-driven) → no reflow jank. Immersive
           // surfaces hide the rail, so no lane.
-          paddingLeft: isImmersive ? 0 : 68,
+          paddingLeft: isImmersive ? 0 : RAIL_LANE,
           paddingTop: isImmersive ? 0 : HEADER_H,
         }}
       >

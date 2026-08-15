@@ -28,10 +28,27 @@ const { AppReporter } = require("./appreporter");
 const { AppSensor } = require("./appsensor");
 const { queryFrontmost } = require("./frontmost");
 const { createJsonStore } = require("./jsonstore");
+const appearance = require("./appearance");
 
 const SIDECAR_LOG = "sidecar.log";
 const APP_SENSOR_STATE = "app-sensor.json";
 const APP_SENSOR_OPEN = "app-sensor-open.json";
+
+/**
+ * The floor the ambient layout still composes at.
+ *
+ * The home pins each group to a FRACTION of the viewport height (the wave at
+ * 0.47, TODAY at 0.66) and gives the task rows what is left over minus fixed
+ * furniture — so a short enough window drives that remainder to nothing and
+ * TODAY, the surface's primary content, clips to a sliver. A resizable window
+ * with no floor is a window that can be dragged into a broken layout, which on
+ * a daily driver you do by accident exactly once and then live with.
+ */
+const MIN_WIDTH = 880;
+const MIN_HEIGHT = 640;
+
+/** How long the first show waits for a painted page before giving up on it. */
+const FIRST_PAINT_GRACE_MS = 4000;
 
 let config = configModule.defaults();
 let configPath = "";
@@ -42,8 +59,10 @@ let sidecar = null;
 let appSensor = null;
 let api = null;
 let harvestedToken = "";
+let openedTheme = appearance.DEFAULT_THEME;
 let quitting = false;
 let logStream = null;
+let mainWindowPainted = false;
 
 const userDataDir = () => app.getPath("userData");
 const sidecarLogPath = () => path.join(app.getPath("logs"), SIDECAR_LOG);
@@ -179,16 +198,26 @@ function registerPowerEvents() {
 // ── windows ──────────────────────────────────────────────────────────────────
 
 function appPreloadArgs() {
-  return [`--gooni-api-url=${config.apiUrl}`];
+  return [`--gooni-api-url=${config.apiUrl}`, `--gooni-theme=${openedTheme}`];
 }
 
 function createMainWindow() {
+  mainWindowPainted = false;
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 860,
+    // See MIN_WIDTH — the ambient layout is fraction-pinned and stops composing
+    // below this, and the window is resizable.
+    minWidth: MIN_WIDTH,
+    minHeight: MIN_HEIGHT,
     show: false,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
-    backgroundColor: "#000000",
+    // The ground the app is ABOUT to paint, remembered from last launch — not a
+    // fixed black. This is the only colour on screen between the window
+    // appearing and the page's first paint, and the app defaults to LIGHT, so a
+    // hardcoded black was a full-window flash on every launch for the default
+    // theme. See appearance.js.
+    backgroundColor: appearance.voidColor(openedTheme),
     webPreferences: {
       preload: path.join(__dirname, "preload-app.js"),
       contextIsolation: true,
@@ -198,6 +227,14 @@ function createMainWindow() {
   });
 
   mainWindow.loadURL(config.appUrl);
+
+  // `ready-to-show` fires when there is something to look at. Until then the
+  // window is only its backgroundColor, and showing it early is how an ambient
+  // app announces itself with an empty rectangle — worst over a slow network,
+  // which is exactly when it is on screen longest.
+  mainWindow.once("ready-to-show", () => {
+    mainWindowPainted = true;
+  });
 
   // A window that fails to load must SAY so. A blank black rectangle is the
   // desktop equivalent of a buffer filling against a backend that is down.
@@ -210,6 +247,9 @@ function createMainWindow() {
     if (!isMainFrame) return;
     if (code === -3) return; // aborted (a navigation superseded this one)
     console.error(`[gooni] window FAILED to load ${url}: ${desc} (${code})`);
+    // A failed load is a REASON to show the window, not to keep waiting for a
+    // paint that is not coming — the failure page is the whole point.
+    mainWindowPainted = true;
     const html = failurePage({ url: url || config.appUrl, desc, code, configPath });
     mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
   });
@@ -257,10 +297,30 @@ function escapeHtml(s) {
   );
 }
 
+/**
+ * Show the window — but on a COLD start, only once it has something to show.
+ *
+ * A tray click or an `activate` on an already-painted window is immediate; it
+ * is only the first show that waits, and it waits with a deadline. The grace is
+ * not optional politeness: a window held back forever by a page that never
+ * paints would be a shell with no way in, which is strictly worse than an empty
+ * rectangle. Whichever comes first wins, and the failure page (see
+ * `did-fail-load`) counts as painted.
+ */
 function showMain() {
   if (!mainWindow) createMainWindow();
-  mainWindow.show();
-  mainWindow.focus();
+  const win = mainWindow;
+  const reveal = () => {
+    if (win.isDestroyed()) return;
+    win.show();
+    win.focus();
+  };
+  if (mainWindowPainted || win.isVisible()) {
+    reveal();
+    return;
+  }
+  win.once("ready-to-show", reveal);
+  setTimeout(reveal, FIRST_PAINT_GRACE_MS).unref?.();
 }
 
 // ── capture overlay ──────────────────────────────────────────────────────────
@@ -374,6 +434,10 @@ function captureState() {
     apiUrl: config.apiUrl,
     signedIn: source !== "none",
     tokenSource: source,
+    // The overlay is summoned over OTHER apps, but it is still a surface of
+    // THIS one — a dark glass panel in front of a light Gooni reads as a
+    // different program. Harvested, so it follows the app without asking.
+    theme: openedTheme,
   };
 }
 
@@ -537,6 +601,21 @@ function registerIpc() {
     refreshTray();
   });
 
+  // The app window reports which theme it is in; the shell remembers it so the
+  // NEXT launch opens on the right ground, and repaints the capture overlay so
+  // the two surfaces of one app are never in opposite themes.
+  ipcMain.on("gooni:theme", (_e, raw) => {
+    const theme = appearance.normalizeTheme(raw);
+    if (theme === openedTheme) return;
+    openedTheme = theme;
+    try {
+      appearance.saveTheme(userDataDir(), theme);
+    } catch (e) {
+      console.error("[gooni] could not persist theme:", e.message);
+    }
+    captureWindow?.webContents.send("capture:theme", theme);
+  });
+
   ipcMain.handle("capture:state", () => captureState());
 
   ipcMain.handle("capture:send", async (_e, text) => {
@@ -578,6 +657,9 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     loadConfig();
     harvestedToken = tokenModule.loadHarvested(userDataDir());
+    // Read BEFORE the window is built: `backgroundColor` is fixed at
+    // construction and is the only thing on screen until the page paints.
+    openedTheme = appearance.loadTheme(userDataDir());
     openLogStream();
 
     api = new GooniApi({

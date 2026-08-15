@@ -29,6 +29,13 @@ const INITIAL_DAYS = 21;
 const PAGE_DAYS = 21;
 const MAX_DAYS = 730; // hard floor on how far back the scroll will page
 
+// The card this table sits in is sized for a WIDE day — every trackable plus
+// the device-event bucket — so on a day with a handful of columns the table was
+// pinned to the left of a card roughly twice its width, and the surface read as
+// broken rather than sparse. Auto margins collapse to zero the moment the table
+// is wider than its scroller, so the wide case is untouched.
+const TABLE_MARGIN = "0 auto";
+
 function isDaily(t: Trackable): boolean {
   if (t.kind === "json") return false;
   if (t.source === "whoop" || t.source === "leetcode") return false;
@@ -320,7 +327,7 @@ export function LogTable() {
       {loading ? (
         <div style={{ color: "rgb(var(--gooni-ink, 244 245 244) / 0.35)", fontSize: 13, padding: 20 }}>loading…</div>
       ) : (
-        <table style={{ borderCollapse: "separate", borderSpacing: 0, color: "rgb(var(--gooni-ink, 244 245 244))", margin: 0 }}>
+        <table style={{ borderCollapse: "separate", borderSpacing: 0, color: "rgb(var(--gooni-ink, 244 245 244))", margin: TABLE_MARGIN }}>
           <thead>
             <tr>
               <th style={{ ...thBase, textAlign: "left", position: "sticky", left: 0, background: "rgb(var(--gooni-surf, 11 15 13) / 0.9)" }} />

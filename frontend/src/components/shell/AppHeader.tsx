@@ -4,6 +4,8 @@ import { ink } from "../ambient/ambientInk";
 import { CornerButton, CornerThemeToggle } from "./CornerChrome";
 import { useHomeChromeStore } from "../../stores/useHomeChromeStore";
 import { QuickFind } from "../ambient/QuickFind";
+import { RAIL_LANE } from "../ambient/IconRail";
+import { dragRegion } from "../../services/desktop";
 import type { ApiNote } from "../../services/api";
 
 // ONE sticky header, on every non-immersive surface.
@@ -23,6 +25,17 @@ import type { ApiNote } from "../../services/api";
 // `FocusDayStat` existed on this surface.
 
 export const HEADER_H = 52;
+
+/**
+ * What the notch must stay clear of on each side, in viewport terms.
+ *
+ * The bar is centred on the VIEWPORT, not inside the flex row, so flexbox can
+ * no longer keep it off the date and the button cluster — a max width does.
+ * Deliberately generous and symmetric: it only ever bites well below the
+ * shell's minimum window width, where "the bar gets narrower" is the right
+ * answer and "the bar slides under the settings icon" is not.
+ */
+const SIDE_RESERVE = 200;
 
 /**
  * The header outranks every other fixed sibling on the surface, `LimboCards`
@@ -73,7 +86,7 @@ export function AppHeader({
         // topmost row.
         top: "var(--gooni-bar-h, 0px)",
         // clears the rail lane, so the rail stays the leftmost thing on screen
-        left: 68,
+        left: RAIL_LANE,
         right: 0,
         height: HEADER_H,
         zIndex: HEADER_Z,
@@ -82,6 +95,13 @@ export function AppHeader({
         gap: 16,
         padding: "0 26px",
         fontFamily: FONT,
+        // THE WINDOW'S DRAG HANDLE, in the desktop shell only. `hiddenInset`
+        // hides the title bar and gives the page the whole window, which leaves
+        // the OS nothing to drag by — an unmovable window. This row is the
+        // right handle: it spans the top, and everything in it that is not a
+        // control is dead space. Every interactive child opts back OUT below;
+        // a drag region swallows clicks, so anything clickable must say so.
+        ...dragRegion("drag"),
         // A seam, not a toolbar: the void shows through and a hairline marks the
         // edge. A filled bar here would be the heaviest thing on a surface whose
         // whole premise is that chrome is dim, bare, or summoned.
@@ -96,12 +116,44 @@ export function AppHeader({
       {/* The search bar sits in the middle of the row and is the widest thing in
           it — deliberately, because pass 8 makes it the notch that carries the
           running session. It is centred on the VIEWPORT rather than in the flex
-          row so it does not shift when the date's width changes across days. */}
-      <div style={{ flex: 1, display: "flex", justifyContent: "center", minWidth: 0 }}>
+          row so it does not shift when the date's width changes across days.
+          It said that before and was not doing it: `flex: 1` centres a child in
+          whatever the date and the button cluster leave over, which is neither
+          the viewport's centre nor stable across days. This header starts after
+          the rail lane, so its own centre is exactly half a lane to the RIGHT of
+          the viewport's — hence the offset, and hence RAIL_LANE being a shared
+          constant rather than a `68` copied into a fourth file. The notch now
+          lines up with the wave, which is the one thing on the home it is
+          supposed to agree with. */}
+      <div style={{ flex: 1, minWidth: 0 }} aria-hidden />
+      <div
+        style={{
+          position: "absolute",
+          left: `calc(50% - ${RAIL_LANE / 2}px)`,
+          // Vertical stated OUTRIGHT rather than left to the static position an
+          // abspos child of a flex container inherits — that resolves correctly
+          // here, but it is a corner of the spec to be relying on for whether
+          // the app's most-used control sits in the middle of its own row.
+          top: "50%",
+          transform: "translate(-50%, -50%)",
+          display: "flex",
+          justifyContent: "center",
+          // Never grow into the date or the cluster: at a narrow window the bar
+          // shrinks instead of sliding under them. In VIEWPORT units, because
+          // that is what it is centred on.
+          maxWidth: `calc(100vw - ${SIDE_RESERVE * 2}px)`,
+          ...dragRegion("no-drag"),
+        }}
+      >
         <QuickFind onOpenNote={onOpenNote} onOpenTrackables={onOpenTrackables} />
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 18, flex: "none" }}>
+      <div
+        style={{
+          display: "flex", alignItems: "center", gap: 18, flex: "none",
+          ...dragRegion("no-drag"),
+        }}
+      >
         {toggleVoice && (
           <CornerButton
             label={voiceOn ? (listening ? "listening — click to go silent" : "voice on — click to go silent") : "voice off — click to talk"}

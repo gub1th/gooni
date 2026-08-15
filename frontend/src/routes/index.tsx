@@ -41,12 +41,31 @@ interface HomeSearch {
   calendar?: true;
 }
 
+/**
+ * A boolean search flag, as it can actually arrive.
+ *
+ * The router JSON-parses search values, so `?audit=1` reaches here as the
+ * NUMBER 1 — and every one of these flags was tested against the STRING "1",
+ * which meant the documented deep links (`?audit=1`, `?trackables=1`,
+ * `?calendar=1`) parsed to undefined and the router immediately rewrote the URL
+ * back to a bare `/`. Silent: typing the URL in the docs simply dropped you on
+ * the home. One reader for all three, so they cannot disagree again.
+ */
+function flag(raw: unknown): true | undefined {
+  if (raw === true || raw === 1) return true;
+  if (typeof raw === "string") {
+    const v = raw.toLowerCase();
+    if (v === "true" || v === "1" || v === "yes") return true;
+  }
+  return undefined;
+}
+
 export const Route = createFileRoute("/")({
   validateSearch: (search: Record<string, unknown>): HomeSearch => ({
     note: typeof search.note === "number" ? search.note : typeof search.note === "string" ? Number(search.note) : undefined,
     conv: typeof search.conv === "number" ? search.conv : typeof search.conv === "string" ? Number(search.conv) : undefined,
     // ?audit=1 → land on the Audit (eval) view.
-    audit: search.audit === true || search.audit === "true" || search.audit === "1" || undefined,
+    audit: flag(search.audit),
     // ?segment=<id> → auto-open that segment's drilldown in the audit view.
     segment: typeof search.segment === "number" ? search.segment : typeof search.segment === "string" ? Number(search.segment) : undefined,
     // ?view=notes|log|memories → force a view that has no other URL signal.
@@ -65,10 +84,8 @@ export const Route = createFileRoute("/")({
     // ?trackables=1 → the log matrix over the home. URL-driven so the rail can
     // open it from outside the home's own state (the widget-overlay store that
     // used to carry this kind of cross-surface summon is gone).
-    trackables:
-      search.trackables === true || search.trackables === "true" || search.trackables === "1" || undefined,
-    calendar:
-      search.calendar === true || search.calendar === "true" || search.calendar === "1" || undefined,
+    trackables: flag(search.trackables),
+    calendar: flag(search.calendar),
   }),
   component: LogPage,
 });
