@@ -51,6 +51,9 @@ _DEFAULT_BLOB = {
     # The short-term promise this session is FOR (focus_service Reminder id), set
     # by the dashboard's per-promise ▶ focus control. None = an untargeted block.
     "target_reminder_id": None,
+    # When the CURRENT focus run started, stamped server-side (naive UTC ISO) on
+    # the transition into `running`. The client never sends it — see set_control.
+    "control_at": None,
 }
 
 
@@ -112,12 +115,35 @@ def set_control(db: Session, control: str, target_reminder_id: int | None = None
     reporting an anonymous block of time. Starting a session always rewrites the
     target (including to None); stopping clears it, since a target outliving its
     session would mislabel the next one.
+
+    **`control_at` is stamped HERE, on the transition into running**, and is the
+    only server-visible answer to "how long has this run been going" — the
+    session itself is a client store (`useFocusSessionStore`), so nothing else
+    server-side knows a session exists. Two rules make it honest:
+
+      · stamped on the TRANSITION, not on every post. `useFocusCamControl` fires
+        its effect on mount, so a page reload mid-session re-posts `running` with
+        the same target; re-stamping there would reset a two-hour run to zero on
+        a refresh. An unchanged (control, target) pair keeps the original stamp.
+      · cleared with the control. A run that has stopped has no start, and a
+        stamp outliving its session is exactly the stale claim
+        `activity_context.live_focus_session` refuses to report on.
     """
     if control not in VALID_CONTROLS:
         raise ValueError(f"control must be one of {VALID_CONTROLS}")
     blob = get_blob(db)
+    target = target_reminder_id if control == "running" else None
+    resumed = control == "running" and (
+        blob.get("control") != "running"
+        or blob.get("target_reminder_id") != target
+        or not blob.get("control_at")
+    )
     blob["control"] = control
-    blob["target_reminder_id"] = target_reminder_id if control == "running" else None
+    blob["target_reminder_id"] = target
+    if control != "running":
+        blob["control_at"] = None
+    elif resumed:
+        blob["control_at"] = datetime.utcnow().isoformat()
     return _write_blob(db, blob)
 
 
