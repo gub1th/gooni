@@ -48,8 +48,12 @@ into one row per day, each anchored at its own first open — the grammar
 
 Deliberately NOT attribution. These rows say what happened and when. Nothing
 here scores a day, binds attention to a Promise, or computes a percentage —
-`browser_intervals`/`app_intervals` stay the honest raw substrate a later
-attribution design would read, and presenting a row is not reading it that way.
+`browser_intervals`/`app_intervals` stay the honest raw substrate, and
+presenting a row is not reading it that way. Binding attention to a commitment
+is `focus_attribution`'s job and only happens inside a focus session's windows;
+the two modules read the same tables and share `host_label`, `CLUSTER_GAP`'s
+neighbours and the scan caps, but a device ROW never carries a promise and an
+attributed second never becomes a row.
 """
 
 from __future__ import annotations

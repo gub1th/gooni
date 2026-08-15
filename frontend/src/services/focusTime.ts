@@ -27,6 +27,14 @@ import { useFocusSessionStore, type FocusSegment } from "../stores/useFocusSessi
 //      date), so per-task totals are a read of this one trackable's entries
 //      grouped in code. That is fine at this volume — do not add an index or a
 //      column to avoid it.
+//
+// The entry is also the SESSION WINDOW OF RECORD. `app/services/
+// focus_attribution.py` overlaps browser/app intervals against `value_json.
+// segments` to bind observed attention to the Promise — the timer is the whole
+// attribution mechanism, so these windows are the only thing standing between
+// "you were on it" and a guess. Two consequences: the segments must be the
+// EXACT focus runs (the envelope spans pauses — see FocusEntryDraft.segments),
+// and the write is the only place they are ever produced.
 
 export const FOCUS_TRACKABLE = "focus";
 
@@ -57,6 +65,22 @@ export interface FocusEntryDraft {
   minutes: number;
   startedAt: string; // ISO
   endedAt: string; // ISO
+  /**
+   * The EXACT focus runs this day's minutes came from, clipped at midnight.
+   *
+   * `startedAt`/`endedAt` are the day's ENVELOPE — every run folds into one
+   * entry, so a session paused for lunch has an envelope spanning the lunch.
+   * That is fine for the number (only focus segments are summed) and wrong for
+   * anything that asks WHAT HAPPENED inside the window: the backend's
+   * attribution layer overlaps device intervals against these windows to bind
+   * observed attention to the Promise, and the envelope would credit it with
+   * whatever was on screen while the timer was paused.
+   *
+   * Rides on `value_json` for the same reason `promise_id` and `truncated` do —
+   * free-form Text, no migration, no new column. An older entry without it
+   * still attributes, from the envelope, flagged imprecise.
+   */
+  segments: { start: string; end: string }[];
   /**
    * Some of these minutes came from a CAPPED run (a session nobody closed), so
    * the number is a floor rather than a measurement. It rides on the entry for
@@ -90,7 +114,10 @@ function nextLocalMidnight(ms: number): number {
  * it produces two entries rather than one fat one filed under the start day.
  */
 export function splitSegmentsByDay(segments: FocusSegment[]): FocusEntryDraft[] {
-  const byDay = new Map<string, { ms: number; start: number; end: number; truncated: boolean }>();
+  const byDay = new Map<
+    string,
+    { ms: number; start: number; end: number; truncated: boolean; runs: [number, number][] }
+  >();
 
   for (const seg of segments) {
     if (seg.mode !== "focus") continue;
@@ -104,12 +131,14 @@ export function splitSegmentsByDay(segments: FocusSegment[]): FocusEntryDraft[] 
         prev.start = Math.min(prev.start, cursor);
         prev.end = Math.max(prev.end, boundary);
         prev.truncated = prev.truncated || seg.truncated === true;
+        prev.runs.push([cursor, boundary]);
       } else {
         byDay.set(key, {
           ms: boundary - cursor,
           start: cursor,
           end: boundary,
           truncated: seg.truncated === true,
+          runs: [[cursor, boundary]],
         });
       }
       cursor = boundary;
@@ -122,6 +151,13 @@ export function splitSegmentsByDay(segments: FocusSegment[]): FocusEntryDraft[] 
       minutes: Math.round((v.ms / 60_000) * 100) / 100,
       startedAt: new Date(v.start).toISOString(),
       endedAt: new Date(v.end).toISOString(),
+      // Sorted, because the attribution overlap short-circuits on the first
+      // window that starts past an interval's end and an unsorted list would
+      // cut the scan early. Cheap here, and the alternative is the reader
+      // having to distrust the order it was given.
+      segments: v.runs
+        .sort((a, b) => a[0] - b[0])
+        .map(([s, e]) => ({ start: new Date(s).toISOString(), end: new Date(e).toISOString() })),
       truncated: v.truncated,
     }))
     // A sub-second sliver either side of midnight isn't an entry.
@@ -208,6 +244,12 @@ export async function writeFocusSession(
         title,
         started_at: d.startedAt,
         ended_at: d.endedAt,
+        // The exact windows the backend's attribution layer overlaps device
+        // intervals against. The envelope above stays for every reader that
+        // only wants "when was this session" — dropping it would break them
+        // for no gain, and the two disagree only in the way documented on
+        // FocusEntryDraft.segments.
+        segments: d.segments,
         // only on the rows it's true of — an absent flag is the normal case
         ...(d.truncated ? { truncated: true } : {}),
       },

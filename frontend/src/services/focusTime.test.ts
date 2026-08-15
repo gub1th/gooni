@@ -9,6 +9,11 @@
  *   3. Attribution rides on the ENTRY (`value_json.promise_id`), never on the
  *      definition — `Trackable.parent_promise_id` binds to exactly one Promise,
  *      so a trackable per task would grow the log matrix a column per task.
+ *   4. The entry carries the EXACT focus runs (`value_json.segments`), clipped
+ *      at midnight, not just the day's envelope. The backend's attribution
+ *      layer overlaps device intervals against those windows, and the envelope
+ *      spans every pause inside the day — so an envelope-only entry credits the
+ *      Promise with whatever was on screen while the timer was stopped.
  *
  * The definition itself is asserted too: `agg=sum` is what makes the day fold
  * to focused-minutes, and `parent_promise_id` must stay absent.
@@ -90,6 +95,61 @@ test("one session inside a day writes exactly one entry, no replace", async () =
   expect(body.value_json).toMatchObject({ promise_id: 42, title: "leetcode" });
   // a genuine session carries no truncation flag at all
   expect(body.value_json).not.toHaveProperty("truncated");
+});
+
+test("the entry carries the EXACT focus runs, not just the day's envelope", async () => {
+  // Focused 09:00–09:30, paused for lunch, focused again 11:00–11:30. The
+  // envelope (09:00–11:30) spans the pause; the segments do not.
+  const segments: FocusSegment[] = [
+    { start: at(2026, 8, 10, 9, 0), end: at(2026, 8, 10, 9, 30), mode: "focus" },
+    { start: at(2026, 8, 10, 11, 0), end: at(2026, 8, 10, 11, 30), mode: "focus" },
+  ];
+
+  await writeFocusSession(segments, 42, "write the docs");
+
+  expect(logged).toHaveLength(1);
+  const vj = logged[0].body.value_json as {
+    started_at: string;
+    ended_at: string;
+    segments: { start: string; end: string }[];
+  };
+  // The envelope stays for readers that only want "when was this session".
+  expect(new Date(vj.started_at).getTime()).toBe(at(2026, 8, 10, 9, 0));
+  expect(new Date(vj.ended_at).getTime()).toBe(at(2026, 8, 10, 11, 30));
+  // The segments are what the backend's attribution layer overlaps device
+  // intervals against. Without them the Promise gets credited with whatever
+  // was on screen during the 90-minute pause.
+  expect(vj.segments).toHaveLength(2);
+  expect(vj.segments.map((s) => new Date(s.start).getTime())).toEqual([
+    at(2026, 8, 10, 9, 0),
+    at(2026, 8, 10, 11, 0),
+  ]);
+  // Sorted, because the overlap scan short-circuits on the first window that
+  // starts past an interval's end.
+  const starts = vj.segments.map((s) => new Date(s.start).getTime());
+  expect([...starts].sort((a, b) => a - b)).toEqual(starts);
+  // They sum to the minutes, which is the invariant that makes the two views
+  // of the same entry agree.
+  const segMinutes = vj.segments.reduce(
+    (n, s) => n + (new Date(s.end).getTime() - new Date(s.start).getTime()) / 60_000,
+    0,
+  );
+  expect(segMinutes).toBe(logged[0].body.value_numeric);
+});
+
+test("a midnight split clips each day's segments at the boundary", async () => {
+  const segments: FocusSegment[] = [
+    { start: at(2026, 8, 10, 23, 40), end: at(2026, 8, 11, 0, 20), mode: "focus" },
+  ];
+
+  const drafts = splitSegmentsByDay(segments);
+
+  // One run either side, each ending/starting at local midnight — a window
+  // that ran past midnight would attribute the next day's browsing to this
+  // day's entry.
+  expect(drafts.map((d) => d.segments.length)).toEqual([1, 1]);
+  expect(new Date(drafts[0].segments[0].end).getTime()).toBe(at(2026, 8, 11, 0, 0));
+  expect(new Date(drafts[1].segments[0].start).getTime()).toBe(at(2026, 8, 11, 0, 0));
 });
 
 test("a session nobody closed is capped, and the entry says the total is a floor", async () => {

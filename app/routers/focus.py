@@ -11,12 +11,13 @@ Endpoints:
   GET    /focus/reminders         list_reminders
   PATCH  /focus/reminders/{id}    edit fields OR toggle state/done
   DELETE /focus/reminders/{id}    hard-delete
+  GET    /focus/attribution       observed attention per commitment (timer-bound)
   GET    /focus/dashboard         assembled glanceable payload
 """
 
 import os
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
 from sqlalchemy.orm import Session
@@ -336,6 +337,45 @@ def stream(days: int = 7, end: str | None = None, db: Session = Depends(get_db))
             raise HTTPException(status_code=400, detail=f"bad end date: {end!r}")
         end_date = d
     return focus_service.stream(db, days=days, end=end_date)
+
+
+# ── Attribution ──────────────────────────────────────────────────────────────
+
+
+@router.get("/focus/attribution")
+def attribution(
+    days: int = 7,
+    end: str | None = None,
+    promise_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    """What each commitment's focus sessions actually observed.
+
+    The read side of the timer-as-attribution design: a named task plus a
+    bounded window means every browser/app interval inside that window belongs
+    to that Promise by construction. Derived at read time from durable session
+    windows, never stamped at ingest — see `focus_attribution` for why the
+    sensors' buffering makes the alternative wrong rather than merely worse.
+
+    `days` + `end` (ISO date) page back in time, matching `/focus/stream`.
+    `promise_id` narrows to one commitment.
+    """
+    from ..services import focus_attribution
+
+    if days < 1:
+        raise HTTPException(status_code=400, detail="days must be >= 1")
+    end_date = local_today(db)
+    if end:
+        d = _parse_iso_date(end)
+        if d is None:
+            raise HTTPException(status_code=400, detail=f"bad end date: {end!r}")
+        end_date = d
+    return focus_attribution.attribute(
+        db,
+        start_day=end_date - timedelta(days=days - 1),
+        end_day=end_date,
+        promise_id=promise_id,
+    )
 
 
 # ── Dashboard ────────────────────────────────────────────────────────────────

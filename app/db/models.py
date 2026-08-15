@@ -901,11 +901,14 @@ class BrowserInterval(Base):
     (`extension/`), which buffers locally and POSTs batches to
     /browser/intervals.
 
-    RAW SENSOR DATA ONLY. These rows are deliberately NOT Trackables and are
-    not attributed to any Topic/Promise — binding observed attention to a
-    declared commitment is a separate design problem, and wiring it up without
-    that design is how you get confidently wrong focus percentages. This table
-    is the honest substrate that a later attribution layer reads.
+    RAW SENSOR DATA ONLY, and it STAYS that way: no Trackable, and no
+    promise/topic column on the row. The attribution layer this table was kept
+    clean for now exists (`app/services/focus_attribution.py`), and it reads
+    these rows rather than writing to them — it overlaps them against the
+    windows of a running focus session at READ time. Nothing may stamp a
+    commitment here at ingest: the extension buffers and retries, so an
+    interval measured at 14:30 legitimately arrives at 18:00 and would be filed
+    against whatever was running then. See that module for the full argument.
 
     Privacy: the full URL is captured for EVERY host — the question this sensor
     exists to answer ("what was I distracted by?") dies with hostname-only data,
@@ -979,10 +982,12 @@ class AppInterval(Base):
     SAVEPOINT insert — are shared as CODE (`interval_ingest.py`), which is the
     part worth not duplicating.
 
-    RAW SENSOR DATA ONLY, same as BrowserInterval: not a Trackable, not
-    attributed to any Topic/Promise. Surfacing an `opened <app>` row in the
+    RAW SENSOR DATA ONLY, same as BrowserInterval: not a Trackable, and no
+    commitment stamped on the row. Surfacing an `opened <app>` row in the
     activity feed is presentation over this substrate, not attribution — no
-    percentage, no judgement, no binding to a commitment.
+    percentage, no judgement, no binding to a commitment. Binding to a
+    commitment happens in `focus_attribution`, as a read-time overlap against
+    focus-session windows, for the reasons in BrowserInterval's docstring.
 
     Privacy: the app NAME is what the OS reports as frontmost. `title` (the
     window title) is optional and is NOT collected by the shell today — the
