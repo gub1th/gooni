@@ -18,6 +18,7 @@ from .steps import (
     _strip_memory_anchors,
     _UNBACKED_CLAIM_RE,
 )
+from .write_ledger import build_ledger
 from .prompt_blocks import (
     ENTRY_SUMMARIZE_THRESHOLD,
     OBJECT_KINDS_BLOCK,
@@ -800,7 +801,7 @@ class Orchestrator:
         path skipped (no audit semantics on vision turns, regen cost is real).
 
         B5/audit 2026-05-31: gated on a cheap claim-regex. Verify scope is
-        PURELY fact-of-action (steps.py::_VERIFY_PROMPT — "Empty audit + no
+        PURELY fact-of-action (steps.py::_VERIFY_PROMPT — "Empty ledger + no
         action-claim = ok=true"), so a draft with no claim-verb would pass
         anyway → skip it (kills the gpt-4o-mini call on every pure-answer
         turn). When a claim IS present, the DETERMINISTIC rail runs first
@@ -809,28 +810,38 @@ class Orchestrator:
         unflagged claim-bearing draft pays for the LLM verify to catch the
         subtler wrong-action-backed case.
 
+        Both rails read ONE `WriteLedger` (write_ledger.py) covering both
+        writers. The subtler case the LLM rail is here for is now reachable:
+        it used to be handed the tool audit alone — which structurally cannot
+        contain a router write — and a prompt rule telling it to treat every
+        router-flavoured verb as accurate on that basis. So the turn where the
+        model narrates a capture nobody performed, the exact turn this rail
+        exists for, was whitelisted by name.
+
         Returns the (possibly regenerated) (response, usage). Fail-open.
         """
         if not (not image_url and response and _UNBACKED_CLAIM_RE.search(response)):
             return response, usage
         try:
-            det_critique = _deterministic_unbacked_check(
-                draft=response,
-                captured_features=routed.captured_features,
-                captured_promises=routed.captured_promises,
-                resolved_promises=routed.completed_promises + routed.broken_promises,
+            # ONE reconstruction of what this turn wrote, read by BOTH rails.
+            # The router writes upstream of the model and the tool loop writes
+            # inside it; before the ledger the two rails reassembled that
+            # separately and disagreed — the LLM verifier's copy of the answer
+            # was a prompt clause blanket-trusting every router-shaped verb.
+            ledger = build_ledger(
+                routed=routed,
                 tool_call_ids=(usage or {}).get("tool_call_ids") or [],
                 db=db,
+            )
+            det_critique = _deterministic_unbacked_check(
+                draft=response, ledger=ledger,
             )
             if det_critique:
                 # Hard rail tripped — authoritative. Skip the LLM verify.
                 verify_ok, verify_critique = False, det_critique
             else:
                 verify_ok, verify_critique = _run_verify(
-                    response,
-                    user_msg=message,
-                    tool_call_ids=(usage or {}).get("tool_call_ids") or [],
-                    db=db,
+                    response, user_msg=message, ledger=ledger,
                 )
             # Phase 2 (backlog #313): the old _deterministic_denied_success_check
             # backstop (reply denies a state change that actually landed —
@@ -842,7 +853,14 @@ class Orchestrator:
             tb.step(
                 "verify",
                 "OK" if verify_ok else f"REVISE: {verify_critique[:120]}",
-                meta={"ok": verify_ok, "critique": verify_critique},
+                # The ledger rides in the trace: the eval UI's verify node can
+                # then show WHAT the rail was reasoning over, so a bad verdict
+                # is debuggable without re-running the turn.
+                meta={
+                    "ok": verify_ok,
+                    "critique": verify_critique,
+                    "ledger": ledger.render(),
+                },
             )
             # Skip regenerate when critique is too short — under 30 chars
             # is almost always vague noise ("may be misleading", "could be

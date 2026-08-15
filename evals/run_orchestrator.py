@@ -162,6 +162,10 @@ _PIPELINE_SOURCE_FILES = [
     "app/services/orchestrator/core.py",
     "app/services/orchestrator/prompt_blocks.py",
     "app/services/orchestrator/steps.py",
+    # The verify rail's evidence, not just its prompt: what the ledger shows
+    # (or marks NOT WRITTEN) decides whether a draft is regenerated, so an
+    # edit here changes pipeline output as surely as one to steps.py.
+    "app/services/orchestrator/write_ledger.py",
     "app/services/conversation_service.py",
     "app/services/memory_service.py",
     "app/services/memory_extraction.py",
