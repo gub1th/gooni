@@ -9,6 +9,7 @@ import { NotesList } from "../components/notes/NotesList";
 import { AmbientHome } from "../components/ambient/AmbientHome";
 import { MemoriesView } from "../components/memories/MemoriesView";
 import { CalendarPanel } from "../components/ambient/CalendarPanel";
+import { LogDots } from "../components/ambient/LogDots";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { fetchNote } from "../services/api";
 
@@ -20,7 +21,7 @@ import { fetchNote } from "../services/api";
 // Everything else on this route (notes, log, audit) is a summoned sheet over
 // the same void, derived from the URL.
 
-type View = "home" | "notes" | "log" | "eval" | "memories" | "calendar";
+type View = "home" | "notes" | "log" | "eval" | "memories" | "calendar" | "trackables";
 
 // Every key is OPTIONAL on purpose. TanStack replaces the whole search object
 // on an object-form navigate, so optionality changes nothing at runtime — but
@@ -106,6 +107,7 @@ function LogPage() {
     search.view === "log" ? "log" :
     search.view === "memories" ? "memories" :
     search.calendar ? "calendar" :
+    search.trackables ? "trackables" :
     "home";
 
   // ?note=<id> → fetch + seed the note into the store. View derives to
@@ -187,10 +189,6 @@ function LogPage() {
           style={view === "home" ? undefined : { pointerEvents: "none" }}
         >
           <AmbientHome
-          trackablesOpen={!!search.trackables}
-          onCloseTrackables={() =>
-            navigate({ search: { ...search, trackables: undefined }, replace: true })
-          }
             covered={view !== "home"}
           />
         </div>,
@@ -208,6 +206,12 @@ function LogPage() {
         <MemoriesView focusId={search.focus} />
       ) : view === "calendar" ? (
         <CalendarPanel />
+      ) : view === "trackables" ? (
+        <LogDots
+          mode="matrix"
+          embedded
+          onClose={() => navigate({ search: { ...search, trackables: undefined }, replace: true })}
+        />
       ) : view === "eval" ? (
         <EvalView
           onOpenNote={(noteId: number) =>

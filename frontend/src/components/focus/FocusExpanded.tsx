@@ -166,8 +166,20 @@ export function FocusExpanded() {
     if (stopping.current) return;
     stopping.current = true;
     setSaveError(false);
+    // Stopping — as opposed to pausing — means the task is DONE: the same
+    // completion `markKept` performs, folded into the one button rather than
+    // left as a second click nobody was reliably making. Read before the
+    // await: the store's own `stop()` (inside `endFocusSession`) clears the
+    // session, so `session` here is the closure's snapshot, not a live ref.
+    const promiseId = session?.promiseId;
+    const alreadyKept = kept;
     try {
       await endFocusSession();
+      if (promiseId != null && !alreadyKept) {
+        // Best-effort: the timer's own write already landed, so a failure
+        // here shouldn't read as the whole stop having failed.
+        await updateFocusReminder(promiseId, { state: "kept" }).catch(() => {});
+      }
     } catch {
       setSaveError(true);
     } finally {

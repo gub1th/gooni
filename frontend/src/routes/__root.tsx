@@ -181,10 +181,17 @@ function AppShell() {
   const isCalendar =
     onIndex &&
     (rawSearch.calendar === true || rawSearch.calendar === "true" || rawSearch.calendar === "1");
+  // Trackables — the log matrix — moved off being an overlay AmbientHome drew
+  // on itself onto a route view of its own, same reason memories/calendar did:
+  // without it here, isHome stays true and the home paints its void straight
+  // over the panel that is meant to be sliding over it.
+  const isTrackables =
+    onIndex &&
+    (rawSearch.trackables === true || rawSearch.trackables === "true" || rawSearch.trackables === "1");
   // The ambient home is the index default — active when nothing else claims the
   // URL. It paints its own void and owns its own corners, so the docked sidebar
   // and the shared top-right cluster stand down here.
-  const isHome = onIndex && !isNotes && !isEval && !isLog && !isMemories && !isCalendar;
+  const isHome = onIndex && !isNotes && !isEval && !isLog && !isMemories && !isCalendar && !isTrackables;
 
   // The header's height, for the same reason the band publishes its own: the
   // things that must clear it are `position: fixed` with their own offsets and
@@ -273,6 +280,21 @@ function AppShell() {
   // `/` (the ambient home) paints its own void ground full-bleed, so it is the
   // one authed surface that is NOT a sheet.
   const isSheet = !isHome && !isImmersive && !isChromelessPath(location.pathname);
+  // Which non-home surface is showing — priority mirrors routes/index.tsx's
+  // own `view` derivation so the two never disagree about what's on screen.
+  const surfaceKey = isEval
+    ? "eval"
+    : isNotes
+    ? "notes"
+    : isLog
+    ? "log"
+    : isMemories
+    ? "memories"
+    : isCalendar
+    ? "calendar"
+    : isTrackables
+    ? "trackables"
+    : "home";
 
   // Esc = drop the summoned layer, back to presence. Skips text inputs and
   // open dialogs (the canonical Modal stopPropagation()s Escape at the
@@ -389,7 +411,7 @@ function AppShell() {
             put; the home renders plainly underneath. `sheetFrame` is retired
             as the page treatment — it framed every surface as a floating
             window, which is what made them read as pasted on. */}
-        <SurfaceHost isSheet={isSheet} onDismiss={gotoBlank}>
+        <SurfaceHost isSheet={isSheet} viewKey={surfaceKey} onDismiss={gotoBlank}>
         {isNotes && sidebarOpen && (
           <Sidebar
             isNotes={isNotes}
@@ -471,15 +493,17 @@ function AppShell() {
  */
 function SurfaceHost({
   isSheet,
+  viewKey,
   onDismiss,
   children,
 }: {
   isSheet: boolean;
+  viewKey: string;
   onDismiss: () => void;
   children: React.ReactNode;
 }) {
   return (
-    <SurfacePanel open={isSheet} onDismiss={onDismiss}>
+    <SurfacePanel open={isSheet} viewKey={viewKey} onDismiss={onDismiss}>
       {children}
     </SurfacePanel>
   );

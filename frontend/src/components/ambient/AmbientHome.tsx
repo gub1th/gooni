@@ -156,13 +156,8 @@ function todayWindowISO(): { startISO: string; endISO: string } {
 }
 
 export function AmbientHome({
-  trackablesOpen = false,
-  onCloseTrackables,
   covered: coveredBySurface = false,
 }: {
-  /** the log matrix, opened from the rail (URL-driven) or the streak row */
-  trackablesOpen?: boolean;
-  onCloseTrackables?: () => void;
   /** a surface panel is sliding over the home — stand every affordance down */
   covered?: boolean;
 } = {}) {
@@ -922,7 +917,7 @@ export function AmbientHome({
   const needsWake = voiceMode && !armed; // show the tap-to-wake veil
 
   // Any full-screen surface owns the void; the stage stands down under it.
-  const covered = coveredBySurface || trackablesOpen || fillOpen || !!peekNote || needsWake;
+  const covered = coveredBySurface || fillOpen || !!peekNote || needsWake;
 
   // A surface panel (notes, memories, the log matrix, a note peek) taking the
   // screen has to fold the composer with it. Not cosmetic: the editor keeps
@@ -969,7 +964,7 @@ export function AmbientHome({
         boxMode={boxMode || editorOpen}
         rect={rect}
         thinking={thinking}
-        dimmed={trackablesOpen || fillOpen}
+        dimmed={fillOpen}
         waveWidth={waveW}
         // THE WAVE STAYS A WAVE (pass 9). It used to be REPLACED by the running
         // session, which meant the notch, the task row and the wave were three
@@ -1188,10 +1183,10 @@ export function AmbientHome({
         </div>
       </div>
 
-      {/* the RECORD — opened from the rail when you want history */}
-      {trackablesOpen && <LogDots mode="matrix" onClose={() => onCloseTrackables?.()} />}
+      {/* the RECORD is now its own route view (`?trackables=1`, the Trackables
+          tab) — see routes/index.tsx — so the home no longer renders it. */}
       {/* the daily FILL — opened from its row in TODAY */}
-      {fillOpen && !trackablesOpen && (
+      {fillOpen && (
         <LogDots mode="fill" onClose={() => { setFillOpen(false); refreshLogged(); }} />
       )}
 

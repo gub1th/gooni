@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { z } from "../../ui";
 import { RAIL_LANE } from "../ambient/IconRail";
 
@@ -36,10 +36,17 @@ const SLIDE_MS = 260;
 // about where you came from.
 export function SurfacePanel({
   open,
+  viewKey,
   onDismiss,
   children,
 }: {
   open: boolean;
+  // Identifies WHICH non-home surface is showing (e.g. "notes"/"memories").
+  // `open` alone only tells us the panel is up — going from notes straight to
+  // memories never flips `open` false→true, so the transform-driven slide
+  // never replays and the two surfaces just swap content instantly. Watching
+  // this key too is what makes a non-home→non-home nav slide in as well.
+  viewKey: string;
   onDismiss: () => void;
   children: React.ReactNode;
 }) {
@@ -52,6 +59,30 @@ export function SurfacePanel({
     const t = window.setTimeout(() => setPresent(false), SLIDE_MS);
     return () => window.clearTimeout(t);
   }, [open]);
+
+  // Replays the entrance transform when the SURFACE changes while the panel
+  // stays open. Done imperatively (write off-screen with no transition, force
+  // a reflow, then write back on with the transition) rather than through
+  // React state, because the ordinary open-driven render already wants the
+  // panel AT translateX(0) the instant `viewKey` changes — there is no
+  // false→true edge on `open` to hang a state-driven replay off of.
+  const panelRef = useRef<HTMLDivElement>(null);
+  const prevViewKey = useRef(viewKey);
+  const prevOpen = useRef(open);
+  useLayoutEffect(() => {
+    const wasOpen = prevOpen.current;
+    const viewChanged = viewKey !== prevViewKey.current;
+    prevViewKey.current = viewKey;
+    prevOpen.current = open;
+    if (!open || !wasOpen || !viewChanged) return;
+    const el = panelRef.current;
+    if (!el) return;
+    el.style.transition = "none";
+    el.style.transform = "translateX(100%)";
+    void el.getBoundingClientRect(); // force a reflow so the off-screen frame paints
+    el.style.transition = `transform ${SLIDE_MS}ms cubic-bezier(0.32, 0.72, 0, 1)`;
+    el.style.transform = "translateX(0)";
+  }, [viewKey, open]);
 
   return (
     // THE CLIP BOX. It occupies exactly the panel's slot and never moves, so
@@ -81,6 +112,7 @@ export function SurfacePanel({
       }}
     >
     <div
+      ref={panelRef}
       data-surface-panel
       data-open={open ? "" : undefined}
       style={{

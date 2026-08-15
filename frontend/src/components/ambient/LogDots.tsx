@@ -94,7 +94,19 @@ interface Row {
  * `mode` only decides which one you land on; the expand control still crosses
  * between them.
  */
-export function LogDots({ onClose, mode = "fill" }: { onClose: () => void; mode?: "fill" | "matrix" }) {
+export function LogDots({
+  onClose,
+  mode = "fill",
+  embedded = false,
+}: {
+  onClose: () => void;
+  mode?: "fill" | "matrix";
+  /** Rendered as a full-screen route view (the Trackables tab) rather than a
+   * centered card floated over the home — the panel it slides in inside
+   * already provides the frame + backdrop, so this drops the fixed overlay,
+   * the centering/scale animation and the click-outside-to-close handler. */
+  embedded?: boolean;
+}) {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [editId, setEditId] = useState<number | null>(null);
@@ -257,6 +269,22 @@ export function LogDots({ onClose, mode = "fill" }: { onClose: () => void; mode?
       await createTrackable({ name, kind: addKind });
       await load();
     } catch { /* ignore */ }
+  }
+
+  if (embedded) {
+    // Full-screen route view: the SurfacePanel it slides in inside already
+    // supplies the frame, the backdrop and the slide/dismiss motion, so this
+    // just fills the panel's content slot — same shape as MemoriesView /
+    // CalendarPanel next to it.
+    return (
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "hidden", fontFamily: FONT, background: "var(--gooni-void, #000000)" }}>
+        <div style={{ flex: 1, minHeight: 0, padding: 20, boxSizing: "border-box", display: "flex" }}>
+          <div style={{ ...GLASS, borderRadius: 16, position: "relative", overflow: "hidden", flex: 1, minWidth: 0, display: "flex" }}>
+            <LogTable />
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
