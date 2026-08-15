@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.236.3 — 2026-08-15 (patch)
+
+- fix(orchestrator): give the verify rail a write ledger instead of a router whitelist (#481)
+
 ## 0.236.2 — 2026-08-15 (patch)
 
 - fix(promises): raise chat auto-close bar to 0.85, ask on near miss (#480)
