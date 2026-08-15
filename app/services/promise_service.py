@@ -434,27 +434,54 @@ def update(
 
 # ── Chat-side promise matching (complete / break via utterance) ────────
 
-MATCH_THRESHOLD = 0.60   # floor for "did the gym thing" → active promise
+# Cosine bar for ACTING on a match — flipping a commitment's lifecycle
+# (kept/broken) with nobody asked. It is the same "this is the same
+# commitment" bar create-dedup already uses, and deliberately so: closure
+# and dedup ask the identical question, just from opposite ends. It shipped
+# at 0.60, which on text-embedding-3-small is the loosely-related band, not
+# the paraphrase band — "went to the store" scores there against "go to the
+# gym", and an auto-close on that is a silent lie in the record with no undo
+# path in the UI. Raising it costs recall in tier 3 only; tiers 1 and 2 carry
+# the ordinary cases, and a near-miss is now ASKED about rather than dropped.
+CLOSE_MATCH_THRESHOLD = 0.85
+# Floor for a candidate worth NAMING (never acting on): the near-miss band
+# [LOOSE_MATCH_THRESHOLD, CLOSE_MATCH_THRESHOLD) becomes a "did you mean X?"
+# ack instead of a silent no-match. Also the bar for non-destructive
+# resolution — parent-hint linking, which only ever adds a link.
+LOOSE_MATCH_THRESHOLD = 0.60
 AMBIGUITY_GAP = 0.05     # top-2 within this gap → refuse, ask Daniel
 
 
 def find_active_match(
-    db: Session, text: str
+    db: Session,
+    text: str,
+    *,
+    threshold: float = CLOSE_MATCH_THRESHOLD,
+    near_threshold: float = LOOSE_MATCH_THRESHOLD,
 ) -> tuple[Promise | None, list[dict]]:
     """Resolve a complete/break `match` phrase against ACTIVE promises.
 
-    Returns (promise, ambiguous_candidates):
+    Returns (promise, candidates):
       - (row, [])      — confident single match, act on it
       - (None, [a, b]) — two candidates within AMBIGUITY_GAP; caller
                          surfaces a "which one?" ack instead of acting
-      - (None, [])     — nothing above MATCH_THRESHOLD
+      - (None, [a])    — ONE near-miss in [near_threshold, threshold):
+                         plausible but not certain, so the caller asks
+                         ("close X? — did you mean …") instead of acting.
+                         Marked `near_miss` so an ack can tell the two
+                         one-vs-two cases apart without re-deriving them.
+      - (None, [])     — nothing above near_threshold
 
     Three deterministic-first tiers:
       1. full-phrase substring ("call paip" in "call paip about rent")
       2. unique content-word overlap ("the gym thing" → the only active
          promise containing "gym") — catches terse referents cosine
          under-scores
-      3. cosine ≥ MATCH_THRESHOLD for true paraphrases
+      3. cosine ≥ `threshold` for true paraphrases
+
+    `threshold` is a parameter, not a hardcoded read, because the two
+    callers want different bars: closure ACTS (strict), parent-hint
+    resolution only LINKS (loose — see resolve_parent_hint).
     """
     cleaned = (text or "").strip()
     if not cleaned:
@@ -499,6 +526,7 @@ def find_active_match(
     vec = _embed(cleaned)
     if vec is None:
         return None, []
+    floor = min(near_threshold, threshold)
     scored: list[tuple[float, Any]] = []
     for r in rows:
         if not r.embedding:
@@ -508,29 +536,47 @@ def find_active_match(
         except (TypeError, ValueError):
             continue
         s = _cosine(vec, emb)
-        if s >= MATCH_THRESHOLD:
+        # Collect down to the NAMEABLE floor, not the actionable bar — a
+        # candidate that just missed is the thing worth asking about.
+        if s >= floor:
             scored.append((s, r))
     if not scored:
         return None, []
     scored.sort(key=lambda t: t[0], reverse=True)
+
+    def _cand(s: float, r: Any, **extra) -> dict:
+        return {
+            "id": r.id,
+            "text": r.summary or r.utterance,
+            "score": round(s, 3),
+            **extra,
+        }
+
+    # Two candidates this close are indistinguishable whichever side of the
+    # bar they sit on — refuse and ask before either gets acted on.
     if len(scored) >= 2 and (scored[0][0] - scored[1][0]) < AMBIGUITY_GAP:
-        cands = [
-            {"id": r.id, "text": r.summary or r.utterance, "score": round(s, 3)}
-            for s, r in scored[:2]
-        ]
-        return None, cands
+        return None, [_cand(s, r) for s, r in scored[:2]]
+    if scored[0][0] < threshold:
+        # Near miss: plausible, not certain. Name it so the caller can ask
+        # instead of silently reporting "no match" on a real referent.
+        return None, [_cand(*scored[0], near_miss=True)]
     return get(db, scored[0][1].id), []
 
 
 def resolve_parent_hint(db: Session, hint: str) -> int | None:
     """Resolve a `parent_hint` phrase to an active Promise id — substring
-    first, cosine fallback. None when nothing lands."""
-    p, ambiguous = find_active_match(db, hint)
+    first, cosine fallback. None when nothing lands.
+
+    Runs at the LOOSE bar on purpose: this only ADDS a parent link, it
+    never flips a lifecycle, so a wrong guess is cheap and editable —
+    unlike closure, which is why that path keeps the strict default.
+    """
+    p, candidates = find_active_match(db, hint, threshold=LOOSE_MATCH_THRESHOLD)
     if p is not None:
         return p.id
-    if ambiguous:
+    if candidates:
         # Ambiguity on a parent link is low-stakes — take the top hit.
-        return ambiguous[0]["id"]
+        return candidates[0]["id"]
     return None
 
 
