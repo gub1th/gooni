@@ -446,28 +446,54 @@ function TaskRow({
         padding: "5px 0",
       }}
     >
-      <button
-        onClick={onTick}
-        aria-label={done ? `Reopen ${item.content}` : `Complete ${item.content}`}
-        aria-pressed={done}
-        style={{
-          width: 18,
-          height: 18,
-          flex: "none",
-          borderRadius: 4,
-          padding: 0,
-          cursor: "pointer",
-          display: "grid",
-          placeItems: "center",
-          border: `1.8px solid ${done || cbHover ? accent : ink(0.38)}`,
-          background: done ? accent : "transparent",
-          transition: "background 120ms ease, border-color 120ms ease",
-        }}
-        onMouseEnter={() => setCbHover(true)}
-        onMouseLeave={() => setCbHover(false)}
-      >
-        {done && <Check size={11} strokeWidth={3.4} color="var(--gooni-void, #000)" />}
-      </button>
+      <span style={{ position: "relative", flex: "none", width: 18, height: 18 }}>
+        {/* the running task's checkbox reads as active, not just checkable —
+            a ring in the FOCUS_GLOW token, pulsing while focus is live and
+            static (calmer) through a break/pause. No blur, no offset — an
+            animated border-opacity ring, not a drop shadow. */}
+        {session && (
+          <span
+            aria-hidden
+            style={{
+              position: "absolute",
+              inset: -3,
+              borderRadius: 7,
+              border: `1.5px solid var(--gooni-focus)`,
+              opacity: session.state === "focus" ? 1 : 0.4,
+              animation: session.state === "focus" ? "gooni-run-pulse 1.8s ease-in-out infinite" : "none",
+            }}
+          />
+        )}
+        <button
+          onClick={onTick}
+          aria-label={done ? `Reopen ${item.content}` : `Complete ${item.content}`}
+          aria-pressed={done}
+          style={{
+            width: 18,
+            height: 18,
+            padding: 0,
+            cursor: "pointer",
+            display: "grid",
+            placeItems: "center",
+            borderRadius: 4,
+            border: `1.8px solid ${
+              session ? "var(--gooni-focus)" : done || cbHover ? accent : ink(0.38)
+            }`,
+            background: session
+              ? session.state === "focus"
+                ? "color-mix(in srgb, var(--gooni-focus) 22%, transparent)"
+                : "transparent"
+              : done
+                ? accent
+                : "transparent",
+            transition: "background 120ms ease, border-color 120ms ease",
+          }}
+          onMouseEnter={() => setCbHover(true)}
+          onMouseLeave={() => setCbHover(false)}
+        >
+          {done && <Check size={11} strokeWidth={3.4} color="var(--gooni-void, #000)" />}
+        </button>
+      </span>
 
       <span
         style={{
