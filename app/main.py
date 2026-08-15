@@ -139,6 +139,10 @@ async def _lifespan(app: FastAPI):
     excerpt_task = asyncio.create_task(background._backfill_note_excerpts_loop())
     mem_task = asyncio.create_task(background._memory_watchdog_loop())
     refresh_task = asyncio.create_task(background._integration_refresh_loop())
+    # The proactive layer — the one loop that can SPEAK unprompted. It checks
+    # its own Settings/env kill switch on every tick rather than at boot, so a
+    # disabled loop still spins (at zero cost) and re-enabling needs no restart.
+    proactive_task = asyncio.create_task(background._proactive_loop())
     from contextlib import AsyncExitStack
 
     async with AsyncExitStack() as _stack:
@@ -151,7 +155,7 @@ async def _lifespan(app: FastAPI):
             yield
         finally:
             for t in (
-                excerpt_task, mem_task, refresh_task,
+                excerpt_task, mem_task, refresh_task, proactive_task,
             ):
                 t.cancel()
                 try:

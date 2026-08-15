@@ -24,9 +24,13 @@ const TZ_OPTIONS = [
   "UTC",
 ];
 
-// The nudge system died in the 2026-07 proactiveness reset; this panel now
-// owns the one surviving knob — the app-wide canonical timezone (`nudge_tz`,
-// legacy column name). Everything user-facing that resolves "today" reads it.
+// Two knobs: the app-wide canonical timezone (`nudge_tz`, legacy column name
+// from the nudge system the 2026-07 proactiveness reset deleted — everything
+// user-facing that resolves "today" reads it), and the proactive layer's kill
+// switch. The second one lives here rather than in env because it is the knob
+// you want to reach in seconds from the UI when the loop starts saying
+// something stupid; GOONI_PROACTIVE_DISABLED still overrides it for a prod stop
+// that must not need a database write.
 export function SettingsPanel() {
   const qc = useQueryClient();
   const { data: settings, isLoading, error } = useQuery({
@@ -77,7 +81,7 @@ export function SettingsPanel() {
       )}
 
       {settings && (
-        <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 18, marginBottom: 18 }}>
           <span style={{
             fontSize: 11, color: "var(--gooni-muted, #8E8E93)", fontWeight: 600,
             textTransform: "uppercase", letterSpacing: 0.4,
@@ -112,6 +116,41 @@ export function SettingsPanel() {
             }}>
               Gooni's canonical timezone — "today" everywhere (trackables,
               promises, chat) resolves against it.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {settings && (
+        <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+          <span style={{
+            fontSize: 11, color: "var(--gooni-muted, #8E8E93)", fontWeight: 600,
+            textTransform: "uppercase", letterSpacing: 0.4,
+            width: 84, flexShrink: 0,
+          }}>Proactive</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <label style={{
+              display: "flex", alignItems: "center", gap: 8, fontSize: 13,
+              color: "var(--gooni-text, #1C1C1E)", cursor: "pointer",
+            }}>
+              <input
+                type="checkbox"
+                // `?? true` mirrors the column default, so a backend from
+                // before the migration doesn't render the switch as OFF and
+                // invite a pointless write to turn on something already on.
+                checked={settings.proactive_enabled ?? true}
+                onChange={(e) => patch({ proactive_enabled: e.target.checked })}
+              />
+              Let Gooni speak first
+            </label>
+            <p style={{
+              margin: "6px 0 0", fontSize: 11,
+              color: "var(--gooni-muted, #A0A0A5)", lineHeight: 1.5,
+            }}>
+              A background loop looks at your activity and commitments every
+              ~15 min and places one line on the home when it has something you
+              don't already know — and texts you on WhatsApp instead if you've
+              been away for hours. Off means silence, no model calls.
             </p>
           </div>
         </div>

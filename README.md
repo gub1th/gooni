@@ -151,6 +151,10 @@ tests/                       # plain-script tests: signal routing, overlay ranke
 | `AUTH_PASSWORD` | No | When set, blocks non-public routes behind a Bearer-token gate |
 | `ALLOWED_ORIGINS` | No | Comma-separated frontend origins for CORS |
 | `TAVILY_API_KEY` | Web search | Powers the `web_search` chat tool |
+| `GOONI_PROACTIVE_DISABLED` | No | Kill switch for the background proactive loop. Set to `1` to stop it everywhere; WINS over the `proactive_enabled` Settings toggle, so a prod stop never needs a database write |
+| `PROACTIVE_INTERVAL_MIN` | No | Proactive loop cadence in minutes (default 15, clamped 5–180) |
+| `PROACTIVE_TTL_MIN` | No | How long an observation stays on the ambient display (default 30, clamped 5–720) |
+| `PROACTIVE_MODEL` | No | Model for the proactive tick (default `gpt-4o-mini`) — one bounded call per tick, never on a request path |
 | `TELEGRAM_BOT_TOKEN` | Bot only | From @BotFather |
 | `TELEGRAM_CHAT_ID` | Bot only | Inbound allowlist; comma-separated chat IDs |
 | `WHATSAPP_VERIFY_TOKEN` | WA only | Pick any string; matches Meta webhook config |
