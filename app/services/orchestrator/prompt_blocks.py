@@ -384,6 +384,30 @@ def _build_state_block(db) -> str:
     except Exception as e:
         print(f"[state_block] recent_activity surface failed: {e}")
 
+    # Life-log Phase 3: what Daniel is DOING, from the device sensors.
+    #
+    # Its own section rather than more lines in `[recent — last 1h]`, because
+    # that block's ~8-line budget is for STATE CHANGES Gooni has to reconcile a
+    # reply against (a promise closed, a trackable logged) — which is exactly
+    # why `recent_activity` excludes device rows at source. Attention is a
+    # different question with a different window, and folding it in would push
+    # out the events the recent block exists to carry.
+    #
+    # Read-only and deterministic: a bounded fold over browser_intervals +
+    # app_intervals plus the focus-cam control blob. It STATES what the sensors
+    # saw and what the running session is FOR; it never scores the window or
+    # calls the two aligned — reading alignment off the pair is the model's job.
+    try:
+        from .. import activity_context
+        doing_lines = activity_context.build_activity_context_lines(db)
+        if doing_lines:
+            lines.append(
+                f"[doing — last {activity_context.WINDOW_MINUTES}m, from device sensors]"
+            )
+            lines.extend(doing_lines)
+    except Exception as e:
+        print(f"[state_block] activity_context surface failed: {e}")
+
     # Today's food ledger — the read-back surface chat was missing (conv
     # #1412-1417, 5/27). A fresh SUM each turn, so even on a turn with no new
     # fitness log Gooni can answer "did you add the cherries?" / cite the
