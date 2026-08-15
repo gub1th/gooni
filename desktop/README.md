@@ -170,8 +170,8 @@ dependencies and nothing extra to codesign. The precision it gives up doesn't
 matter for a row that means "opened after five minutes away".
 
 **It needs Accessibility permission** (System Settings ▸ Privacy & Security ▸
-Accessibility). Because the build is unsigned, that grant is re-prompted after a
-rebuild — see *Not in v1*.
+Accessibility). The build is self-signed, so the grant survives rebuilds — see
+*Codesigning*.
 
 **The honesty rules**, which are the browser extension's rules restated:
 
@@ -217,21 +217,37 @@ lost data with a better excuse. The numbers are clamped — a 100ms poll would
 spawn `osascript` ten times a second forever, and a 2-second idle threshold would
 close an interval every time you stop to read something.
 
+## Codesigning (self-signed, 2026-08-15)
+
+The build is signed with a **self-signed** identity, `Gooni Dev Signing` — no
+Apple Developer account, no notarization. The point is TCC persistence: macOS
+ties camera, Accessibility and Screen-Recording grants to a binary's
+code-signature identity. Unsigned (and ad-hoc `-s -`) builds get a fresh
+identity every rebuild — the designated requirement is the per-build cdhash —
+so every rebuild re-prompted for every permission. A stable cert makes the
+designated requirement `identifier "app.gooni.desktop" and certificate leaf =
+<cert hash>`, identical across rebuilds, so grants stick.
+
+- **One-time per machine:** `scripts/setup-signing.sh` — idempotent; generates
+  a 10-year self-signed cert with the codeSigning EKU, imports it into the
+  login keychain pre-authorized for `codesign`, and trusts it for code signing
+  in the user trust domain (which may raise one GUI confirmation).
+- **Every build signs automatically:** `build.mac.identity` in `package.json`
+  names the cert; `npm run pack` / `npm run dist` do the rest. No manual step.
+- **Check:** `codesign --verify --deep --strict dist/mac-arm64/Gooni.app` and
+  `codesign -dr - dist/mac-arm64/Gooni.app` (the leaf hash must not change
+  between builds).
+- If the identity is missing, electron-builder fails the build naming it — run
+  the setup script.
+
+Not notarized and not installable on other machines without clicking through
+Gatekeeper; that (a paid Developer ID) is still out of scope. Self-signing is
+enough for the shell to eventually own the camera grant directly instead of
+leaving it to the sidecar.
+
 ## Not in v1
 
-**Codesigning and notarization.** This build is **unsigned**, and that has one
-consequence worth writing down so it isn't mistaken for a bug: macOS ties
-camera, Accessibility and Screen-Recording grants to a binary's identity, and an
-unsigned binary's identity changes every time it is rebuilt. So **every rebuild
-re-prompts for permissions**, and previously granted ones stop applying. That is
-friction, not a blocker — click through it. It is also the reason the *sidecar's*
-own camera permission is best left to the sidecar for now: the shell can start a
-Python process that holds its own long-lived camera grant, where an unsigned
-shell holding that grant itself would lose it on every rebuild.
-
-Signing is what turns this from "works on this machine today" into something
-installable, and it is the prerequisite for the shell ever owning the camera
-grant directly.
+**Notarization / Developer-ID signing** — see *Codesigning* above.
 
 ## Layout
 
