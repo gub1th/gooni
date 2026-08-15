@@ -603,11 +603,11 @@ def _build_state_block(db) -> str:
     # calls the two aligned — reading alignment off the pair is the model's job.
     try:
         from .. import activity_context
-        doing_lines = activity_context.build_activity_context_lines(db)
+        suffix, doing_lines = activity_context.build_activity_context(db)
         if doing_lines:
-            lines.append(
-                f"[doing — last {activity_context.WINDOW_MINUTES}m, from device sensors]"
-            )
+            header = f"[doing — last {activity_context.WINDOW_MINUTES}m, from device sensors"
+            header += f" — {suffix}]" if suffix else "]"
+            lines.append(header)
             lines.extend(doing_lines)
     except Exception as e:
         print(f"[state_block] activity_context surface failed: {e}")

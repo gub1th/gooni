@@ -371,11 +371,18 @@ def test_reload_does_not_restart_the_run_clock(db):
 
 
 def test_silence_says_nothing(db):
-    print("\n[silence is silence]")
+    print("\n[no data is stated, not implied]")
     clear_intervals(db)
     clear_focus(db)
-    lines = activity_context.build_activity_context_lines(db)
-    check(lines == [], f"no rows + no session → NO section at all, got {lines!r}")
+    suffix, lines = activity_context.build_activity_context(db)
+    check(
+        lines == ["no recent activity data"],
+        f"no rows + no session → explicit no-data line, got {lines!r}",
+    )
+    check(
+        suffix is None,
+        "no header suffix — the body line already says it, no need to repeat",
+    )
 
 
 def test_unobserved_session_is_not_zero(db):
@@ -435,6 +442,69 @@ def test_quiet_and_truncated_are_flagged(db):
         "durations are a floor" in joined(activity_context.render_activity_lines(s)),
         "…and is still flagged from there",
     )
+
+
+# ── 8b: staleness awareness ──────────────────────────────────────────────────
+
+
+def test_stale_activity_is_labeled_not_presented_as_current(db):
+    print("\n[stale device data reads as past, not present]")
+    clear_intervals(db)
+    clear_focus(db)
+    # Last app activity ended 20m ago — inside the 30m window, past the 15m
+    # STALE_THRESHOLD. Browser stayed fresh (ended 3m ago).
+    app_interval(db, "cursor", NOW - mins(28), NOW - mins(20))
+    browser_interval(db, "github.com", NOW - mins(10), NOW - mins(3), title="gooni PRs")
+
+    s = activity_context.build_activity_summary(db, now=NOW)
+    text = joined(activity_context.render_activity_lines(s))
+    check(
+        "apps — last seen 20m ago: cursor" in text,
+        f"a stale layer is framed as the past, with its own age: {text!r}",
+    )
+    check(
+        "apps: cursor" not in text,
+        "the stale layer never reads as a current-doing line",
+    )
+    check(
+        "browsing: github 7m" in text,
+        "the still-fresh layer keeps the ordinary current-doing framing",
+    )
+
+    suffix = activity_context.freshness_suffix(s)
+    check(
+        suffix == "as of 3m ago",
+        f"the header freshness follows the FRESHEST layer, not the stalest: {suffix!r}",
+    )
+
+
+def test_stale_header_when_everything_is_old(db):
+    print("\n[the header itself goes stale]")
+    clear_intervals(db)
+    clear_focus(db)
+    app_interval(db, "cursor", NOW - mins(29), NOW - mins(20))
+
+    s = activity_context.build_activity_summary(db, now=NOW)
+    suffix = activity_context.freshness_suffix(s)
+    check(
+        suffix == "stale — last data 20m ago",
+        f"both layers are stale → the header says so: {suffix!r}",
+    )
+    text = joined(activity_context.render_activity_lines(s))
+    check("apps — last seen 20m ago: cursor" in text, f"…and so does the body: {text!r}")
+
+
+def test_live_session_with_no_device_data_reads_as_of_now(db):
+    print("\n[a live session is its own freshness signal]")
+    clear_intervals(db)
+    focus_cam_service.set_control(db, "running", target_reminder_id=None)
+    s = activity_context.build_activity_summary(db, now=datetime.utcnow())
+    suffix = activity_context.freshness_suffix(s)
+    check(
+        suffix == "as of now",
+        f"no device rows but a live session → freshness reads off the session: {suffix!r}",
+    )
+    clear_focus(db)
 
 
 # ── 9: read-only ─────────────────────────────────────────────────────────────
@@ -531,8 +601,9 @@ def test_reaches_the_state_block(db):
 
     block = _build_state_block(db)
     check(
-        f"[doing — last {activity_context.WINDOW_MINUTES}m, from device sensors]" in block,
-        "the state block carries the device-activity section",
+        f"[doing — last {activity_context.WINDOW_MINUTES}m, from device sensors — as of "
+        in block,
+        f"the state block carries the device-activity section, freshness-labelled: {block!r}",
     )
     check("cursor 11m" in block, f"…with the folded app durations: {block!r}")
     check("github 4m" in block, "…and the folded host durations")
@@ -553,6 +624,9 @@ def main():
     test_silence_says_nothing(db)
     test_unobserved_session_is_not_zero(db)
     test_quiet_and_truncated_are_flagged(db)
+    test_stale_activity_is_labeled_not_presented_as_current(db)
+    test_stale_header_when_everything_is_old(db)
+    test_live_session_with_no_device_data_reads_as_of_now(db)
     test_worst_case_stays_inside_the_budget(db)
     test_read_only(db)
     test_reaches_the_state_block(db)
