@@ -46,6 +46,7 @@ export function LimboCards({
   total,
   onPromote,
   onDismiss,
+  dim = 1,
 }: {
   items: LogMessage[];
   /**
@@ -56,6 +57,13 @@ export function LimboCards({
   total?: number;
   onPromote: (m: LogMessage) => void;
   onDismiss: (m: LogMessage) => void;
+  /**
+   * How much of the home is showing. The lane is home furniture, so it dims
+   * with the stage while the capture box or its note editor has the screen —
+   * a pending-commitment card at full brightness beside a dimmed TODAY would
+   * read as the one thing being pointed at.
+   */
+  dim?: number;
 }) {
   const shown = items.slice(0, MAX_CARDS);
   const pending = Math.max(total ?? items.length, items.length);
@@ -69,6 +77,7 @@ export function LimboCards({
         left: "50%", transform: "translateX(-50%)",
         zIndex: z.overlay, display: "flex", flexDirection: "column", gap: 10,
         width: "min(440px, 92vw)", fontFamily: FONT, pointerEvents: "none",
+        opacity: dim, transition: "opacity 260ms ease",
       }}
     >
       {shown.map((m) => (

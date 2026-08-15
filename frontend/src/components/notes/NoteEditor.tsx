@@ -31,6 +31,7 @@ import { NoteCard } from "./NoteCardExtension";
 import { NoteMention } from "./note-mention";
 import { TextColor, TEXT_COLOR_PALETTE } from "./TextColorExtension";
 import { useNoteCardStyles } from "./noteCardStyles";
+import { splitTitleAndBody } from "./quickNote";
 import { SendButton } from "../chat/SendButton";
 import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, autoTitleNote as apiAutoTitleNote, uploadImage as apiUploadImage, uploadAttachment as apiUploadAttachment, fetchOgMetadata, saveLocalNoteDraft, readLocalNoteDraft, clearLocalNoteDraft, type ApiNote, type ApiMemory, type NoteClassifySignals } from "../../services/api";
 import { NoteMemoriesPanel } from "./NoteMemoriesPanel";
@@ -42,7 +43,28 @@ import { useDraftVersionStore } from "../../stores/useDraftVersionStore";
 import { Tooltip } from "../Tooltip";
 import { frostInk as ctok } from "../../ui";
 
-type Variant = "full" | "embedded";
+// "ambient" is the capture box's expanded note surface on the home. It is the
+// EMBEDDED composer with three things forced, because on the void every one of
+// them would otherwise be wrong:
+//   · EPHEMERAL — the store's `activeNoteId` is ignored outright. Left alone,
+//     opening this after browsing a note in the notes surface would hydrate the
+//     composer with that note's body and ⌘↵ would OVERWRITE it. The capture box
+//     always writes a NEW note.
+//   · TRANSPARENT — the embedded root is a `--gooni-card` slab, which is exactly
+//     the lit rectangle the ambient treatment rule exists to keep off the void.
+//     The home supplies the frost; this renders on it.
+//   · ⌘↵ TO SUBMIT — Enter is a newline in a note editor. The embedded composer
+//     submits on bare Enter because it was a one-line dashboard quick-note.
+type Variant = "full" | "embedded" | "ambient";
+
+// Is a suggestion popup (slash menu / @-mention) on screen right now? Both
+// render through tippy appended to <body>, and tippy stamps the visible box
+// with data-state="visible" — the only signal available from outside the
+// extension. Read by the Escape handler so a menu can close itself before the
+// composer takes the key.
+function suggestionPopupOpen(): boolean {
+  return !!document.querySelector('[data-tippy-root] [data-state="visible"]');
+}
 
 // Block image insertion helper. Always trails the image with an empty
 // paragraph so the cursor has a text-block to land in even when the image
@@ -539,14 +561,38 @@ interface NoteEditorProps {
   // embedded composer to dim surrounding chrome (TakeTabs etc) so the
   // writing surface gets the eye.
   onFocusChange?: (focused: boolean) => void;
+  /** ambient only — the document the composer opens with (the capture box's text). */
+  initialContent?: string;
+  /**
+   * ambient only — Escape inside the editor. Deliberately NOT the parent
+   * listening for a bubbled keydown: a suggestion popup (slash menu, @-mention)
+   * owns Escape while it is open, and only the editor can tell.
+   */
+  onEscape?: () => void;
+  /** ambient only — hands the live TipTap instance up so the parent can seed + focus it. */
+  onReady?: (editor: Editor | null) => void;
 }
 
-export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFocusChange }: NoteEditorProps = {}) {
+export function NoteEditor({
+  variant = "full",
+  onSubmitted,
+  onEmptyChange,
+  onFocusChange,
+  initialContent,
+  onEscape,
+  onReady,
+}: NoteEditorProps = {}) {
   useEditorStyles();
   useNoteCardStyles();
-  const embedded = variant === "embedded";
+  const ambient = variant === "ambient";
+  const embedded = variant === "embedded" || ambient;
 
-  const { selectedSpaceId, notes, activeNoteId, updateNote, refetchNote, selectNote, deleteNote } = useNotesContentStore();
+  const { selectedSpaceId, notes, activeNoteId: storeActiveNoteId, updateNote, refetchNote, selectNote, deleteNote } = useNotesContentStore();
+  // THE ephemeral switch, in one line. Every guard downstream is already
+  // `activeNoteId && activeNoteId > 0`, so nulling it here is what makes the
+  // ambient composer create-only: no hydration, no autosave, no save-on-leave,
+  // no memories/refetch effects firing against somebody else's note.
+  const activeNoteId = ambient ? null : storeActiveNoteId;
   const navigate = useNavigate();
   const [signalsExpanded, setSignalsExpanded] = useState(false);
   // Surface for the embedded composer — the last submitted note's classify
@@ -787,7 +833,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
         TextColor,
         ToggleBlock,
       ],
-      content: activeNote?.content ?? "",
+      content: ambient ? (initialContent ?? "") : (activeNote?.content ?? ""),
       // Embedded variant intentionally does NOT autofocus — focus
        // triggers the dashboard's expand-and-dim layout, which would
        // fire on every dashboard mount otherwise. User clicks to start.
@@ -805,16 +851,29 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
           class: "gooni-note-editor",
         },
         handleKeyDown: (_view, event) => {
-          if (embedded && event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+          // The ambient composer is a note editor, so Enter is a NEWLINE there
+          // and ⌘/Ctrl+Enter commits — the same pair the capture box it grew
+          // out of already used. The dashboard's embedded quick-note was a
+          // one-liner, so it keeps bare Enter.
+          if (embedded && event.key === "Enter" && !event.isComposing
+              && (ambient ? (event.metaKey || event.ctrlKey) : !event.shiftKey)) {
             event.preventDefault();
             void handleSubmitRef.current();
             return true;
           }
           // Esc on the embedded composer collapses focus mode without
           // submitting. TipTap doesn't blur on Esc by default; do it here.
+          //
+          // A suggestion popup (slash menu, @-mention) owns Escape while it is
+          // open and must close ITSELF first. These are direct view props, which
+          // ProseMirror runs BEFORE any plugin's handler, so without this bail
+          // the first Escape would tear down the composer out from under an open
+          // menu. Returning false hands the key back to the plugin.
           if (embedded && event.key === "Escape") {
+            if (suggestionPopupOpen()) return false;
             event.preventDefault();
             (event.target as HTMLElement | null)?.blur?.();
+            onEscape?.();
             return true;
           }
           // Cmd/Ctrl+Shift+M → toggle inline code on selection. TipTap's
@@ -865,6 +924,16 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
   useEffect(() => {
     if (editor) setEditorEmpty(editor.isEmpty);
   }, [editor, activeNoteId]);
+
+  // Hand the instance up (ambient only). The home has to be able to seed the
+  // composer with whatever was already typed in the capture box and put the
+  // caret at the end — neither is expressible as a prop, because the composer
+  // outlives any single opening of it.
+  useEffect(() => {
+    if (!onReady) return;
+    onReady(editor);
+    return () => onReady(null);
+  }, [editor, onReady]);
 
   // Toggle .is-empty on the editor DOM so the placeholder CSS tracks real emptiness
   // (not CSS :empty, which breaks the moment ProseMirror inserts a trailing <br>).
@@ -1020,7 +1089,14 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
     if (embedded && !activeNoteId) {
       // Ephemeral quick-note path: create the note server-side NOW with the final content.
       try {
-        savedNote = await apiCreateNote("general", { content: contentToSave });
+        // The ambient composer is the capture box grown up, so it writes the
+        // same shape ⌘↵ in the box does: first line as the title, the rest as
+        // the body. The dashboard composer never titled anything, and changing
+        // that is not this variant's business.
+        const payload = ambient
+          ? (() => { const { title, body } = splitTitleAndBody(contentToSave); return { title, content: body }; })()
+          : { content: contentToSave };
+        savedNote = await apiCreateNote("general", payload);
       } catch {
         // silent — animation/refresh will no-op
       }
@@ -1030,7 +1106,10 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
       hasChanges.current = false;
       setEditorEmpty(true);
       onEmptyChange?.(true);
-      editor.commands.focus("end");
+      // The dashboard composer stays open for the next quick note, so it takes
+      // focus back. The ambient one is closing — grabbing focus mid-collapse
+      // would fight whatever the home hands it to next.
+      if (!ambient) editor.commands.focus("end");
     } else if (activeNoteId && activeNoteId > 0) {
       // Existing full-variant / already-created path.
       try {
@@ -1057,7 +1136,11 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
       // Embedded composer surfaces a transient toast since the disclosure
       // block lives in the full-variant render path. Clear any prior toast
       // and start a poll for the classify_signals payload.
-      if (embedded) {
+      //
+      // NOT on the ambient surface: it closes on submit, so the pill would
+      // render 3.5s later inside a panel nobody can see, and the poll would be
+      // a fetch for a screen that is gone. The home flashes its own confirmation.
+      if (embedded && !ambient) {
         // Cancel any in-flight pill before starting a new one.
         setEmbeddedToastVisible(false);
         setEmbeddedToast(null);
@@ -1433,13 +1516,17 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
       style={
         embedded
           ? {
-              background: "var(--gooni-card, #FFFFFF)",
-              border: "1px solid var(--gooni-border, rgba(0,0,0,0.07))",
-              borderRadius: 14,
+              // The ambient surface renders ON the home's frosted panel — a
+              // second opaque card inside it would be a slab on the void, which
+              // is the one thing the ambient treatment rule forbids.
+              background: ambient ? "transparent" : "var(--gooni-card, #FFFFFF)",
+              border: ambient ? "none" : "1px solid var(--gooni-border, rgba(0,0,0,0.07))",
+              borderRadius: ambient ? 0 : 14,
               display: "flex",
               flexDirection: "column",
               minWidth: 0,
               position: "relative",
+              ...(ambient ? { height: "100%" } : null),
             }
           : {
               flex: 1,
@@ -1756,19 +1843,43 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
             el.style.setProperty("--glow-x", `${e.clientX - rect.left}px`);
             el.style.setProperty("--glow-y", `${e.clientY - rect.top}px`);
           }}
-          style={{
-            position: "relative",
-            padding: "18px 22px",
-            boxSizing: "border-box",
-            width: "100%",
-            minHeight: embeddedFocused ? 220 : 80 + 18 * 2,
-            overflow: "hidden",
-            borderRadius: 14,
-            transition: "min-height 280ms cubic-bezier(0.22, 0.61, 0.36, 1)",
-          }}
+          style={
+            ambient
+              ? {
+                  // The ambient composer fills the home's panel rather than
+                  // growing with its content: the panel already has a size, and
+                  // a surface that resizes under the caret on the void reads as
+                  // the screen twitching. The bottom padding reserves the send
+                  // button's row so the last line never sits under it.
+                  position: "relative",
+                  padding: "20px 26px 46px",
+                  boxSizing: "border-box",
+                  width: "100%",
+                  height: "100%",
+                  display: "flex",
+                  flexDirection: "column",
+                  overflow: "hidden",
+                  borderRadius: 0,
+                }
+              : {
+                  position: "relative",
+                  padding: "18px 22px",
+                  boxSizing: "border-box",
+                  width: "100%",
+                  minHeight: embeddedFocused ? 220 : 80 + 18 * 2,
+                  overflow: "hidden",
+                  borderRadius: 14,
+                  transition: "min-height 280ms cubic-bezier(0.22, 0.61, 0.36, 1)",
+                }
+          }
         >
             <div
-              style={{ position: "relative", zIndex: 1 }}
+              // Ambient scrolls the TEXT, not the shell — the send button is
+              // absolute against the shell, so a scrolling shell would carry it
+              // off the bottom of a long note.
+              style={ambient
+                ? { position: "relative", zIndex: 1, flex: 1, minHeight: 0, overflowY: "auto" }
+                : { position: "relative", zIndex: 1 }}
               onDrop={async (e) => {
                 const all = Array.from(e.dataTransfer?.files ?? []);
                 if (!all.length || !editor) return;
@@ -1828,13 +1939,13 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                 and chat InputBar share one source of truth (#122-124). The
                 anchor wrapper handles the absolute positioning that's
                 specific to the embedded composer card. */}
-            <div style={{ position: "absolute", bottom: 10, right: 10 }}>
+            <div style={{ position: "absolute", bottom: ambient ? 12 : 10, right: ambient ? 14 : 10 }}>
               <SendButton
                 ref={submitButtonRef}
                 onClick={handleSubmit}
                 disabled={editorEmpty}
-                title="Submit (Enter)"
-                ariaLabel="Submit note"
+                title={ambient ? "Save as a note (⌘↵)" : "Submit (Enter)"}
+                ariaLabel={ambient ? "Save as a note" : "Submit note"}
               />
             </div>
         </div>
