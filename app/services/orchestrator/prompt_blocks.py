@@ -275,6 +275,205 @@ def _build_ack(routed: "RouterResult") -> str | None:
     return " · ".join(parts)
 
 
+# ── Overlay surface — the ranked "what matters right now" block ───────
+#
+# overlay_service already computes the ONE deterministic ranking Gooni
+# has (overdue → due ≤48h → important, each row carrying a `reason`) plus
+# today's met/missed/pending trackable fold. Until this block existed
+# none of it reached the model: the prompt carried an UNRANKED promise
+# dump (state_block) and no target awareness at all, so "what should I
+# focus on?" was answered by vibes and "how am I doing on calories?" by a
+# shrug or a tool call.
+#
+# Read-only by contract — this block never re-implements a rule. It
+# renders `overlay_service.build_overlay`'s output and the Promise
+# Integrity Score route's output verbatim. If a ranking looks wrong, fix
+# it in overlay_service; a second cascade here is how the two drift.
+#
+# Injected on EVERY source (web + bots) — same reason state_block is.
+# It overlaps state_block's promise lines: same rows, so the two can
+# restate but never contradict. Kept anyway because they answer
+# different questions — state_block LISTS what's open, this one RANKS it
+# and says why, and it is the only surface carrying today's trackable
+# TARGETS (met vs missed vs still short of the floor).
+OVERLAY_HORIZON_CAP = 4      # named horizon rows; the rest are counted
+OVERLAY_TRACKABLE_CAP = 4    # named trackable rows; the rest are counted
+OVERLAY_PENDING_CAP = 5      # names in the "not logged yet" list
+
+
+def _cadence_tag(cadence: str | None, target=None) -> str:
+    """Compact recurrence tag shared by every prompt block, so a promise
+    reads the same whether state_block or the overlay block printed it."""
+    cad = cadence or "once"
+    if cad == "n_per_week":
+        return f" [{target or '?'}x/wk]"
+    if cad != "once":
+        return f" [{cad}]"
+    return ""
+
+
+def _rel_span(delta_seconds: float) -> str:
+    """Coarse '2d' / '5h' / '40m' for a due distance. Coarse on purpose —
+    the model needs urgency, not a countdown, and precision here would
+    invite it to recite a deadline to the minute.
+
+    Rounds to nearest rather than flooring: a deadline 4h59m out reading
+    'in 4h' understates urgency by an hour, and understating is the one
+    direction that costs something on a horizon block."""
+    mins = int(abs(delta_seconds) // 60)
+    if mins >= 2880:
+        return f"{int(mins / 1440 + 0.5)}d"
+    if mins >= 60:
+        return f"{int(mins / 60 + 0.5)}h"
+    return f"{max(mins, 1)}m"
+
+
+def _build_overlay_block(db) -> str:
+    """Render overlay_service's ranked action horizon + today's trackable
+    fold + the Promise Integrity Score as one bounded prompt block
+    (~150 tokens at the caps above).
+
+    Deterministic end to end: no LLM call, no scoring of its own. Caller
+    wraps with try/except — a failure here must never block the reply.
+
+    Only two of the four zones are rendered. `anchor` (the pinned note) is
+    already reachable via the note tools and would cost prompt budget on
+    every turn to restate; `whoop_select` is a display picker whose numbers
+    ride the state block's feeds. Both are read and dropped on purpose —
+    calling the public `build_overlay` keeps this a reader of the surface
+    rather than a caller of overlay_service's privates.
+    """
+    from datetime import datetime as _dt
+
+    from .. import overlay_service
+
+    zones = overlay_service.build_overlay(db)
+    now = _dt.utcnow()
+    lines: list[str] = []
+
+    # ── zone 1: the ranked action horizon ──
+    horizon = zones.get("action_horizon") or []
+    if horizon:
+        lines.append(
+            "- next up (ranked: overdue → due <=48h → important):"
+        )
+        for e in horizon[:OVERLAY_HORIZON_CAP]:
+            summary = (e.get("summary") or e.get("utterance") or "").strip()
+            if len(summary) > 50:
+                summary = summary[:50].rstrip() + "…"
+            reason = e.get("reason")
+            due_raw = e.get("inferred_due")
+            due = None
+            if due_raw:
+                try:
+                    due = _dt.fromisoformat(due_raw)
+                except (TypeError, ValueError):
+                    due = None
+            if reason == "overdue" and due:
+                why = f"overdue by {_rel_span((now - due).total_seconds())}"
+                # A due nobody chose must not read as a broken deadline —
+                # same rule auto_mark_overdue honours by skipping these.
+                if e.get("due_is_default"):
+                    why += " (auto-set date, not his deadline)"
+            elif reason == "due_soon" and due:
+                why = f"due in {_rel_span((due - now).total_seconds())}"
+            elif reason == "important":
+                why = "flagged important"
+            else:
+                why = reason or ""
+            tag = _cadence_tag(e.get("cadence"), e.get("cadence_target"))
+            slip = e.get("slip_count") or 0
+            slip_tail = f", slipped {slip}x" if slip else ""
+            lines.append(f'  · "{summary}"{tag} — {why}{slip_tail}')
+        cut = len(horizon) - OVERLAY_HORIZON_CAP
+        if cut > 0:
+            # No silent caps — a truncated list read as the whole list is
+            # how "that's everything, sir" becomes a lie.
+            lines.append(f"  · (+{cut} more in the horizon, lower priority)")
+
+    # ── zone 2: today's trackables, met/missed/pending ──
+    tracks = zones.get("trackables_today") or []
+    if tracks:
+        counts: dict[str, int] = {}
+        for t in tracks:
+            counts[t["status"]] = counts.get(t["status"], 0) + 1
+        # 'logged' splits by whether there was a target to judge against:
+        # a floor mid-day is in-progress, a target-less metric is just
+        # logged. overlay_service collapses both into 'logged'.
+        def _in_progress(t: dict) -> bool:
+            return t["status"] == "logged" and t.get("target") is not None
+
+        summary_bits = []
+        if counts.get("met"):
+            summary_bits.append(f"{counts['met']} met")
+        if counts.get("missed"):
+            summary_bits.append(f"{counts['missed']} missed")
+        n_prog = sum(1 for t in tracks if _in_progress(t))
+        if n_prog:
+            summary_bits.append(f"{n_prog} in progress")
+        n_logged = counts.get("logged", 0) - n_prog
+        if n_logged > 0:
+            summary_bits.append(f"{n_logged} logged")
+        if counts.get("pending"):
+            summary_bits.append(f"{counts['pending']} not logged")
+        lines.append("- today's trackables: " + " · ".join(summary_bits))
+
+        # Name the ones carrying a target — that's what turns "how am I
+        # doing on calories?" into an answer instead of a tool call.
+        rank = {"missed": 0, "logged": 1, "met": 2}
+        judged = sorted(
+            [t for t in tracks if t["status"] in ("missed", "met") or _in_progress(t)],
+            key=lambda t: (rank.get(t["status"], 3), t["name"]),
+        )
+        for t in judged[:OVERLAY_TRACKABLE_CAP]:
+            status = "in progress" if _in_progress(t) else t["status"]
+            unit = f" {t['unit']}" if t.get("unit") else ""
+            # overlay_service's `reason` is already "<value> vs limit
+            # <target>" — rendering the value again beside it would be the
+            # same number twice, and the two could only ever agree.
+            lines.append(
+                f"  · {t['name']}: {status} — {t.get('reason', '')}{unit}"
+            )
+        cut = len(judged) - OVERLAY_TRACKABLE_CAP
+        if cut > 0:
+            lines.append(f"  · (+{cut} more tracked today)")
+        pending = [t["name"] for t in tracks if t["status"] == "pending"]
+        if pending:
+            shown = ", ".join(pending[:OVERLAY_PENDING_CAP])
+            extra = len(pending) - OVERLAY_PENDING_CAP
+            if extra > 0:
+                shown += f", +{extra} more"
+            lines.append(f"  · nothing logged today: {shown}")
+
+    # ── zone 3: Promise Integrity Score ──
+    # Owned by GET /promises/pis — called, not re-derived. The weighting
+    # (kept +1.0 / broken -1.5) lives in exactly one place and this is a
+    # read of it.
+    try:
+        from ...routers.promises import promise_integrity_score
+
+        pis = promise_integrity_score(db=db)
+        if pis.get("score") is not None:
+            tail = ""
+            if pis.get("kept_streak"):
+                tail = f" · {pis['kept_streak']} kept in a row"
+            lines.append(
+                f"- promise integrity: {pis['score']}/100 over the last "
+                f"{pis['sample_size']} resolved{tail}"
+            )
+    except Exception as e:
+        print(f"[overlay_block] integrity score failed: {e}")
+
+    if not lines:
+        return ""
+    return (
+        "[what matters right now — deterministic, off Daniel's own rows. "
+        "Answer \"what should I focus on\" / \"how am I doing on X\" from "
+        "this, no tool call needed. Don't recite it verbatim; don't turn "
+        "it into an unprompted nag.]\n" + "\n".join(lines)
+    )
+
+
 def _build_state_block(db) -> str:
     """Snapshot of Daniel's actionable state, injected into the master
     prompt for bot channels. Fixes the segment-#209 failure mode where
@@ -301,12 +500,9 @@ def _build_state_block(db) -> str:
         cutoff = _dt.utcnow() + _td(hours=24)
 
         def _cad_tag(p) -> str:
-            cad = p.cadence or "once"
-            if cad == "n_per_week":
-                return f" [{p.cadence_target or '?'}x/wk]"
-            if cad != "once":
-                return f" [{cad}]"
-            return ""
+            # Shared renderer — a promise must read the same here as in
+            # the overlay block, so the format has one owner.
+            return _cadence_tag(p.cadence, p.cadence_target)
 
         due_soon = [p for p in promises if p.inferred_due and p.inferred_due <= cutoff]
         named_ids = set()
