@@ -34,9 +34,12 @@ handing it over as a fact is not.
      uninstalled extension, a closed laptop and a genuinely quiet half-hour are
      all "no rows"). So the block reports how much of the window anything
      observed, and never fills the remainder with a claim.
-  2. **Silence is silence.** With nothing observed and no live session, the block
-     is EMPTY rather than saying Daniel was idle. Absence of sensor data is not
-     evidence of absence of the human.
+  2. **No data is stated, not implied.** With nothing observed and no live
+     session, the block says `no recent activity data` rather than going
+     silent or claiming Daniel was idle — absence of sensor data is not
+     evidence of absence of the human, but a silently-omitted section is
+     indistinguishable from "nothing worth mentioning", and the model needs to
+     tell "sensors saw nothing" apart from "sensors weren't asked".
   3. **A stale control blob is not a live session.** The focus page clears
      `control` on unmount, but a hard tab close never runs that cleanup, so a
      bare `control == "running"` can outlive its session indefinitely. A session
@@ -84,6 +87,15 @@ MAX_ROWS = 2_000
 # minutes, because intervals close on idle after ~a minute of no input, so a
 # shorter gap is the ordinary seam between two intervals rather than a signal.
 QUIET_GAP = timedelta(minutes=2)
+
+# The line between "this is what I'm doing" and "this is what I was doing".
+# Below this age a layer's folded seconds are presented as current state
+# ("apps: cursor 12m"); at or past it they're presented as a fact about the
+# past ("apps — last seen 2h ago: cursor") so a stale interval can't read as
+# a live one. 15 minutes, named per the staleness-awareness brief — long
+# enough that an ordinary short away-from-keyboard gap (already surfaced via
+# `QUIET_GAP`) doesn't flip the framing on its own.
+STALE_THRESHOLD = timedelta(minutes=15)
 
 # The longest a focus run can honestly be. Mirrors `useFocusSessionStore`'s
 # MAX_RUN_MS — the client caps an open run at six hours, so a `control_at` older
@@ -478,9 +490,21 @@ def build_activity_summary(
 # ── the render ───────────────────────────────────────────────────────────────
 
 
-def _layer_line(prefix: str, layer: dict, *, with_titles: bool) -> str | None:
+def _layer_line(prefix: str, layer: dict, *, with_titles: bool, now: datetime) -> str | None:
     if not layer["top"] and not layer["other_count"]:
         return None
+
+    last_end = layer.get("last_end")
+    # A layer's OWN recency, not the window's — the browser can be stale while
+    # the app layer is fresh (or the reverse), and each must be judged on what
+    # it actually last saw. `last_end` is None only when this layer contributed
+    # nothing, which the guard above already ruled out.
+    if last_end is not None and now - last_end >= STALE_THRESHOLD:
+        names = [row["label"] for row in layer["top"]]
+        if layer["other_count"]:
+            names.append(f"+{layer['other_count']} more")
+        return f"{prefix} — last seen {fmt_age(last_end, now)}: " + ", ".join(names)
+
     parts = []
     for row in layer["top"]:
         piece = f"{row['label']} {fmt_dur(row['seconds'])}"
@@ -524,8 +548,8 @@ def render_activity_lines(summary: dict) -> list[str]:
                 f"  · the window below also covers {fmt_dur(before)} before it started"
             )
 
-    app_line = _layer_line("apps", summary["apps"], with_titles=False)
-    web_line = _layer_line("browsing", summary["browser"], with_titles=True)
+    app_line = _layer_line("apps", summary["apps"], with_titles=False, now=now)
+    web_line = _layer_line("browsing", summary["browser"], with_titles=True, now=now)
     if app_line:
         lines.append(f"- {app_line}")
     if web_line:
@@ -556,7 +580,60 @@ def render_activity_lines(summary: dict) -> list[str]:
             "- some spans were salvaged or capped, so these durations are a floor"
         )
 
+    if not lines:
+        # Neither a live session nor anything either sensor observed in the
+        # window — genuinely no signal, as opposed to a quiet-but-sensed
+        # stretch (which the branches above already name). Say so explicitly:
+        # a silently-omitted section reads to the model as "nothing to
+        # report" and a truly dark sensor reads identically to a calm one.
+        # The model should be able to tell "no data" apart from "idle".
+        return ["no recent activity data"]
+
     return lines
+
+
+def freshness_suffix(summary: dict) -> str | None:
+    """The header's age label — `None` when the body already says "no data".
+
+    Reads the freshest `last_end` across both layers: `as of {age}` under
+    `STALE_THRESHOLD`, `stale — last data {age}` at or past it. Falls back to
+    "as of now" when nothing was observed but a session is live (the session
+    itself is the current signal), and to `None` — meaning no suffix, the
+    caller renders the bare header — when there is truly nothing, since the
+    body's "no recent activity data" line already carries that fact and
+    repeating it in both places is noise, not clarity.
+    """
+    now = summary["window_end"]
+    ends = [
+        l["last_end"]
+        for l in (summary["apps"], summary["browser"])
+        if l.get("last_end") is not None
+    ]
+    if ends:
+        newest = max(ends)
+        age = now - newest
+        if age < STALE_THRESHOLD:
+            return f"as of {fmt_age(newest, now)}"
+        return f"stale — last data {fmt_age(newest, now)}"
+    if summary.get("focus"):
+        return "as of now"
+    return None
+
+
+def build_activity_context(
+    db: Session, *, window_minutes: int = WINDOW_MINUTES
+) -> tuple[str | None, list[str]]:
+    """`(header_suffix, lines)` — what Gooni should know about what Daniel is
+    doing, plus the age label the header wears so stale data can't read as
+    current. `header_suffix` is `None` exactly when `lines` already says "no
+    recent activity data" on its own. Never raises.
+    """
+    try:
+        summary = build_activity_summary(db, window_minutes=window_minutes)
+        return freshness_suffix(summary), render_activity_lines(summary)
+    except Exception as e:  # pragma: no cover — defensive
+        print(f"[activity_context] summary failed: {e}")
+        return None, []
 
 
 def build_activity_context_lines(
@@ -564,13 +641,10 @@ def build_activity_context_lines(
 ) -> list[str]:
     """What Gooni should know about what Daniel is doing, as state-block lines.
 
-    Empty list when there is nothing to say. Never raises — the caller wraps this
-    too, but a state-block surface that can take down a chat reply is a surface
-    that eventually will.
+    Thin wrapper over `build_activity_context` for callers that only need the
+    body (tests, mainly) — see that function for the header/freshness half.
+    Never raises — the caller wraps this too, but a state-block surface that
+    can take down a chat reply is a surface that eventually will.
     """
-    try:
-        summary = build_activity_summary(db, window_minutes=window_minutes)
-        return render_activity_lines(summary)
-    except Exception as e:  # pragma: no cover — defensive
-        print(f"[activity_context] summary failed: {e}")
-        return []
+    _, lines = build_activity_context(db, window_minutes=window_minutes)
+    return lines
