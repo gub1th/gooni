@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Mic, StickyNote } from "lucide-react";
+import type { Editor } from "@tiptap/react";
 import { FONT, frostInk } from "../../ui";
 import { speakText, isVoiceMode, setVoiceMode, stopSpeaking, primeAudio } from "../../services/speech";
 import { MorphLine, type MorphRect } from "./MorphLine";
@@ -13,6 +14,9 @@ import { useHomeChromeStore } from "../../stores/useHomeChromeStore";
 import { LogSheet } from "./LogSheet";
 import { CurrentActivityLine } from "./CurrentActivityLine";
 import { ProactiveLine } from "./ProactiveLine";
+import { CaptureEditor } from "./CaptureEditor";
+import { captureState, homeInteractive, homeOpacity } from "./captureStates";
+import { hasRichContent, textToParagraphs } from "../notes/quickNote";
 import { ink } from "./ambientInk";
 import { emptyRetained, mergeTodayRows, retainTicked } from "./todayRows";
 import {
@@ -110,6 +114,16 @@ const ROWS_MAX = `max(${ROWS_MIN_H}px, calc(${(1 - TODAY_Y) * 100}vh - 152px))`;
 // default window size resolves to the identical 560px.
 const RAIL_CLEARANCE = 80;
 const STAGE_W = `min(560px, calc(100vw - ${RAIL_CLEARANCE * 2}px))`;
+// The expanded note editor. Wider and much taller than the box, but on the same
+// centre — it is the box grown, not a panel summoned somewhere else.
+const EDITOR_MAX_W = 720;
+const EDITOR_MAX_H = 560;
+// Never let the grown box run under the sticky header or off the bottom. It is
+// centred on the wave (which sits at 47% of the viewport), so the room above is
+// the smaller half and decides the height.
+const EDITOR_MARGIN_TOP = 76;
+const EDITOR_MARGIN_BOTTOM = 40;
+const EDITOR_MIN_H = 260;
 // The subtitle + live transcript run wider than the stage on purpose; they get
 // the same clearance rule for the same reason.
 const SUBTITLE_W = `min(600px, calc(100vw - ${RAIL_CLEARANCE * 2}px))`;
@@ -175,6 +189,15 @@ export function AmbientHome({
   }, []);
   useEffect(() => { refreshLogged(); }, [refreshLogged]);
   const [value, setValue] = useState("");
+  // The box's other size. `editorMounted` latches on first open and never
+  // clears: TipTap is too heavy to mount on the home's first paint, and once it
+  // exists, keeping it is what makes a collapse non-destructive — the draft is
+  // still in the editor when you come back to it.
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorMounted, setEditorMounted] = useState(false);
+  const [editorSeed, setEditorSeed] = useState("");
+  const [editorHasDraft, setEditorHasDraft] = useState(false);
+  const editorRef = useRef<Editor | null>(null);
   const [boxH, setBoxH] = useState(PEEK_H);
   const [thinking, setThinking] = useState(false);
   const [replyText, setReplyText] = useState<string | null>(null);
@@ -185,6 +208,9 @@ export function AmbientHome({
   const stickyRef = useRef<StickyHandle>(null);
   const focusedRef = useRef(false);
   const boxModeRef = useRef(false);
+  // Read by the hover handlers, which are plain functions closing over a stale
+  // render — the same reason `boxModeRef` exists.
+  const editorOpenRef = useRef(false);
   const hideTimer = useRef<number | null>(null);
   const enterTimer = useRef<number | null>(null);
   const replyTimer = useRef<number | null>(null);
@@ -224,8 +250,25 @@ export function AmbientHome({
 
   boxModeRef.current = boxMode;
 
+  const cx = vp.w / 2;
+  const cy = vp.h * WAVE_Y;
   const boxW = Math.min(WAVE_WIDTH + 40, vp.w * 0.9);
-  const rect: MorphRect = { cx: vp.w / 2, cy: vp.h * WAVE_Y, w: boxW, h: boxH, r: 20 };
+  const editorW = Math.min(EDITOR_MAX_W, Math.max(320, vp.w - RAIL_CLEARANCE * 2));
+  // Symmetric about the wave's centre, so growing the box never shifts it. The
+  // room above the centre is the binding constraint at every window size.
+  const editorH = Math.max(
+    EDITOR_MIN_H,
+    Math.min(
+      EDITOR_MAX_H,
+      2 * Math.min(cy - EDITOR_MARGIN_TOP, vp.h - EDITOR_MARGIN_BOTTOM - cy),
+    ),
+  );
+  // ONE rect drives the stroke: the box's while capturing, the editor's once it
+  // expands. MorphLine eases both dimensions toward it, so the line grows into
+  // the editor's outline rather than the editor arriving over a stale box.
+  const rect: MorphRect = editorOpen
+    ? { cx, cy, w: editorW, h: editorH, r: 22 }
+    : { cx, cy, w: boxW, h: boxH, r: 20 };
   const waveW = Math.min(WAVE_WIDTH, boxW - 40); // wave sits just inside the box
 
   const reload = useCallback(async () => {
@@ -521,6 +564,13 @@ export function AmbientHome({
     inputRef.current?.blur();
   }, []);
 
+  // Stable by contract: NoteEditor re-runs its hand-up effect whenever this
+  // identity changes, and an inline arrow would hand the editor over on every
+  // render of the home — which polls twice a minute.
+  const onEditorReady = useCallback((ed: Editor | null) => {
+    editorRef.current = ed;
+  }, []);
+
   // Publish the two HOME functions the sticky header renders buttons for, plus
   // the state those buttons display. The header is mounted in AppShell and this
   // component is portaled to the body, so there is no shared provider — and the
@@ -542,8 +592,15 @@ export function AmbientHome({
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const el = document.activeElement;
-      const typing = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
-      if (e.key === "/" && !typing) {
+      // `isContentEditable` is not optional here: the note editor is a
+      // contenteditable div, so an input/textarea-only check let this swallow
+      // every "/" typed into it — the slash MENU could never open, and the key
+      // re-summoned the capture box instead.
+      const typing =
+        el instanceof HTMLInputElement ||
+        el instanceof HTMLTextAreaElement ||
+        (el instanceof HTMLElement && el.isContentEditable);
+      if (e.key === "/" && !typing && !editorOpenRef.current) {
         e.preventDefault();
         if (voiceModeRef.current && !armedRef.current) disableVoice();
         openBox();
@@ -570,6 +627,7 @@ export function AmbientHome({
   }
 
   function onHeroEnter() {
+    if (editorOpenRef.current) return;
     clearHideTimer();
     clearEnterTimer();
     enterTimer.current = window.setTimeout(() => {
@@ -580,6 +638,9 @@ export function AmbientHome({
 
   function onHeroLeave() {
     clearEnterTimer();
+    // The editor lives OUTSIDE the hero rect, so reaching into it fires the
+    // box's leave. Nothing about hover may close a surface you are writing in.
+    if (editorOpenRef.current) return;
     if (focusedRef.current) return;
     if (value.trim()) return;
     idleActive();
@@ -617,11 +678,90 @@ export function AmbientHome({
     inputRef.current?.blur();
   }
 
+  // ── the box's second size ──────────────────────────────────────────────────
+  //
+  // ONE composer in two sizes, so exactly one of them holds the draft at a time.
+  // Expanding hands the box's text to the editor and empties the box; collapsing
+  // mirrors the editor's text back. The rule that keeps them from disagreeing:
+  // the box's text WINS whenever it differs from the editor's, because it is the
+  // one you were last typing into. That is also what stops a stale rich draft
+  // resurrecting over something you typed after collapsing.
+  function openEditor() {
+    clearHideTimer();
+    clearEnterTimer();
+    const seed = textToParagraphs(value);
+    const ed = editorRef.current;
+    if (ed) {
+      if (value.trim() && value.trim() !== ed.getText().trim()) {
+        ed.commands.setContent(seed);
+      }
+    } else {
+      // First open — the editor mounts with this as its document.
+      setEditorSeed(seed);
+      setEditorMounted(true);
+    }
+    setValue("");
+    setBoxMode(true);
+    setEditorOpen(true);
+    editorOpenRef.current = true;
+    activeRef.current = 1;
+    inputRef.current?.blur();
+    // Two frames: the editor may be mounting this tick, and TipTap needs its
+    // view in the document before focus lands anywhere.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      editorRef.current?.commands.focus("end");
+    }));
+  }
+
+  // Escape (or a click on the void). NEVER destructive: the editor stays mounted
+  // holding whatever was written, and its plain text comes back into the box so
+  // the thought is still ON SCREEN rather than filed away behind a pill.
+  function collapseEditor({ focusBox = true }: { focusBox?: boolean } = {}) {
+    const ed = editorRef.current;
+    const text = ed ? ed.getText().trim() : "";
+    setEditorOpen(false);
+    editorOpenRef.current = false;
+    // The pill only claims a draft when the collapse was LOSSY — a heading, a
+    // list, an image. Plain prose comes back into the box intact, so flagging
+    // it there too would be a badge on something already on screen.
+    setEditorHasDraft(!!text && !!ed && hasRichContent(ed.getHTML()));
+    if (!text) {
+      closeBox();
+      idleActive();
+      return;
+    }
+    setValue(ed?.getText() ?? "");
+    setBoxMode(true);
+    // NOT when a surface caused the collapse: the box is behind that panel, and
+    // focusing it there is the same theft this collapse exists to prevent, just
+    // pointing the other way.
+    if (focusBox) requestAnimationFrame(() => inputRef.current?.focus());
+  }
+
+  function onEditorSubmitted(note: ApiNote | null) {
+    setEditorOpen(false);
+    editorOpenRef.current = false;
+    setEditorHasDraft(false);
+    closeBox();
+    idleActive();
+    flash(note ? "saved as a note" : "couldn't save that note");
+  }
+
+  // The box just consumed its text, and after a collapse that text IS the
+  // editor's draft mirrored back. Leaving it behind would keep the pill
+  // advertising a draft that has already been sent, and reopening would show
+  // it again as if it were unsaved.
+  function clearEditorDraft() {
+    editorRef.current?.commands.clearContent();
+    setEditorHasDraft(false);
+  }
+
   // Typed capture (voice off, or optional typing while voice on) — silent reply.
   function capture() {
     const text = value.trim();
     if (!text) return;
     closeBox();
+    clearEditorDraft();
     void runTurn(text, false);
   }
 
@@ -631,6 +771,7 @@ export function AmbientHome({
     const text = value.trim();
     if (!text) return;
     closeBox();
+    clearEditorDraft();
     const [first, ...restLines] = text.split("\n");
     try {
       await createNote("general", { title: first.slice(0, 120), content: restLines.join("\n") });
@@ -782,13 +923,26 @@ export function AmbientHome({
 
   // Any full-screen surface owns the void; the stage stands down under it.
   const covered = coveredBySurface || trackablesOpen || fillOpen || !!peekNote || needsWake;
-  // The stage yields to the capture box the moment it opens. It used to wait
-  // for the box to GROW past its resting bounds, which read as the box and the
-  // line briefly sharing the screen.
-  const stageHidden = covered || boxMode;
+
+  // A surface panel (notes, memories, the log matrix, a note peek) taking the
+  // screen has to fold the composer with it. Not cosmetic: the editor keeps
+  // FOCUS, so an unfolded one sits invisible behind an opaque panel eating every
+  // keystroke meant for the surface on top. Collapsing is the right verb rather
+  // than closing — it is non-destructive, so the draft is waiting when you come
+  // back to the home.
+  useEffect(() => {
+    if (covered && editorOpenRef.current) collapseEditor({ focusBox: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [covered]);
+
+  // Capturing DIMS the home, it no longer deletes it. The ladder (and the reason
+  // a covering surface is the only zero) lives in captureStates.ts.
+  const captureMode = captureState({ boxOpen: boxMode, editorOpen });
+  const stageOpacity = homeOpacity(captureMode, covered);
+  const stageLive = homeInteractive(captureMode, covered);
 
   function onRootDoubleClick(e: React.MouseEvent) {
-    if (boxMode || covered || logSheet) return;
+    if (boxMode || editorOpen || covered || logSheet) return;
     if ((e.target as HTMLElement).closest("button, textarea, input, a, [data-sticky], [data-chat-ribbon], [data-quickfind], [data-log-sheet]")) return;
     stickyRef.current?.createAt(e.clientX, e.clientY);
   }
@@ -809,7 +963,10 @@ export function AmbientHome({
           morphs into, so `/` and hover work exactly as before during a
           session. The session display fades out as the box opens. */}
       <MorphLine
-        boxMode={boxMode}
+        // The editor is the box at another size, so the stroke stays a rect for
+        // it — it eases out to the bigger outline instead of snapping back to a
+        // wave under a panel.
+        boxMode={boxMode || editorOpen}
         rect={rect}
         thinking={thinking}
         dimmed={trackablesOpen || fillOpen}
@@ -823,13 +980,29 @@ export function AmbientHome({
         activeRef={activeRef}
       />
 
-      <StickyLayer ref={stickyRef} vp={vp} center={{ cx: rect.cx, cy: rect.cy, w: boxW }} hidden={covered || logSheet} />
+      {/* Both take the same dim as the stage: they are home furniture, and a
+          sticky note at full brightness beside a dimmed TODAY would read as the
+          one thing being pointed at. */}
+      <StickyLayer
+        ref={stickyRef}
+        vp={vp}
+        center={{ cx: rect.cx, cy: rect.cy, w: boxW }}
+        hidden={covered || logSheet}
+        dim={stageOpacity}
+        inert={!stageLive}
+      />
 
       {/* Home furniture, same as the stickies: a pending-commitment card has
           nothing to do with notes/memories/calendar/the log sheet, and the
           panel slides in over a home that stays mounted. */}
       {!covered && !logSheet && (
-        <LimboCards items={limbo} total={limboTotal} onPromote={onPromote} onDismiss={onDismiss} />
+        <LimboCards
+          items={limbo}
+          total={limboTotal}
+          onPromote={onPromote}
+          onDismiss={onDismiss}
+          dim={stageOpacity}
+        />
       )}
 
 
@@ -841,11 +1014,16 @@ export function AmbientHome({
         onMouseLeave={onHeroLeave}
         style={{
           position: "absolute",
-          left: rect.cx - rect.w / 2,
-          top: rect.cy - boxH / 2,
-          width: rect.w,
+          // The hero stays the INPUT's rect even while the editor is open — the
+          // editor is its own element, so the box's height sync and the panel's
+          // grow animation never fight over the same node.
+          left: cx - boxW / 2,
+          top: cy - boxH / 2,
+          width: boxW,
           height: boxH,
           zIndex: 2,
+          // Nothing to hover while the editor has the centre.
+          pointerEvents: editorOpen ? "none" : "auto",
         }}
       >
         <textarea
@@ -866,54 +1044,97 @@ export function AmbientHome({
             position: "absolute", inset: 0, width: "100%", height: "100%", boxSizing: "border-box",
             resize: "none", outline: "none", border: "none", overflow: "hidden",
             fontFamily: FONT, fontSize: 16, lineHeight: 1.5, padding: "16px 22px",
-            borderRadius: rect.r, color: "rgb(var(--gooni-ink, 244 245 244))", caretColor: frostInk.accent,
+            borderRadius: 20, color: "rgb(var(--gooni-ink, 244 245 244))", caretColor: frostInk.accent,
             background: boxMode ? "color-mix(in srgb, rgb(var(--gooni-surf, 11 15 13)) 52%, transparent)" : "transparent",
             backdropFilter: boxMode ? "blur(16px)" : "none",
             WebkitBackdropFilter: boxMode ? "blur(16px)" : "none",
-            opacity: boxMode ? 1 : 0,
-            pointerEvents: boxMode ? "auto" : "none",
+            // Hands the centre over during the morph: the box fades out as the
+            // editor fades in, which is also what hides the two frost tints
+            // differing.
+            opacity: boxMode && !editorOpen ? 1 : 0,
+            pointerEvents: boxMode && !editorOpen ? "auto" : "none",
             transition: "opacity 200ms ease, background 220ms ease",
           }}
         />
-        {/* the note exit, discoverable but quiet — the box's other door */}
-        {boxMode && (
+        {/* The box's other door. It used to be the `⌘↵ note` HINT — a label for
+            a shortcut, which is the least useful thing a corner can hold: it
+            told you about the fast path and offered nothing to anyone who
+            wanted room to write. The shortcut is unchanged (⌘↵ in the box still
+            writes the note straight off), and the pill now buys the editor. */}
+        {boxMode && !editorOpen && (
           <button
-            onClick={() => void captureAsNote()}
-            title="⌘↵ — save as a note instead"
-            aria-label="Save as a note"
+            onClick={openEditor}
+            title={editorHasDraft
+              ? "Back to the note editor — it still holds formatting the box can't show"
+              : "Open the note editor — ⌘↵ saves straight away"}
+            aria-label="Open the note editor"
+            aria-expanded={editorOpen}
             style={{
               position: "absolute", right: 12, bottom: 10, zIndex: 1,
               display: "inline-flex", alignItems: "center", gap: 5,
-              border: "none", background: "transparent", padding: "2px 4px", cursor: "pointer",
-              fontFamily: FONT, fontSize: 10.5, color: ink(0.34),
+              borderRadius: 999, cursor: "pointer",
+              border: `1px solid ${editorHasDraft ? frostInk.accent : ink(0.14)}`,
+              // A pill, not a chip: it is the only control ON the box, and the
+              // box is not the centre's anchor — the wave is. Tint only, no
+              // fill, no shadow.
+              background: editorHasDraft ? "transparent" : ink(0.05),
+              padding: "3px 9px",
+              fontFamily: FONT, fontSize: 10.5, letterSpacing: 0.2,
+              color: editorHasDraft ? frostInk.accent : ink(0.42),
+              transition: "color 160ms ease, border-color 160ms ease, background 160ms ease",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = frostInk.accent; }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = editorHasDraft ? frostInk.accent : ink(0.42);
             }}
           >
             <StickyNote size={11} strokeWidth={1.8} />
-            ⌘↵ note
+            {editorHasDraft ? "note · draft" : "note"}
           </button>
         )}
       </div>
+
+      {/* The box at its other size. Outside the hero on purpose — see its own
+          file for why it is one object with the box rather than a summoned panel. */}
+      <CaptureEditor
+        open={editorOpen}
+        mounted={editorMounted}
+        left={cx - (editorOpen ? editorW : boxW) / 2}
+        top={cy - (editorOpen ? editorH : boxH) / 2}
+        width={editorOpen ? editorW : boxW}
+        height={editorOpen ? editorH : boxH}
+        radius={editorOpen ? 22 : 20}
+        initialContent={editorSeed}
+        onReady={onEditorReady}
+        onEscape={collapseEditor}
+        onSubmitted={onEditorSubmitted}
+      />
 
       {/* ── the stage: line · TODAY · streaks, each pinned to its own % ─────── */}
       <div
         style={{
           // pointerEvents NONE on the full-bleed layer, auto on the children
-          // that need it. The stage spans inset:0 ABOVE the hero zone, so a
-          // hit-testable stage swallowed the mouseenter that summons the
-          // capture box — hovering the wave did nothing at all.
-          position: "absolute", inset: 0, zIndex: 3, pointerEvents: "none",
-          opacity: stageHidden ? 0 : 1, transition: "opacity 220ms ease",
+          // that need it. The stage spans inset:0, so a hit-testable one
+          // swallowed the mouseenter that summons the capture box — hovering
+          // the wave did nothing at all.
+          //
+          // UNDER the capture box (z1, not z3) since the box stopped hiding it:
+          // a dimmed-but-present TODAY at z3 painted straight THROUGH the box
+          // and the note editor, which is text over text on the one surface
+          // that exists to be written in.
+          position: "absolute", inset: 0, zIndex: 1, pointerEvents: "none",
+          opacity: stageOpacity, transition: "opacity 260ms ease",
         }}
       >
         {/* Inside the stage, so it inherits the two rules every ambient
-            affordance needs: it fades with `stageHidden` while a surface
-            covers the home or the capture box is open, and it is
+            affordance needs: it dims with the stage while a surface covers
+            the home or the capture box is open, and it is
             pointer-transparent until it has something to be clicked. */}
         <div
           style={{
             position: "absolute", top: `${OBSERVATION_Y * 100}%`, left: "50%", transform: "translate(-50%, -50%)",
             width: SUBTITLE_W,
-            pointerEvents: stageHidden ? "none" : "auto",
+            pointerEvents: stageLive ? "auto" : "none",
           }}
         >
           <ProactiveLine />
@@ -936,7 +1157,7 @@ export function AmbientHome({
           style={{
             position: "absolute", top: `${TODAY_Y * 100}%`, left: "50%", transform: "translateX(-50%)",
             width: STAGE_W,
-            pointerEvents: stageHidden ? "none" : "auto",
+            pointerEvents: stageLive ? "auto" : "none",
           }}
         >
           <TodayList

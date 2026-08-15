@@ -50,6 +50,10 @@ export function MorphLine({
   const glowRef = useRef<SVGPathElement>(null);
   const morphRef = useRef(0);
   const hRef = useRef(rect.h);
+  // Width eases like height does. It only ever mattered once the box gained a
+  // SECOND size (the note editor): the box→editor grow changes both dimensions,
+  // and an eased height beside a snapped width reads as the outline tearing.
+  const wRef = useRef(rect.w);
   const reduce = useReducedMotion();
 
   // The line sets its own `stroke` each frame (JS, so no CSS var), so it can't
@@ -103,14 +107,16 @@ export function MorphLine({
 
       const r = rectRef.current;
       hRef.current += (r.h - hRef.current) * Math.min(1, dt * 8); // box height eases
+      wRef.current += (r.w - wRef.current) * Math.min(1, dt * 8); // …and its width
       const h = hRef.current;
+      const w = wRef.current;
 
       const breathe = 0.5 + 0.5 * Math.sin(t * 0.7);
       // rest peak ≈ (40+12)*0.8 ≈ 42 half-height, so the wave sits inside the
       // PEEK_H (104) box with margin — the box IS the wave's bounding rect.
       const amp = (40 + 12 * breathe) * (0.8 + e.cur * 0.6) * (1 + a.cur * 0.4) * (1 - m);
-      const W = Math.min(waveWidth, r.w * 1.05);
-      const rectPts = m > 0.001 ? roundedRectPoints(r.cx - r.w / 2, r.cy - h / 2, r.w, h, r.r, N) : null;
+      const W = Math.min(waveWidth, w * 1.05);
+      const rectPts = m > 0.001 ? roundedRectPoints(r.cx - w / 2, r.cy - h / 2, w, h, r.r, N) : null;
 
       // a bright bump that travels along the wave = the "thinking" indicator,
       // embedded in the line itself instead of separate dots

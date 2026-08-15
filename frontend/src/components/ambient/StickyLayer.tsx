@@ -60,8 +60,21 @@ interface Sticky {
 
 export const StickyLayer = forwardRef<
   StickyHandle,
-  { vp: { w: number; h: number }; center: { cx: number; cy: number; w: number }; hidden?: boolean }
->(function StickyLayer({ vp, center, hidden }, ref) {
+  {
+    vp: { w: number; h: number };
+    center: { cx: number; cy: number; w: number };
+    hidden?: boolean;
+    /**
+     * How much of the home is showing. Stickies are home furniture, so they
+     * dim with the stage while the capture box or its note editor has the
+     * screen — a lit sticky beside a dimmed TODAY reads as the one thing being
+     * pointed at.
+     */
+    dim?: number;
+    /** dimmed is backdrop: dragging a sticky mid-capture is a reach past the composer */
+    inert?: boolean;
+  }
+>(function StickyLayer({ vp, center, hidden, dim = 1, inert = false }, ref) {
   const [items, setItems] = useState<Sticky[]>([]);
   const [live, setLive] = useState<{ key: string; x: number; y: number } | null>(null);
   const [dragKey, setDragKey] = useState<string | null>(null);
@@ -295,7 +308,13 @@ export const StickyLayer = forwardRef<
   ];
 
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 7, pointerEvents: "none", display: hidden ? "none" : "block" }}>
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 7, pointerEvents: "none",
+        display: hidden ? "none" : "block",
+        opacity: dim, transition: "opacity 260ms ease",
+      }}
+    >
       {items.map((s) => {
         const [x, y] = posOf(s);
         const dragging = dragKey === s.key;
@@ -311,7 +330,10 @@ export const StickyLayer = forwardRef<
             onMouseLeave={() => setHoverKey((k) => (k === s.key ? null : k))}
             style={{
               position: "absolute", left: x, top: y, width: s.w, height: s.h,
-              pointerEvents: "auto", cursor: s.editing ? "text" : dragging ? "grabbing" : "grab",
+              // The layer is pointer-transparent and each note opts back in —
+              // so standing them down means NOT opting in, which is the one
+              // place `inert` can be expressed.
+              pointerEvents: inert ? "none" : "auto", cursor: s.editing ? "text" : dragging ? "grabbing" : "grab",
               ...frost.panel, borderRadius: 14,
               border: `1px solid rgb(var(--gooni-ink, 244 245 244) / ${s.editing ? 0.2 : 0.1})`,
               // Ring on drag, nothing at rest — see Widget.tsx (same call).
@@ -361,7 +383,7 @@ export const StickyLayer = forwardRef<
                 style={{
                   position: "absolute", top: 6, right: 6, width: 22, height: 22,
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  borderRadius: 7, border: "none", cursor: "pointer", pointerEvents: "auto",
+                  borderRadius: 7, border: "none", cursor: "pointer", pointerEvents: inert ? "none" : "auto",
                   background: "rgba(0,0,0,0.35)", color: "rgb(var(--gooni-ink, 244 245 244) / 0.6)",
                 }}
                 onMouseEnter={(e) => {
@@ -385,7 +407,7 @@ export const StickyLayer = forwardRef<
                 onPointerDown={(e) => onResizeDown(e, s, hd.dirX, hd.dirY)}
                 onPointerMove={onResizeMove}
                 onPointerUp={(e) => onResizeUp(e, s)}
-                style={{ position: "absolute", cursor: hd.cursor, pointerEvents: "auto", ...hd.style }}
+                style={{ position: "absolute", cursor: hd.cursor, pointerEvents: inert ? "none" : "auto", ...hd.style }}
               />
             ))}
           </div>
