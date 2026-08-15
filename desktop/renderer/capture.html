@@ -9,11 +9,26 @@
          no drop shadow. The 2026-08-02 pass took shadows off every floating
          thing on the home surface because a 60px black bloom is what made it
          read heavy — a summoned overlay should read as a seam, not a control. */
+      /* THEMED, because the overlay is a surface of the same app.
+         Every rule below reads these four channels and nothing else, so
+         following the app's theme is a variable swap rather than a second
+         stylesheet. `data-theme` is stamped on <html> by capture.js from the
+         theme the shell harvested out of the web app (see appearance.js);
+         DARK is the default so a first launch that has never seen the app
+         still renders the surface it was designed on.
+         Values mirror AMBIENT_PALETTES + FROST_INK_PALETTES in
+         frontend/src/stores/useGooniThemeStore.ts. */
       :root {
         --ink: 244 245 244;
         --surf: 11 15 13;
         --accent: 122 200 160;
         --warn: 226 180 110;
+      }
+      :root[data-theme="light"] {
+        --ink: 17 17 19;
+        --surf: 250 249 246;
+        --accent: 27 139 74;
+        --warn: 180 83 9;
       }
       * { box-sizing: border-box; }
       html, body {

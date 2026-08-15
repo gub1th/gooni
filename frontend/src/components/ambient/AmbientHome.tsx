@@ -85,7 +85,27 @@ const TODAY_Y = 0.66;
 // a ten-task day walks off the bottom and takes `+ add`, `N later` and the
 // capture hint with it. Reserve is: `+ add` + `N later` + the streak row + the
 // hint, all of which have to stay on screen at any list length.
-const ROWS_MAX = `calc(${(1 - TODAY_Y) * 100}vh - 152px)`;
+//
+// The FLOOR is what makes it survive a resized desktop window. This is a
+// fraction of the viewport minus a fixed reserve, so a short window drives it
+// toward zero and then past it: at 700px tall it is 86px, at 500 it is 18 —
+// TODAY, the primary content, clipped to a sliver by the same expression that
+// protects it at full height. The floor holds ~3 rows, which is enough for the
+// list to still be a list; the shell's own minimum window height (see
+// desktop/src/main.js) keeps the two ends of this from ever meeting.
+const ROWS_MIN_H = 108;
+const ROWS_MAX = `max(${ROWS_MIN_H}px, calc(${(1 - TODAY_Y) * 100}vh - 152px))`;
+// The stage's column width. It is centred on the viewport (the wave is the
+// anchor and Momentum centres on the window), so a plain viewport fraction
+// slides under the rail lane once the window is narrow enough — 84vw reaches
+// x=58 at a 720px window, and the rail owns everything up to 68. Subtracting a
+// fixed clearance instead keeps the same 80px gap at every width, and at the
+// default window size resolves to the identical 560px.
+const RAIL_CLEARANCE = 80;
+const STAGE_W = `min(560px, calc(100vw - ${RAIL_CLEARANCE * 2}px))`;
+// The subtitle + live transcript run wider than the stage on purpose; they get
+// the same clearance rule for the same reason.
+const SUBTITLE_W = `min(600px, calc(100vw - ${RAIL_CLEARANCE * 2}px))`;
 
 
 // Evaluated at MODULE scope, once per page load. It cannot go in a useState
@@ -881,7 +901,7 @@ export function AmbientHome({
         <div
           style={{
             position: "absolute", top: `${ACTIVITY_Y * 100}%`, left: "50%", transform: "translate(-50%, -50%)",
-            width: "min(560px, 84vw)",
+            width: STAGE_W,
           }}
         >
           <CurrentActivityLine />
@@ -890,7 +910,7 @@ export function AmbientHome({
         <div
           style={{
             position: "absolute", top: `${TODAY_Y * 100}%`, left: "50%", transform: "translateX(-50%)",
-            width: "min(560px, 84vw)",
+            width: STAGE_W,
             pointerEvents: stageHidden ? "none" : "auto",
           }}
         >
@@ -940,7 +960,7 @@ export function AmbientHome({
           style={{
             position: "absolute",
             left: "50%", top: rect.cy + PEEK_H / 2 + 20, transform: "translateX(-50%)",
-            width: "min(600px, 86vw)", textAlign: "center", zIndex: 5, pointerEvents: "none",
+            width: SUBTITLE_W, textAlign: "center", zIndex: 5, pointerEvents: "none",
             fontFamily: FONT, fontSize: 15.5, lineHeight: 1.55, fontStyle: "italic",
             color: ink(0.5),
           }}
@@ -955,7 +975,7 @@ export function AmbientHome({
           style={{
             position: "absolute",
             left: "50%", top: rect.cy + PEEK_H / 2 + 20, transform: "translateX(-50%)",
-            width: "min(600px, 86vw)", textAlign: "center", zIndex: 5,
+            width: SUBTITLE_W, textAlign: "center", zIndex: 5,
             pointerEvents: "none", fontFamily: FONT, fontSize: 15.5, lineHeight: 1.55,
             color: ink(0.86),
             opacity: replyShown ? 1 : 0, transition: "opacity 420ms ease",

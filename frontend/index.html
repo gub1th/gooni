@@ -24,13 +24,40 @@
         padding: 0;
         height: 100%;
       }
-      /* Actual background is set dynamically by the theme store (default = cool). */
-      html, body { background: #FAFAFA; }
+      /* The ground is the ambient VOID, and it has to be right on the FIRST
+         paint — not once React has mounted and ThemeVarSync has run. In a
+         browser tab a wrong ground is a blink; in the desktop shell it is a
+         full-window white flash on every launch of a dark-mode app, and the
+         shell's own window backgroundColor makes it a black one for a
+         light-mode app. `--gooni-void` is resolved by the boot script below
+         and then owned by the theme store as usual. */
+      html, body { background: var(--gooni-void, #f7f6f2); }
       body {
         overscroll-behavior: none;
         -webkit-font-smoothing: antialiased;
       }
     </style>
+    <script>
+      // Boot paint. Runs before the bundle, so the ground is correct in the
+      // very first frame. It reads the SAME key the theme store persists
+      // (`gooni_theme`, JSON-encoded via LocalStorageService — hence the
+      // quote-stripping) and the SAME two void colours as AMBIENT_PALETTES in
+      // src/stores/useGooniThemeStore.ts. Duplicated on purpose: nothing from
+      // the bundle can run this early. Anything unreadable falls through to the
+      // store's own default, light.
+      (function () {
+        try {
+          var raw = window.localStorage.getItem("gooni_theme") || "";
+          var theme = raw.replace(/^"|"$/g, "").toLowerCase() === "dark" ? "dark" : "light";
+          document.documentElement.style.setProperty(
+            "--gooni-void",
+            theme === "dark" ? "#000000" : "#f7f6f2"
+          );
+        } catch (e) {
+          /* private mode / storage blocked — the CSS fallback is the answer */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

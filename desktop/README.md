@@ -244,6 +244,50 @@ Not notarized and not installable on other machines without clicking through
 Gatekeeper; that (a paid Developer ID) is still out of scope. Self-signing is
 enough for the shell to eventually own the camera grant directly instead of
 leaving it to the sidecar.
+## The window
+
+`titleBarStyle: hiddenInset` hides the title bar and hands the page the whole
+window, traffic lights floating over it. The part that is easy to miss: it also
+leaves the OS **nothing to drag the window by**. Web content covers the title
+bar, so unless the page volunteers a drag region the window cannot be moved at
+all — which is what this shipped with.
+
+The frontend supplies it. The preload exposes `__GOONI_DESKTOP__`, and
+`frontend/src/services/desktop.ts` emits `-webkit-app-region` only when that is
+present — a positive signal from the shell rather than a user-agent sniff,
+because the same deployed bundle also serves a browser tab and the extension's
+new-tab frame, where the rule is meaningless and the mistake would be silent.
+The app's sticky header is the handle; every control in it opts back out with
+`no-drag`, since a drag region swallows clicks.
+
+**Minimum size** is 880×640. The ambient home pins each group to a FRACTION of
+the viewport and gives the task list what is left over minus fixed furniture, so
+a short enough window drives that remainder to nothing and TODAY — the surface's
+primary content — clips to a sliver. The frontend has its own floor for the same
+reason; a resizable window with no minimum is one you drag into a broken layout
+by accident exactly once, and then live with.
+
+**Launch does not flash.** Three separate causes, worth keeping apart:
+
+- the window was shown at `whenReady`, with the page still loading — an empty
+  rectangle, on screen longest over a slow network. The FIRST show now waits for
+  `ready-to-show`, with a deadline so a page that never paints cannot lock you
+  out, and a failed load counts as painted because the failure page **is** the
+  thing to show;
+- `backgroundColor` — the only colour on screen until the page paints — was a
+  hardcoded black under an app that defaults to **light**. It is fixed at window
+  construction, so there is no asking the page: `appearance.js` remembers the
+  theme harvested from the app's own `localStorage`, exactly like the token, and
+  the next launch opens on the ground the app is about to paint. First ever
+  launch has nothing to remember and uses the frontend's default;
+- the frontend's `index.html` hardcoded a near-white ground, which it painted
+  before React could correct it. It now resolves the persisted theme in an
+  inline boot script.
+
+The **capture overlay** follows the app's theme through the same harvest. Its
+stylesheet reads four colour channels and nothing else, so this is a variable
+swap rather than a second stylesheet; dark stays the default, so a first launch
+that has never seen the app still renders the surface it was designed on.
 
 ## Not in v1
 
@@ -265,7 +309,9 @@ src/appfocus.js        the frontmost-app interval state machine  (tested)
 src/appreporter.js     buffer + retain-by-default delivery       (tested)
 src/appsensor.js       the sensor loop that joins the three      (tested)
 src/jsonstore.js       durable state: atomic write, loud loss    (tested)
-src/preload-app.js     injects __GOONI_API_URL__, harvests the token
+src/appearance.js      the remembered theme + its void colours    (tested)
+src/preload-app.js     injects __GOONI_API_URL__ + __GOONI_DESKTOP__,
+                       harvests the token and the theme
 src/preload-capture.js the narrow capture bridge (no token, no fetch)
 renderer/capture.*     the overlay
 scripts/make-tray-icon.js  regenerates assets/trayTemplate*.png

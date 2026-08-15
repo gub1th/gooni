@@ -42,7 +42,19 @@ function showReply(text, className = "") {
   fit();
 }
 
+/**
+ * Stamp the theme on <html>, where capture.html's `:root[data-theme=…]` block
+ * picks it up. Only "light" is stamped: dark is the stylesheet's own default,
+ * so an unknown or missing value lands on the surface this was designed for
+ * rather than on a half-applied one.
+ */
+function applyTheme(theme) {
+  if (theme === "light") document.documentElement.setAttribute("data-theme", "light");
+  else document.documentElement.removeAttribute("data-theme");
+}
+
 function applyState(state) {
+  applyTheme(state.theme);
   target.textContent = host(state.apiUrl);
   const signedIn = Boolean(state.signedIn);
   banner.hidden = signedIn;
@@ -101,6 +113,11 @@ window.gooniCapture.onOpened((state) => {
 window.gooniCapture.onClosed(() => {
   showReply("");
 });
+
+// A theme flipped in the app window while the overlay is hidden must land
+// before the next summon, not on the one after it — the overlay is pre-loaded
+// and long-lived, so it can only ever learn this by being told.
+window.gooniCapture.onTheme?.(applyTheme);
 
 window.gooniCapture.state().then(applyState);
 fit();
