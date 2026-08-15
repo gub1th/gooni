@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.241.0 — 2026-08-15 (minor)
+
+- feat(ambient): capture dims the home instead of deleting it; note pill expands the box into the real editor (#487)
+
 ## 0.240.1 — 2026-08-15 (patch)
 
 - fix(home): icon+pill on the activity line, hide undated, drop panel edge (#486)
