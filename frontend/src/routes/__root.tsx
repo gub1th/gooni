@@ -22,6 +22,7 @@ import { Sidebar } from "../components/notes/Sidebar";
 // ONE app nav: the persistent IconRail pill. The hover-summoned SummonedNav it
 // replaced was deleted with the widget system it hosted.
 import { IconRail, RAIL_LANE } from "../components/ambient/IconRail";
+import { FooterIsland } from "../components/shell/FooterIsland";
 import { useFocusCamControl } from "../components/focus/useFocusCamControl";
 import { SurfacePanel } from "../components/shell/SurfacePanel";
 import { AppHeader, HEADER_H } from "../components/shell/AppHeader";
@@ -462,7 +463,12 @@ function AppShell() {
           <Outlet />
         </div>
         </SurfaceHost>
-        {!isImmersive && <IconRail />}
+        {/* IconRail is the APP-level nav. Notes carries its own primary nav
+            (Sidebar / CollapsedSidebar) with a Home button already in its
+            header, so showing both was a redundant second rail eating the
+            same left edge — hidden here whenever notes owns the surface. */}
+        {!isImmersive && !isNotes && <IconRail />}
+        {!isImmersive && <FooterIsland />}
         <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
         {/* ONE sticky header, on every non-immersive surface — date, quickfind,
             mic, log, theme. It replaces four separately-positioned fixed

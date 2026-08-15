@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
-  Radio, FileText, Brain, LayoutGrid, CalendarDays,
+  FileText, Brain, LayoutGrid, CalendarDays,
   SearchCheck, type LucideIcon,
 } from "lucide-react";
 import { FONT, frost, z } from "../../ui";
+import { GooniLogo } from "../GooniLogo";
 
 // THE app nav — a persistent centered pill of icons at the left edge (NOT a
 // full-height strip): always visible so nav is discoverable, but light enough
@@ -16,7 +17,17 @@ import { FONT, frost, z } from "../../ui";
 // the widget system; `Trackables` (the log matrix) replaced the calendar one.
 
 const INK = "rgb(var(--gooni-ink, 244 245 244)";
-const ACCENT = "rgba(74,222,128,0.9)";
+
+// Distinct hue per item (Bear/Notion-style sidebar identity colors) instead
+// of one flat accent green for everything — "home" carries no tint since
+// it renders the mascot's own colors instead of a lucide icon.
+const ICON_TINT = {
+  Trackables: "#4ADE80", // green — matches the app's accent, trackables=logging
+  Calendar:   "#F59E0B", // amber
+  Notes:      "#3B82F6", // blue
+  Memories:   "#A78BFA", // violet
+  Audit:      "#22D3EE", // cyan
+} as const;
 
 /**
  * The lane the rail owns at the left edge — the shell reserves it, the header
@@ -32,7 +43,9 @@ export const RAIL_LANE = 68;
 
 interface NavItem {
   label: string;
-  Icon: LucideIcon;
+  Icon?: LucideIcon;
+  color?: string;
+  mascot?: boolean; // Home renders the Gooni character instead of a lucide glyph
   go: () => void;
 }
 
@@ -44,12 +57,12 @@ export function IconRail() {
     navigate({ to: "/", search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: undefined, trackables: undefined, calendar: undefined, ...search } });
 
   const items: NavItem[] = [
-    { label: "Home", Icon: Radio, go: () => nav({}) },
-    { label: "Trackables", Icon: LayoutGrid, go: () => nav({ trackables: true }) },
-    { label: "Calendar", Icon: CalendarDays, go: () => nav({ calendar: true }) },
-    { label: "Notes", Icon: FileText, go: () => nav({ view: "notes" }) },
-    { label: "Memories", Icon: Brain, go: () => nav({ view: "memories" }) },
-    { label: "Audit", Icon: SearchCheck, go: () => nav({ audit: true }) },
+    { label: "Home", mascot: true, go: () => nav({}) },
+    { label: "Trackables", Icon: LayoutGrid, color: ICON_TINT.Trackables, go: () => nav({ trackables: true }) },
+    { label: "Calendar", Icon: CalendarDays, color: ICON_TINT.Calendar, go: () => nav({ calendar: true }) },
+    { label: "Notes", Icon: FileText, color: ICON_TINT.Notes, go: () => nav({ view: "notes" }) },
+    { label: "Memories", Icon: Brain, color: ICON_TINT.Memories, go: () => nav({ view: "memories" }) },
+    { label: "Audit", Icon: SearchCheck, color: ICON_TINT.Audit, go: () => nav({ audit: true }) },
   ];
 
   return (
@@ -80,7 +93,9 @@ export function IconRail() {
               transition: "background 140ms ease",
             }}
           >
-            <it.Icon size={18} strokeWidth={1.9} color={ACCENT} />
+            {it.mascot
+              ? <GooniLogo size={20} />
+              : it.Icon && <it.Icon size={18} strokeWidth={1.9} color={it.color} />}
 
             {/* label flyout — overlay to the right, no content push */}
             <span

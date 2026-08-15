@@ -8,7 +8,7 @@ import { useDraftVersionStore } from "../../stores/useDraftVersionStore";
 import { useOrderingStore, applyOrder } from "../../stores/useOrderingStore";
 import {
   PenLine, FileText,
-  Globe, Plug, PanelLeftClose,
+  PanelLeftClose, ChevronDown, ChevronUp,
   Pin as PinIcon, Tag as TagIcon,
 } from "lucide-react";
 import { GooniLogo } from "../GooniLogo";
@@ -27,25 +27,10 @@ const ICON_TINT = {
   settings: "#64748B",   // slate
 } as const;
 
-const sidebarFooterBtn: React.CSSProperties = {
-  flex: 1,
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: 5,
-  height: 28,
-  padding: "0 8px",
-  borderRadius: 6,
-  border: "none",
-  background: "transparent",
-  color: "var(--gooni-text, #3C3C43)",
-  fontSize: 11,
-  fontWeight: 500,
-  fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-  cursor: "pointer",
-  transition: "background 0.12s",
-  outline: "none",
-};
+// Drafts / Tags lists are capped at this many rows before an expand toggle
+// appears — an uncapped drafts list can run 20+ items deep.
+const CAPPED_LIST_SIZE = 5;
+const EXPANDED_LIST_MAX_HEIGHT = 220;
 
 // Sidebar = the NOTES BROWSER (pinned/drafts/recents/tags). App-level nav
 // lives in IconRail (one rail, every surface) since the unification pass.
@@ -212,6 +197,31 @@ function SidebarChildRow({
   );
 }
 
+// ExpandToggle — "Show all N" / "Show less" row under a capped list.
+function ExpandToggle({ expanded, hiddenCount, onClick }: { expanded: boolean; hiddenCount: number; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: "flex", alignItems: "center", gap: 4,
+        width: "calc(100% - 24px)", margin: "1px 0 2px 38px",
+        padding: "4px 6px",
+        background: "transparent", border: "none", borderRadius: 5,
+        cursor: "pointer", textAlign: "left",
+        fontSize: 11.5, fontWeight: 500,
+        color: "var(--gooni-muted, #8E8E93)",
+        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+        transition: "color 0.12s",
+      }}
+      onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-text, #1C1C1E)")}
+      onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-muted, #8E8E93)")}
+    >
+      {expanded ? <ChevronUp size={12} strokeWidth={2} /> : <ChevronDown size={12} strokeWidth={2} />}
+      {expanded ? "Show less" : `Show all (${hiddenCount} more)`}
+    </button>
+  );
+}
+
 export function Sidebar({ isNotes, showCompose, onLogoClick, onAllNotes, onSelectNote, onCompose, onClose }: SidebarProps) {
   const navigate = useNavigate();
   const { selectSpace, loadNotes, selectNote, activeNoteId } = useNotesContentStore();
@@ -222,6 +232,9 @@ export function Sidebar({ isNotes, showCompose, onLogoClick, onAllNotes, onSelec
   // Distinct tag set across the whole corpus — derived from the flat
   // GET /notes list (notes carry `tags: string[]`).
   const [allTags, setAllTags] = useState<string[]>([]);
+
+  const [draftsExpanded, setDraftsExpanded] = useState(false);
+  const [tagsExpanded, setTagsExpanded] = useState(false);
 
   const pinnedVersion = usePinnedVersionStore((s) => s.version);
   const draftVersion = useDraftVersionStore((s) => s.version);
@@ -449,16 +462,6 @@ export function Sidebar({ isNotes, showCompose, onLogoClick, onAllNotes, onSelec
                 }
               />
             ))}
-            {draftNotes.length > 0 && <GroupLabel label="Drafts" />}
-            {draftNotes.map((note) => (
-              <SidebarChildRow
-                key={`draft-${note.id}`}
-                label={displayTitle(note)}
-                icon={<PenLine size={11} strokeWidth={2} color={ICON_TINT.draft} />}
-                selected={activeNoteId === note.id}
-                onClick={() => handleSelectNote(note)}
-              />
-            ))}
             {recentTop.length > 0 && <GroupLabel label="Recent" />}
             {recentTop.map((note) => (
               <SidebarChildRow
@@ -468,6 +471,27 @@ export function Sidebar({ isNotes, showCompose, onLogoClick, onAllNotes, onSelec
                 onClick={() => handleSelectNote(note)}
               />
             ))}
+            {draftNotes.length > 0 && <GroupLabel label="Drafts" />}
+            {draftNotes.length > 0 && (
+              <div style={draftsExpanded ? { maxHeight: EXPANDED_LIST_MAX_HEIGHT, overflowY: "auto" } : undefined}>
+                {(draftsExpanded ? draftNotes : draftNotes.slice(0, CAPPED_LIST_SIZE)).map((note) => (
+                  <SidebarChildRow
+                    key={`draft-${note.id}`}
+                    label={displayTitle(note)}
+                    icon={<PenLine size={11} strokeWidth={2} color={ICON_TINT.draft} />}
+                    selected={activeNoteId === note.id}
+                    onClick={() => handleSelectNote(note)}
+                  />
+                ))}
+              </div>
+            )}
+            {draftNotes.length > CAPPED_LIST_SIZE && (
+              <ExpandToggle
+                expanded={draftsExpanded}
+                hiddenCount={draftNotes.length - CAPPED_LIST_SIZE}
+                onClick={() => setDraftsExpanded((v) => !v)}
+              />
+            )}
           </SidebarSection>
 
           {allTags.length > 0 && (
@@ -484,50 +508,28 @@ export function Sidebar({ isNotes, showCompose, onLogoClick, onAllNotes, onSelec
                 iconColor={ICON_TINT.tags}
                 onHeaderClick={() => { /* label-only header */ }}
               >
-                {allTags.map((tag) => (
-                  <SidebarChildRow
-                    key={`tag-${tag}`}
-                    label={`#${tag}`}
-                    onClick={() => handleTagClick(tag)}
+                <div style={tagsExpanded ? { maxHeight: EXPANDED_LIST_MAX_HEIGHT, overflowY: "auto" } : undefined}>
+                  {(tagsExpanded ? allTags : allTags.slice(0, CAPPED_LIST_SIZE)).map((tag) => (
+                    <SidebarChildRow
+                      key={`tag-${tag}`}
+                      label={`#${tag}`}
+                      onClick={() => handleTagClick(tag)}
+                    />
+                  ))}
+                </div>
+                {allTags.length > CAPPED_LIST_SIZE && (
+                  <ExpandToggle
+                    expanded={tagsExpanded}
+                    hiddenCount={allTags.length - CAPPED_LIST_SIZE}
+                    onClick={() => setTagsExpanded((v) => !v)}
                   />
-                ))}
+                )}
               </SidebarSection>
             </>
           )}
 
           <div style={{ flex: 1, minHeight: 20 }} />
 
-        </div>
-
-        {/* Footer — Public profile + MCP connector. Side-by-side pills. Lives
-            outside the scrollable area so they're always visible at sidebar
-            bottom. */}
-        <div style={{
-          display: "flex", gap: 6, padding: "8px 8px 10px",
-          borderTop: "1px solid rgb(var(--gooni-tint, 0 0 0) / 0.06)", flexShrink: 0,
-        }}>
-          <button
-            onClick={() => navigate({ to: "/public/notes" })}
-            title="Public profile (your notes list)"
-            aria-label="Public profile"
-            style={sidebarFooterBtn}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgb(var(--gooni-tint, 0 0 0) / 0.06)")}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
-          >
-            <Globe size={13} strokeWidth={1.7} />
-            <span>Public</span>
-          </button>
-          <button
-            onClick={() => navigate({ to: "/public/mcp" })}
-            title="MCP — public connector page"
-            aria-label="MCP"
-            style={sidebarFooterBtn}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgb(var(--gooni-tint, 0 0 0) / 0.06)")}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
-          >
-            <Plug size={13} strokeWidth={1.7} />
-            <span>MCP</span>
-          </button>
         </div>
       </div>
 
