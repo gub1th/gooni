@@ -23,6 +23,7 @@ from .prompt_blocks import (
     ENTRY_SUMMARIZE_THRESHOLD,
     OBJECT_KINDS_BLOCK,
     _build_ack,
+    _build_overlay_block,
     _build_state_block,
     _build_just_extracted_block,
     _build_time_block,
@@ -672,7 +673,8 @@ class Orchestrator:
         - static_context = byte-stable identity (PERSONA + OBJECT_KINDS) for
           the cached prompt prefix (see B1 in prompts.system_prompt).
         - dynamic_context = the volatile per-turn blocks (memory, bot
-          delivery mechanics, state, note, focus) — never cacheable.
+          delivery mechanics, state, ranked overlay, note, focus) — never
+          cacheable.
 
         Records the memory-recall and master-prompt trace steps.
         """
@@ -710,7 +712,9 @@ class Orchestrator:
         # channel — web + bots — enforces them. This block carries only:
         # bubble count + blank-line splitting (split_for_bots regex needs
         # explicit blank-line separators) + the "context blocks are private"
-        # rule (those blocks are bot-only, so this rule is too).
+        # rule. That rule stays here even though the blocks it names now
+        # ride on every channel: echoing a bracketed block into a chat
+        # BUBBLE is the bot-shaped failure, and web has never done it.
         cadence_block = ""
         if source != "web":
             cadence_block = (
@@ -732,7 +736,8 @@ class Orchestrator:
                 "unreadable (grooming flow, full todo dump on request). "
                 "When in doubt: prose.\n"
                 "- BLOCK CONTENT IS PRIVATE: the [your state right now], "
-                "[current time], and [just extracted…] blocks are CONTEXT "
+                "[what matters right now…], [current time], and [just "
+                "extracted…] blocks are CONTEXT "
                 "for you, not lines to echo back. Never paste rule text "
                 "(\"make explanations shorter\") or block headers into your "
                 "reply. Use the info, don't copy it."
@@ -757,6 +762,20 @@ class Orchestrator:
             time_block = _build_time_block(db)
         except Exception as e:
             print(f"[time_block] build failed: {e}")
+
+        # The ranked action horizon + today's trackable fold. Every source,
+        # for the same reason state_block above is: web has UI showing the
+        # raw rows, but the UI isn't in the MODEL's context, so without this
+        # block web chat answers "what should I focus on?" from vibes.
+        # state_block lists what's open; this one RANKS it and says why —
+        # and it's the only surface carrying today's trackable TARGETS.
+        # Deterministic (overlay_service does no LLM work) and bounded by
+        # the caps in prompt_blocks, so it's cheap to pay for every turn.
+        overlay_block = ""
+        try:
+            overlay_block = _build_overlay_block(db)
+        except Exception as e:
+            print(f"[overlay_block] build failed: {e}")
 
         # ReAct PLAN step REMOVED (audit 2026-06-10). It was a serial
         # gpt-4o-mini call whose state_summary arg was hardcoded "" — the
@@ -809,6 +828,7 @@ class Orchestrator:
             cadence_block,
             time_block,
             state_block,
+            overlay_block,
             just_extracted_block,
             rollup_block,
             memory_context,
