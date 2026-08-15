@@ -21,7 +21,11 @@
     "mac": {
       "category": "public.app-category.productivity",
       "target": "dir",
-      "identity": null
+      "identity": "Gooni Dev Signing",
+      "type": "development",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "notarize": false
     }
   }
 }
