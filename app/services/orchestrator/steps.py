@@ -2,22 +2,24 @@ import json
 import re
 
 from ...common import WRITE_CLAIM_RE
-from ...db.models import ToolCall as ToolCallModel
 from ...llm.client import llm_client
+from .write_ledger import WriteLedger
 
 
-_VERIFY_PROMPT = """Compare this assistant reply against the actual tool audit. Did the reply make a CONCRETE state-changing claim that the audit doesn't back?
+_VERIFY_PROMPT = """Compare this assistant reply against the ledger of what the turn ACTUALLY wrote. Did the reply make a CONCRETE state-changing claim the ledger doesn't back?
 
 USER ASKED: {user_msg}
 
 DRAFT REPLY: {draft}
 
-TOOLS ACTUALLY CALLED THIS TURN (status='done' means action succeeded):
+WRITE LEDGER FOR THIS TURN — every write BOTH writers performed. `[router]`
+lines ran upstream of the reply, `[tool]` lines ran inside it. A line with no
+parenthesised note LANDED; any parenthesised note means it did NOT:
 {audit}
 
 Return strict JSON. No prose, no markdown fence.
 
-{{"ok": true|false, "critique": "if not ok, quote the EXACT unbacked phrase from the draft and name the missing tool (one sentence); else null"}}
+{{"ok": true|false, "critique": "if not ok, quote the EXACT unbacked phrase from the draft and name what is missing from the ledger (one sentence); else null"}}
 
 Rules — be CONSERVATIVE (default ok=true):
 - ok=false ONLY when the draft contains an EXPLICIT past-tense state-changing
@@ -31,12 +33,25 @@ Rules — be CONSERVATIVE (default ok=true):
     "I can't track that as a habit / I don't have a tool for X / loosely
     remembered, not formally tracked / only in conversation context / not
     durable / I'd need a tool for that / no recurring reminder support"
-- ROUTER-LAYER CLAIMS ok=true: the orchestrator router fires promise/feature/
-  tone hooks UPSTREAM of the chat model. If the draft says "captured" /
-  "logged as a feature request" / "added that promise" without an explicit
-  chat-side tool call, it's still ACCURATE — the router did it. ok=true.
+- THE LEDGER IS THE WHOLE ANSWER ON FACT-OF-ACTION. The router fires
+  promise/feature/tone hooks upstream of the reply, so a claim CAN be backed
+  with no tool call at all — but only by a `[router]` line that is actually
+  listed above. A router-flavoured VERB ("captured" / "logged as a feature
+  request" / "added that promise") is NOT itself evidence that the router
+  ran. Look it up in the ledger; if no line backs it, ok=false.
+- A NOTED line backs NOTHING. Specifically:
+    "NOT WRITTEN — noticed only" = the router flagged a commitment for review
+      and deliberately created NO row. "added/tracked that promise" off one of
+      these is ok=false; "i see the commitment" / "flagged it for you" is fine.
+    "queued, unconfirmed" = dispatched off-thread; the turn cannot know it
+      landed, so it does not back "saved it".
+    "read-only" = the tool only read. "FAILED" = it did not land.
+- The backing write must be about the CLAIMED OBJECT. Writes to unrelated
+  objects do not launder a claim: if the draft says "logged that feature
+  request" and the only landed line is a trackable entry, ok=false. When the
+  ledger is ambiguous about which object a line touched, default ok=true.
 - Tone, length, helpfulness are NEVER in scope here. Only fact-of-action.
-- Empty audit + no action-claim = ok=true (default).
+- Empty ledger + no action-claim = ok=true (default).
 - Critique must be CONCRETE: include the verbatim sloppy phrase. Vague
   critiques like "may be misleading" or "could be clearer" — emit ok=true.
 """
@@ -50,62 +65,37 @@ Rules — be CONSERVATIVE (default ok=true):
 # one opinion.
 _UNBACKED_CLAIM_RE = WRITE_CLAIM_RE
 
-# Read-only CHAT-registry tools whose presence in the audit doesn't justify
-# a "tracked/saved" claim. Must track app/tools/__init__.py registry names —
-# the previous set was copied from the MCP surface (~15 nonexistent names,
-# 7 real read tools missing), which let read-only turns pass as writes.
-_READ_ONLY_TOOLS = {
-    "list_recent_notes", "read_note", "find_note", "search_notes",
-    "list_promises", "read_trackable",
-    "web_search", "fetch_url",
-    "check_calendar_busy", "list_upcoming_events",
-}
 
-def _deterministic_unbacked_check(
-    *,
-    draft: str,
-    captured_features: list[dict],
-    captured_promises: list[dict],
-    resolved_promises: list[dict] | None = None,
-    tool_call_ids: list[int],
-    db,
-) -> str | None:
+def _deterministic_unbacked_check(*, draft: str, ledger: WriteLedger) -> str | None:
     """Return a critique string if the draft claims a persisted write that
     nothing in this turn actually backs. Returns None when the draft is
-    clean OR a real write exists.
+    clean OR at least one real write exists.
 
     Hard rail backstop — runs before the LLM verifier so the regen path
     fires deterministically on the leetcode-class miss.
+
+    This rail is deliberately OBJECT-BLIND: any landed write suppresses it,
+    because a deterministic verb→object matcher would false-positive on
+    ordinary paraphrase and this rail overrides the LLM verifier outright.
+    Matching the claim to the RIGHT write is the verifier's job — which is
+    what it can finally do now that it is shown the ledger instead of being
+    told to trust every router-shaped verb on sight.
     """
     if not draft:
-        return None
-    # Router-layer writes back any "tracked"/"logged" claim — Promise /
-    # Feature rows landed (or a promise resolved kept/broken) even when no
-    # chat tool fired. Trackable logging is NOT here anymore: it's an explicit
-    # log_trackable_entry tool call, so its "logged X" claim is backed by the
-    # non-read-only tool-call check below.
-    if captured_features or captured_promises or resolved_promises:
         return None
     m = _UNBACKED_CLAIM_RE.search(draft)
     if not m:
         return None
-    # Any state-changing chat tool call this turn also backs the claim.
-    # Filter out read-only tools — they don't justify "tracked/saved".
-    if tool_call_ids:
-        try:
-            rows = (
-                db.query(ToolCallModel)
-                .filter(ToolCallModel.id.in_(tool_call_ids))
-                .all()
-            )
-            for r in rows:
-                if r.status != "done":
-                    continue
-                if (r.tool_name or "") not in _READ_ONLY_TOOLS:
-                    return None
-        except Exception as e:
-            print(f"[unbacked_check] audit read failed: {e}")
-            return None
+    # Fail OPEN when the tool audit couldn't be read — an unreadable audit is
+    # not evidence that the draft lied.
+    if not ledger.audit_readable:
+        return None
+    # Any landed write — router capture OR non-read-only chat tool — backs the
+    # claim here. Glow annotations, queued off-thread preferences and failed
+    # writes are in the ledger but do NOT count: `backs_a_claim` is what draws
+    # that line, in one place, for both rails.
+    if ledger.backing_writes():
+        return None
     return (
         f'reply contains "{m.group(0)}" claim but nothing was persisted '
         f"this turn — no router-layer captures and no state-changing tool "
@@ -140,28 +130,22 @@ def _strip_memory_anchors(text: str) -> str:
 def _run_verify(
     draft: str,
     user_msg: str,
-    tool_call_ids: list[int],
-    db,
+    ledger: WriteLedger,
 ) -> tuple[bool, str]:
-    """Post-reply verify against ToolCall audit. Returns (ok, critique).
-    Fail-open on any error — never break the chat path. ok=True means
-    ship as-is; ok=False + critique means regenerate w/ correction.
+    """Post-reply verify against the turn's write ledger. Returns
+    (ok, critique). Fail-open on any error — never break the chat path.
+    ok=True means ship as-is; ok=False + critique means regenerate w/
+    correction.
+
+    Takes the ledger rather than raw tool-call ids on purpose: the router
+    writes upstream of the model and leaves no ToolCall row, so a verifier
+    shown only the tool audit could never confirm a router claim — which is
+    how it came to be told to trust them all unconditionally instead.
     """
     if not draft:
         return True, ""
     try:
-        rows: list[ToolCallModel] = []
-        if tool_call_ids:
-            rows = (
-                db.query(ToolCallModel)
-                .filter(ToolCallModel.id.in_(tool_call_ids))
-                .all()
-            )
-        audit_lines = [
-            f"- {r.tool_name} [{r.status}]" + (f" error={r.error[:80]}" if r.error else "")
-            for r in rows
-        ]
-        audit_block = "\n".join(audit_lines) if audit_lines else "(no tools called)"
+        audit_block = ledger.render()
         prompt = _VERIFY_PROMPT.format(
             user_msg=(user_msg or "")[:600],
             draft=(draft or "")[:1500],
