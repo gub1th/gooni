@@ -372,6 +372,14 @@ class Settings(Base):
     #   awake     — Gooni up behind the desk, still no data
     #   dash      — the dashboard, summoned deliberately (desk button)
     display = Column(Text, nullable=True)
+    # The proactive layer's runtime kill switch (see services/proactive_service).
+    # Settings-not-env on purpose: this is the knob you want to reach in seconds
+    # from the UI when the loop starts saying something stupid, and this table
+    # exists for exactly "runtime toggling without a redeploy". The env var
+    # GOONI_PROACTIVE_DISABLED still wins over it — a prod stop must not need a
+    # database write. Defaults ON: a proactive layer nobody switches on is never
+    # evaluated, which is the same non-feature with a better excuse.
+    proactive_enabled = Column(Boolean, nullable=False, default=True)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
@@ -1035,3 +1043,75 @@ class AppInterval(Base):
 
 
 Index("ix_app_intervals_app_started", AppInterval.app, AppInterval.started_at)
+
+
+class ProactiveObservation(Base):
+    """One thing Gooni noticed while nobody was talking to it.
+
+    The store behind the background proactive loop (`services/proactive_service`
+    + `background._proactive_loop`): every ~15 minutes the loop folds the
+    device sensors, the live focus session, the ranked action horizon and
+    today's trackable status into one bounded context, makes ONE cheap model
+    call, and — if the model finds something worth saying — writes a row here.
+    `GET /proactive/current` serves the newest live one to the ambient home.
+
+    A TABLE rather than a module-level dict, for three reasons, none of them
+    about volume (this writes at most ~96 rows a day and usually far fewer):
+
+      1. Fly restarts. A machine suspend mid-window would silently drop the
+         observation AND the fact that Daniel had dismissed it, so the next
+         tick would cheerfully surface the thing he just waved away.
+      2. Dismissal has to outlive the row it dismissed. `_is_repeat` reads
+         dismissed rows for a longer cooldown than live ones precisely so a
+         dismissal means something; that read needs history.
+      3. Tuning. The only way to answer "is the asymmetric-value rule actually
+         holding?" is to look at what the loop said over a week — which is why
+         `context_digest` stores the exact context the model was shown. Same
+         instinct as the verify rail's ledger riding in the trace `meta`: a bad
+         output should be debuggable without re-running the tick that made it.
+
+    NOT written from a chat turn, ever. This is a separate background process
+    and touching the orchestrator from here would put a model call on the
+    request path the whole design exists to keep clear.
+    """
+
+    __tablename__ = "proactive_observations"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # The line itself — one sentence, already clamped by the service. Rendered
+    # verbatim wherever it goes; nothing downstream re-formats it.
+    content = Column(Text, nullable=False)
+
+    # WHERE it went. `ambient` = the display line (the default, and the only
+    # channel `GET /proactive/current` serves). `whatsapp` = a silence-triggered
+    # reach-out that was already delivered to Daniel's phone, recorded here so
+    # the once-per-day rule has something durable to read and so both kinds of
+    # unprompted output share one history.
+    #
+    # A whatsapp row is written ONLY after Meta accepts the send. That ordering
+    # is the whole point: an idempotency stamp written before delivery burns the
+    # day's one reach-out on a message that never arrived, which is precisely
+    # the failure the 2026-06-10 nudge audit found (see WhatsAppCloudClient.
+    # send_text's docstring).
+    channel = Column(String, nullable=False, default="ambient", index=True)
+
+    # Naive UTC, like every other datetime in this schema.
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    # When this stops being served. An observation is a claim about a MOMENT
+    # ("25m on youtube, the review is due in 3h") and goes from useful to wrong
+    # as that moment recedes, so it expires rather than waiting to be dismissed.
+    expires_at = Column(DateTime, nullable=False, index=True)
+
+    dismissed = Column(Boolean, nullable=False, default=False, index=True)
+    # Kept separate from `dismissed` so the cooldown can be measured from the
+    # dismissal rather than from creation — waving something away at the end of
+    # its window should buy the same quiet as waving it away at the start.
+    dismissed_at = Column(DateTime, nullable=True)
+
+    # The rendered context block this observation was generated from, verbatim.
+    # Debug/tuning only — nothing reads it back into a prompt.
+    context_digest = Column(Text, nullable=True)
+    # Which model produced it, so a cadence-wide quality shift is attributable
+    # to a model swap rather than to the prompt.
+    model = Column(String, nullable=True)

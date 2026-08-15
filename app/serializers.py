@@ -23,6 +23,10 @@ def _serialize_settings(s: Settings) -> dict:
         "nudge_tz": s.nudge_tz or "America/Los_Angeles",
         "overlay_anchor_note_id": s.overlay_anchor_note_id,
         "overlay_whoop_keys": _safe_json_list(s.overlay_whoop_keys),
+        # The proactive loop's runtime switch. `getattr` rather than a plain
+        # attribute read so a settings row loaded before the migration lands
+        # (or a stub row in a test) still serializes instead of 500ing.
+        "proactive_enabled": bool(getattr(s, "proactive_enabled", True)),
     }
 
 

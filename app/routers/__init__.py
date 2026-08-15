@@ -38,4 +38,5 @@ ROUTER_MODULES = [
     "browser_activity",
     "app_activity",
     "display",
+    "proactive",
 ]

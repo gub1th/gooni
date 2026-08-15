@@ -1311,6 +1311,9 @@ export async function fetchChatAudit(opts: {
 export interface AppSettings {
   // Legacy field name — the app-wide canonical timezone (IANA).
   nudge_tz: string;
+  // The background proactive loop's kill switch. Optional so a client talking
+  // to a backend from before the column existed still type-checks.
+  proactive_enabled?: boolean;
 }
 
 export async function fetchSettings(): Promise<AppSettings> {
@@ -2151,3 +2154,37 @@ export async function fetchReflections(opts: {
 }
 
 // ── Reactions (Confluence-style emoji on notes + comments) ────────────────
+
+// ── Proactive layer ────────────────────────────────────────────────────────
+// What Gooni says when nobody asked. A background loop writes at most one live
+// observation at a time (services/proactive_service); the ambient home polls
+// for it and can dismiss it. `null` is the normal answer and means exactly
+// that — nothing worth surfacing. The client never fills the slot with a
+// placeholder, because a slot that always says something stops being read.
+
+export interface ProactiveObservation {
+  id: number;
+  content: string;
+  channel: "ambient" | "whatsapp";
+  created_at: string | null;
+  expires_at: string | null;
+  dismissed: boolean;
+  age_seconds: number | null;
+}
+
+// Poll cadence for the observation line. Slower than the feeds: the loop only
+// writes every ~15 minutes and an observation lives ~30, so anything faster is
+// polling for news that cannot have arrived.
+export const PROACTIVE_POLL_MS = 60_000;
+
+export async function fetchProactiveObservation(): Promise<ProactiveObservation | null> {
+  const res = await apiFetch(`${BASE}/proactive/current`);
+  if (!res.ok) throw new Error("Failed to fetch proactive observation");
+  const data = await res.json();
+  return data.observation ?? null;
+}
+
+export async function dismissProactiveObservation(id: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/proactive/${id}/dismiss`, { method: "POST" });
+  if (!res.ok) throw new Error("Failed to dismiss observation");
+}

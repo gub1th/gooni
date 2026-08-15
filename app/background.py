@@ -1,11 +1,21 @@
 """Background loop coroutines for the FastAPI process.
 
 Extracted from main.py — these are the long-running workers the app starts in
-its lifespan: one-shot startup backfills and the memory watchdog. (The daily
-nudge scheduler and proactive-nudge tick died in the 2026-07 proactiveness
-reset — Gooni sends zero unprompted messages until the next proactive system
-is designed.) main.py's lifespan owns STARTING them (asyncio.create_task);
-the loop bodies live here so main stays pure app wiring.
+its lifespan: one-shot startup backfills, the memory watchdog, the hourly
+integration refresh, and — since 2026-08-15 — the PROACTIVE LOOP.
+
+That last one ends the 2026-07 proactiveness reset on purpose. The old daily
+digest and whoop-ping schedulers were deleted because they were SCHEDULE-driven:
+they fired whether or not there was anything to say, and a signal that fires on
+a timer stops being read. The reset's own note said the next proactive system
+should start from asymmetric value, be event-driven rather than schedule-driven,
+and carry a per-day cap. `_proactive_loop` is a cadence, but the cadence only
+decides when to LOOK — every gate on whether to speak is about what is actually
+true right now (see services/proactive_service), and the WhatsApp reach-out is
+silence-triggered and capped at one a day.
+
+main.py's lifespan owns STARTING them (asyncio.create_task); the loop bodies
+live here so main stays pure app wiring.
 
 All decision logic still lives in the respective services — these loops just
 tick, call the service, and fail open. Service imports are kept lazy (inside
@@ -214,3 +224,50 @@ async def _integration_refresh_loop():
         except Exception as e:
             print(f"[refresh] loop error: {e}", flush=True)
         await asyncio.sleep(INTEGRATION_REFRESH_INTERVAL_S)
+
+
+# --- the proactive loop -----------------------------------------------------
+# The one place Gooni speaks first. Every ~15 minutes (PROACTIVE_INTERVAL_MIN)
+# it looks at what the sensors and the deterministic rankers already know and
+# usually decides there is nothing worth saying. See
+# services/proactive_service for the gates; this is just the clock.
+#
+# The model call inside is a synchronous network round trip, so the whole tick
+# goes off the event loop via asyncio.to_thread — the same treatment
+# _integration_refresh_loop gives its API pulls, and for the same reason: no
+# user-facing request may ever wait on background inference.
+
+
+async def _proactive_loop():
+    """Tick the proactive layer on its configured cadence.
+
+    Fails open in every direction. A tick that raises is logged and the loop
+    keeps its cadence — a proactive layer that can take the app down with it is
+    strictly worse than one that says nothing, and saying nothing is its normal
+    output anyway.
+
+    The interval is re-read every pass so PROACTIVE_INTERVAL_MIN takes effect on
+    the next tick rather than at the next restart, and the enabled check lives
+    inside `tick()` for the same reason — the loop keeps spinning while disabled
+    (at zero cost, no context build and no model call) so flipping the Settings
+    toggle back on doesn't need a redeploy.
+    """
+    from .services import proactive_service
+
+    # Long enough that a boot storm (alembic, backfills, the fly-revive scan)
+    # is finished before the first tick spends a model call.
+    await asyncio.sleep(90)
+    while True:
+        try:
+            result = await asyncio.to_thread(proactive_service.run_tick)
+            status = (result or {}).get("status")
+            # Only the interesting outcomes get a line. `skipped_live` and
+            # `none` are the steady state and would otherwise be 96 log lines a
+            # day saying nothing happened.
+            if status not in ("none", "skipped_live", "skipped_disabled"):
+                print(f"[proactive] tick: {status}", flush=True)
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            print(f"[proactive] loop error: {e}", flush=True)
+        await asyncio.sleep(proactive_service.interval_minutes() * 60)

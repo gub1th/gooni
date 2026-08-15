@@ -47,6 +47,15 @@ def patch_settings(body: dict, db: Session = Depends(get_db)):
         if not isinstance(keys, list) or not all(isinstance(k, str) for k in keys):
             raise HTTPException(status_code=400, detail="overlay_whoop_keys must be list[str]")
         s.overlay_whoop_keys = json.dumps(keys)
+    if "proactive_enabled" in body:
+        # The proactive loop's kill switch — the one knob worth reaching in
+        # seconds when the loop starts saying something stupid. Strict bool:
+        # a truthy string here would silently turn the loop back ON, which is
+        # the wrong direction to be lenient in.
+        raw = body["proactive_enabled"]
+        if not isinstance(raw, bool):
+            raise HTTPException(status_code=400, detail="proactive_enabled must be a bool")
+        s.proactive_enabled = raw
     db.commit()
     db.refresh(s)
     return _serialize_settings(s)

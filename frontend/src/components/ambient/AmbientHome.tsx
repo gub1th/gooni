@@ -12,6 +12,7 @@ import { TodayList, type SessionRow, type TodayRow } from "./TodayList";
 import { useHomeChromeStore } from "../../stores/useHomeChromeStore";
 import { LogSheet } from "./LogSheet";
 import { CurrentActivityLine } from "./CurrentActivityLine";
+import { ProactiveLine } from "./ProactiveLine";
 import { ink } from "./ambientInk";
 import { emptyRetained, mergeTodayRows, retainTicked } from "./todayRows";
 import {
@@ -78,6 +79,12 @@ const MIN_UTTERANCE = 2; // ignore stray one-char finals / noise
 // Momentum's vertical rhythm, as fractions of the viewport. Pinning each group
 // to its own fraction (rather than stacking them in flow under the wave) is
 // what keeps the wave at true centre however long the line or the list runs.
+// The proactive remark, above the mirror. The pair reads as one sentence —
+// what Gooni noticed, then what you're actually on — and the remark goes first
+// because it's the one worth reading first. Its own fraction rather than a
+// stacked sibling, for the same reason everything else here has one: a group
+// that grows in flow pushes the wave off centre, and the wave is the anchor.
+const OBSERVATION_Y = 0.345;
 const ACTIVITY_Y = 0.40; // "currently doing" line, above the wave
 const WAVE_Y = 0.47;
 const TODAY_Y = 0.66;
@@ -898,6 +905,20 @@ export function AmbientHome({
           opacity: stageHidden ? 0 : 1, transition: "opacity 220ms ease",
         }}
       >
+        {/* Inside the stage, so it inherits the two rules every ambient
+            affordance needs: it fades with `stageHidden` while a surface
+            covers the home or the capture box is open, and it is
+            pointer-transparent until it has something to be clicked. */}
+        <div
+          style={{
+            position: "absolute", top: `${OBSERVATION_Y * 100}%`, left: "50%", transform: "translate(-50%, -50%)",
+            width: SUBTITLE_W,
+            pointerEvents: stageHidden ? "none" : "auto",
+          }}
+        >
+          <ProactiveLine />
+        </div>
+
         <div
           style={{
             position: "absolute", top: `${ACTIVITY_Y * 100}%`, left: "50%", transform: "translate(-50%, -50%)",
