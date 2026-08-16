@@ -12,6 +12,7 @@ import {
   fetchLeetcodeToday,
   fetchTrackableDays,
   fetchTrackables,
+  fetchUltrahumanToday,
   fetchWhoopToday,
   logTrackable,
   FEED_REFRESH_MS,
@@ -20,6 +21,7 @@ import {
   type LeetcodeToday,
   type Trackable,
   type TrackableDay,
+  type UltrahumanToday,
   type WhoopToday,
 } from "../../services/api";
 
@@ -53,7 +55,7 @@ const GLASS: React.CSSProperties = {
 // isDaily (LogTable) deliberately keeps them — the glance is priority-only.
 export function isDaily(t: Trackable): boolean {
   if (t.kind === "json") return false;
-  if (t.source === "whoop" || t.source === "leetcode") return false;
+  if (t.source === "whoop" || t.source === "leetcode" || t.source === "ultrahuman") return false;
   if (t.source === "shortcuts") return false;
   // focus-cam telemetry is walled off server-side (never reaches /trackables) —
   // this is belt-and-suspenders so a loosened backend filter can't leak it here.
@@ -653,6 +655,7 @@ function Column({
 function FeedTiles() {
   const [whoop, setWhoop] = useState<WhoopToday | null | "err">(null);
   const [lc, setLc] = useState<LeetcodeToday | null | "err">(null);
+  const [uh, setUh] = useState<UltrahumanToday | null | "err">(null);
   // The panel can stay open for hours; without a tick the age below is frozen
   // at mount and the 36h flip could never fire while you are looking at it.
   const now = useNowTick();
@@ -678,6 +681,12 @@ function FeedTiles() {
       void fetchLeetcodeToday()
         .then((d) => { if (alive) setLc(d); })
         .catch(() => { if (alive) setLc("err"); });
+      // Same "keep the last good reading" rule the whoop pull uses — a
+      // stub/unconfigured backend 401s every poll, which would otherwise
+      // flicker the tile between real data and the connect placeholder.
+      void fetchUltrahumanToday()
+        .then((d) => { if (alive) setUh(d); })
+        .catch(() => { if (alive) setUh((prev) => (prev === null ? "err" : prev)); });
     };
     pull();
     const id = window.setInterval(pull, FEED_REFRESH_MS);
@@ -734,6 +743,24 @@ function FeedTiles() {
             <Metric label="today" value={fmt(lc.today_count)} accent />
             <Metric label="streak" value={fmt(lc.streak)} />
             <Metric label="solved" value={fmt(lc.total_solved)} />
+          </>
+        )}
+      </FeedTile>
+
+      <FeedTile title="ultrahuman">
+        {uh === null ? (
+          <Dim>…</Dim>
+        ) : uh === "err" || !uh.date ? (
+          // Placeholder until the captain provisions ULTRAHUMAN_API_KEY —
+          // see app/services/ultrahuman.py for the setup TODOs. No OAuth
+          // connect button (API-key auth, no browser flow), just a dim
+          // "not connected" state.
+          <Dim>not connected</Dim>
+        ) : (
+          <>
+            <Metric label="sleep" value={fmtPct(uh.sleep_score)} accent />
+            <Metric label="recovery" value={fmtPct(uh.recovery_score)} />
+            <Metric label="steps" value={fmt(uh.steps)} />
           </>
         )}
       </FeedTile>

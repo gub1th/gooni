@@ -31,6 +31,8 @@ ROUTER_MODULES = [
     "memories",
     "eval",
     "whoop",
+    "gmail",
+    "ultrahuman",
     "integrations",
     "reflections",
     "focus",

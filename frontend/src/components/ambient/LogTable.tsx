@@ -38,7 +38,7 @@ const TABLE_MARGIN = "0 auto";
 
 function isDaily(t: Trackable): boolean {
   if (t.kind === "json") return false;
-  if (t.source === "whoop" || t.source === "leetcode") return false;
+  if (t.source === "whoop" || t.source === "leetcode" || t.source === "ultrahuman") return false;
   if (t.name === "note") return false; // the daily-note column replaces it
   return true;
 }
