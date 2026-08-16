@@ -402,6 +402,7 @@ def build_activity_summary(
     """
     from ..db.models import AppInterval, BrowserInterval
     from .device_activity import host_label
+    from .self_hosts import is_self_host
 
     now = now or datetime.utcnow()
     minutes = max(1, int(window_minutes))
@@ -424,6 +425,14 @@ def build_activity_summary(
             db, model, name_col, title_col, win_start, now, layer=key
         )
         capped_any = capped_any or capped
+        if key == "browser":
+            # Gooni's own tabs are the tool, not distraction — excluded before
+            # the fold so they never enter `top`/`observed_seconds`/`last_end`
+            # for this layer. Presence (`last_sensor_signal` in
+            # `proactive_service`) reads the RAW rows, unfiltered — being on
+            # Gooni still proves Daniel is at the machine, it just isn't
+            # reported as "browsing X".
+            rows = [r for r in rows if not is_self_host(r[0])]
         folded = fold_intervals(rows, win_start, now)
         top, other_count, other_sec = rank_names(
             folded["names"], top_n=top_n, label_fn=label_fn

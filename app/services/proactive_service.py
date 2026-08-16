@@ -461,6 +461,16 @@ def build_context(db: Session, *, now: datetime | None = None) -> dict:
 
         summary = activity_context.build_activity_summary(db, now=now)
         activity_lines = activity_context.render_activity_lines(summary)
+        # Belt-and-suspenders: `activity_context` already excludes SELF_HOSTS
+        # at the fold, so this line never fires in practice — but the GATE's
+        # off-task tensions (A/B) are read straight off `activity_lines`, and
+        # time on Gooni's own site must never read as distraction, so a
+        # residual mention is stripped here too rather than trusted upstream.
+        from .self_hosts import SELF_HOSTS
+
+        activity_lines = [
+            ln for ln in activity_lines if not any(h in ln for h in SELF_HOSTS)
+        ]
         focus = summary.get("focus")
         # The AGE LABEL — `as of 4m ago` / `stale — last data 2h ago`. Rendered
         # into the section header exactly as the chat state block does, because
