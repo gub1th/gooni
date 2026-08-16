@@ -380,6 +380,24 @@ class Settings(Base):
     # database write. Defaults ON: a proactive layer nobody switches on is never
     # evaluated, which is the same non-feature with a better excuse.
     proactive_enabled = Column(Boolean, nullable=False, default=True)
+    # The initiative synthesizer's cached snapshot (see
+    # services/initiative_service): what Daniel is currently working on,
+    # clustered out of his memories + thought-batches + active promises once a
+    # day and labeled by a cheap model. Text-not-JSON for the same reason as
+    # focus_cam / display — one blob whose shape can grow without a migration.
+    # NULL → never synthesized; every reader renders that as zero initiatives.
+    # A blob rather than a table because there is no per-row lifecycle here and
+    # nothing to dismiss: the snapshot IS the state, and the previous one has no
+    # value once a newer one exists.
+    #
+    # DEFERRED, unlike every other blob on this row, and that is load-bearing:
+    # each cluster carries a ~1500-float centroid, so a saturated snapshot is
+    # ~100KB — and Settings is the singleton every `local_now(db)` /
+    # `local_today(db)` / `deps._settings_row` call already selects, dozens of
+    # times per request. Undeferred, the whole app would hydrate the synthesis
+    # on every clock read. initiative_service reads `row.initiatives` on the one
+    # path that wants it, which fires the second SELECT deliberately.
+    initiatives = deferred(Column(Text, nullable=True))
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )

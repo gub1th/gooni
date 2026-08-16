@@ -244,6 +244,61 @@ async def _integration_refresh_loop():
         await asyncio.sleep(INTEGRATION_REFRESH_INTERVAL_S)
 
 
+# --- the initiative synthesizer ---------------------------------------------
+# Gooni's first inference layer: once a day it clusters memories +
+# thought-batches + active promises in embedding space and names each cluster,
+# caching the snapshot on Settings.initiatives (see services/initiative_service).
+#
+# The CADENCE here only decides when to LOOK — same shape as the proactive loop.
+# `refresh_if_stale` returns None unless the cached snapshot was built on an
+# earlier LOCAL day and it is past INITIATIVE_REFRESH_HOUR, so the steady state
+# is a cheap no-op and the real work happens once each morning. A tick that
+# arrives late (machine asleep at 6am, Fly restart at noon) still rebuilds on
+# its first pass, which is what covers the "first request after midnight" case
+# without ever putting a build on a request path.
+#
+# Blocking body (sync DB + one model call per cluster), so it goes off the event
+# loop via asyncio.to_thread — the same treatment the other two loops give their
+# network work, and for the same reason.
+
+INITIATIVE_CHECK_INTERVAL_S = 1800  # 30 min — a granularity, not a schedule
+
+
+def _run_initiative_refresh() -> dict | None:
+    from .services import initiative_service
+    db = SessionLocal()
+    try:
+        return initiative_service.refresh_if_stale(db)  # commits internally
+    finally:
+        db.close()
+
+
+async def _initiative_loop():
+    """Rebuild the initiative snapshot once a day, in the morning.
+
+    Fails open: a tick that raises is logged and the cadence continues. A stale
+    synthesis is a mild problem (every reader can see `built_at`); a background
+    loop that can take the app down is not.
+    """
+    # After the boot storm (alembic, backfills, fly-revive) — a first-run
+    # refresh is the most expensive tick this loop ever does.
+    await asyncio.sleep(120)
+    while True:
+        try:
+            snapshot = await asyncio.to_thread(_run_initiative_refresh)
+            if snapshot is not None:
+                print(
+                    f"[initiatives] snapshot rebuilt: "
+                    f"{len(snapshot.get('clusters') or [])} initiative(s)",
+                    flush=True,
+                )
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            print(f"[initiatives] loop error: {e}", flush=True)
+        await asyncio.sleep(INITIATIVE_CHECK_INTERVAL_S)
+
+
 # --- the proactive loop -----------------------------------------------------
 # The one place Gooni speaks first. Every ~15 minutes (PROACTIVE_INTERVAL_MIN)
 # it looks at what the sensors and the deterministic rankers already know and

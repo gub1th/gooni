@@ -143,6 +143,11 @@ async def _lifespan(app: FastAPI):
     # its own Settings/env kill switch on every tick rather than at boot, so a
     # disabled loop still spins (at zero cost) and re-enabling needs no restart.
     proactive_task = asyncio.create_task(background._proactive_loop())
+    # The initiative synthesizer — a once-a-day re-cluster of what Daniel is
+    # working on. Its own loop rather than a step in _integration_refresh_loop:
+    # that one pulls EXTERNAL data hourly, this one infers over Gooni's own rows
+    # daily, and folding them would make one cadence serve two jobs.
+    initiative_task = asyncio.create_task(background._initiative_loop())
     from contextlib import AsyncExitStack
 
     async with AsyncExitStack() as _stack:
@@ -156,6 +161,7 @@ async def _lifespan(app: FastAPI):
         finally:
             for t in (
                 excerpt_task, mem_task, refresh_task, proactive_task,
+                initiative_task,
             ):
                 t.cancel()
                 try:

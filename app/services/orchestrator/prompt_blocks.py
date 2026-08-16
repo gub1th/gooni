@@ -474,6 +474,102 @@ def _build_overlay_block(db) -> str:
     )
 
 
+# ── the initiative block ──────────────────────────────────────────────
+# The third altitude in the prompt, and the only one that is SYNTHESIZED
+# rather than listed. state_block LISTS what is open, overlay_block RANKS
+# it and says why — both answer "what is on the plate today". Neither can
+# answer "what is he actually working on this month", because that is not
+# a property of any row: it lives in the shape of the whole corpus.
+# initiative_service clusters memories + thought-batches + active promises
+# in embedding space once a day and names each cluster; this renders the
+# cached result.
+#
+# Read-only over the cache, ALWAYS. It never clusters and never calls a
+# model — a synthesis on the request path would put N model calls in front
+# of every reply, which is the whole reason the snapshot exists.
+#
+# Injected on EVERY source, same as the other two. A bot turn is where
+# this matters most: there is no UI on WhatsApp, so the model's only route
+# to "you've been on interview prep all week" is the prompt.
+INITIATIVE_CAP = 5           # named initiatives; the rest are counted
+INITIATIVE_SUMMARY_CHARS = 130
+# Past this the synthesis describes a week that has moved on. Rendered, not
+# suppressed — a labeled corpus from four days ago is still broadly true
+# about what Daniel is working on, and saying how old it is costs six words.
+INITIATIVE_STALE_DAYS = 3
+
+
+def _build_initiative_block(db) -> str:
+    """Render the cached initiative snapshot as one bounded prompt block
+    (~120 tokens at the cap above). Empty string when nothing has been
+    synthesized yet — the block is absent rather than announcing its own
+    emptiness, which would spend budget on a non-fact.
+
+    Caller wraps with try/except: a failure here must never block a reply.
+    """
+    from datetime import datetime as _dt, timezone as _tz
+
+    from .. import initiative_service
+
+    snap = initiative_service.get_snapshot(db)
+    if not snap:
+        return ""
+    clusters = snap.get("clusters") or []
+    if not clusters:
+        return ""
+
+    lines: list[str] = []
+    for i, c in enumerate(clusters[:INITIATIVE_CAP], start=1):
+        label = (c.get("label") or "").strip()
+        if not label:
+            continue
+        summary = (c.get("summary") or "").strip()
+        if len(summary) > INITIATIVE_SUMMARY_CHARS:
+            summary = summary[:INITIATIVE_SUMMARY_CHARS].rstrip() + "…"
+        size = c.get("size") or len(c.get("items") or [])
+        tail = f" ({size} items)" if size else ""
+        lines.append(f"{i}. {label}{tail}" + (f": {summary}" if summary else ""))
+
+    if not lines:
+        return ""
+
+    # No silent caps — the same rule the horizon and trackable lists follow.
+    total = snap.get("total_clusters") or len(clusters)
+    if total > INITIATIVE_CAP:
+        lines.append(f"(+{total - INITIATIVE_CAP} more, smaller)")
+    noise = (snap.get("uncategorized") or {}).get("count") or 0
+    if noise:
+        lines.append(f"({noise} items belong to no initiative)")
+
+    # Age, when it is old enough to matter. A synthesis presented without a
+    # date is a claim about right now, and this one is at most a day fresh
+    # by construction.
+    age_note = ""
+    built_raw = snap.get("built_at")
+    if built_raw:
+        try:
+            built = _dt.fromisoformat(built_raw)
+            if built.tzinfo is None:
+                built = built.replace(tzinfo=_tz.utc)
+            days = (_dt.now(_tz.utc) - built).days
+            if days >= INITIATIVE_STALE_DAYS:
+                age_note = f" Synthesized {days}d ago — may have moved on."
+            elif days >= 1:
+                age_note = f" Synthesized {days}d ago."
+        except (TypeError, ValueError):
+            pass
+
+    return (
+        "[your current initiatives — synthesized from your memories, "
+        "thoughts, and commitments. Use it to place what he says in "
+        "context (\"this is the interview thread again\"). Don't recite "
+        "the list and don't turn it into a status report."
+        + age_note
+        + "]\n"
+        + "\n".join(lines)
+    )
+
+
 def _build_state_block(db) -> str:
     """Snapshot of Daniel's actionable state, injected into the master
     prompt for bot channels. Fixes the segment-#209 failure mode where
