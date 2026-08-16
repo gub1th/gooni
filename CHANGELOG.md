@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.244.2 — 2026-08-16 (patch)
+
+- fix(frontend): ambient capture editor no longer drops seeded content (#501)
+
 ## 0.244.1 — 2026-08-16 (patch)
 
 - fix(frontend): dedupe settings gear, move mic to home, fix notes/focus slide-in (#500)
