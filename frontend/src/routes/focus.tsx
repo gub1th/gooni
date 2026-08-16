@@ -1,22 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { PasswordGate } from "../components/PasswordGate";
-import { FocusKiosk } from "../components/focus/FocusKiosk";
 
-// `/focus` — the chromeless KIOSK WINDOW onto a session (prototype pass 2).
+// `/focus` — the URL that summons the focus hub.
 //
-// It is no longer where focus happens. Focus is a STATE, not a place: the
-// session is owned by the banner, which rides every surface, so pause/resume
-// are always under your thumb. Making this a page conflated BEING in focus with
-// LOOKING AT focus, and stranded the controls on a route you had navigated away
-// from. This route is now just a second-monitor view of the same session.
-//
-// Chrome-LESS (see __root.tsx's isChromelessPath) — app nav on a glance surface
-// is the opposite of the point. PasswordGate stays: owner-only data.
-// Gooni asleep is the idle state; see FocusKiosk for why he lives here.
+// The actual content (FocusKiosk) is mounted permanently in __root.tsx's
+// AppShell, inside its own persistent SurfacePanel, and just slid open when
+// this route is active — the same "always mounted, parked off-screen" trick
+// the shared SurfaceHost uses for notes/memories/etc. A node that only
+// mounts when this route matches has no parked frame to animate FROM, so it
+// would snap open instead of sliding — which is exactly the bug this route
+// used to have. This component therefore renders nothing; it exists only so
+// the router has something to match at this path (and so __root's shared
+// PasswordGate — which now wraps this path too — actually gates it).
 export const Route = createFileRoute("/focus")({
-  component: () => (
-    <PasswordGate>
-      <FocusKiosk />
-    </PasswordGate>
-  ),
+  component: () => null,
 });

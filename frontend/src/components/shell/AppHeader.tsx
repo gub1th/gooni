@@ -1,4 +1,4 @@
-import { Mic, MicOff, ScrollText, Settings as SettingsIcon } from "lucide-react";
+import { ScrollText } from "lucide-react";
 import { FONT, z } from "../../ui";
 import { ink } from "../ambient/ambientInk";
 import { CornerButton, CornerThemeToggle } from "./CornerChrome";
@@ -61,19 +61,11 @@ function HeaderDate() {
 export function AppHeader({
   onOpenNote,
   onOpenTrackables,
-  onOpenSettings,
-  settingsActive,
 }: {
   onOpenNote: (note: ApiNote) => void;
   onOpenTrackables: () => void;
-  /** absent until settings becomes a surface — the rail still owns it until then */
-  onOpenSettings?: () => void;
-  settingsActive?: boolean;
 }) {
-  const voiceOn = useHomeChromeStore((s) => s.voiceOn);
-  const listening = useHomeChromeStore((s) => s.listening);
   const logOpen = useHomeChromeStore((s) => s.logOpen);
-  const toggleVoice = useHomeChromeStore((s) => s.toggleVoice);
   const toggleLog = useHomeChromeStore((s) => s.toggleLog);
 
   return (
@@ -154,16 +146,6 @@ export function AppHeader({
           ...dragRegion("no-drag"),
         }}
       >
-        {toggleVoice && (
-          <CornerButton
-            label={voiceOn ? (listening ? "listening — click to go silent" : "voice on — click to go silent") : "voice off — click to talk"}
-            active={listening}
-            onClick={toggleVoice}
-          >
-            {voiceOn ? <Mic size={15} strokeWidth={1.7} /> : <MicOff size={15} strokeWidth={1.7} />}
-          </CornerButton>
-        )}
-
         {/* NO calendar dot. It used to wear an accent badge whenever the day
             had an event, and the captain's verdict on using it was that a dot
             says "something exists" without saying WHAT — you cannot decode it
@@ -177,16 +159,6 @@ export function AppHeader({
         )}
 
         <CornerThemeToggle />
-
-        {/* Settings moved OUT of the left rail: the rail is navigation between
-            surfaces, and settings is a tool. It is a slide-in surface like every
-            other one now, so the rail entry was also the last thing pretending
-            a modal was a destination. */}
-        {onOpenSettings && (
-          <CornerButton label="Settings" active={settingsActive} onClick={onOpenSettings}>
-            <SettingsIcon size={15} strokeWidth={1.7} />
-          </CornerButton>
-        )}
       </div>
     </div>
   );
