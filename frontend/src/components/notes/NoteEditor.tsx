@@ -634,7 +634,10 @@ export function NoteEditor({
   // stale title flicker. `null` when no parent or fetch is in flight.
   const [parentLink, setParentLink] = useState<{ id: number; title: string } | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const bodyRef = useRef<string>(activeNote?.content ?? "");
+  // ambient seeds from the box's typed text (initialContent), never from
+  // activeNote — activeNoteId is forced null above, so activeNote is always
+  // null here and `?? ""` would silently drop the seed.
+  const bodyRef = useRef<string>(ambient ? (initialContent ?? "") : (activeNote?.content ?? ""));
   const titleRef = useRef<string>(activeNote?.title ?? "");
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -663,6 +666,12 @@ export function NoteEditor({
   const handleSubmitRef = useRef<() => Promise<void>>(async () => {});
 
   useEffect(() => {
+    // ambient is create-only and never switches notes (activeNoteId is
+    // forced null) — this whole hydrate-on-switch effect exists for real
+    // note switches, and running it on mount clobbered bodyRef.current
+    // (and title/tags) back to "" right after the box's seeded content had
+    // already been set, silently dropping whatever was typed before ⌘↵.
+    if (ambient) return;
     // Flush any unsaved changes (e.g. a dropped image, an in-flight image
     // replace) before leaving the previous note.
     //
