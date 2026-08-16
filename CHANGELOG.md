@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.245.6 — 2026-08-16 (patch)
+
+- fix(proactive): gate off-task tension on live session, name specific site/app (#508)
+
 ## 0.245.5 — 2026-08-16 (patch)
 
 - fix(frontend): make /focus a proper shell citizen (shared header/rail/footer) (#507)
