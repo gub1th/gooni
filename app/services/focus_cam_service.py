@@ -23,7 +23,7 @@ timestamp parser); calendar days resolve via local_now/local_today.
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -37,15 +37,23 @@ SOURCE = "focus_cam"
 VALID_STATES = ("focused", "distracted", "away", "paused")
 VALID_CONTROLS = ("idle", "running")
 VALID_EVENT_KINDS = ("distracted", "phone", "vape", "stand", "left_desk")
+# Kinds that count as a VIOLATION for the status indicator's live count —
+# `stand` isn't a lapse, so it's excluded (left_desk isn't either, same reason).
+VIOLATION_EVENT_KINDS = ("distracted", "phone", "vape")
 
 SESSION_TRACKABLE = "focus_session"
 SCORE_TRACKABLE = "focus_score"
+EVIDENCE_TRACKABLE = "focus_evidence"
 
 _DEFAULT_BLOB = {
     "control": "idle",
     "state": None,
     "score": None,
     "app": None,
+    # Which physical camera the sidecar is reading from (e.g. "FaceTime HD
+    # Camera") — display-only, so the status indicator can name it rather than
+    # just claiming "camera" generically.
+    "camera": None,
     "session_id": None,
     "at": None,
     # The short-term promise this session is FOR (focus_service Reminder id), set
@@ -92,6 +100,7 @@ def merge_state(
     state: str | None,
     score: float | None,
     app: str | None,
+    camera: str | None = None,
 ) -> dict:
     """Merge one live-state report into the blob (control is left untouched —
     the sidecar reports state, the UI owns control)."""
@@ -100,6 +109,8 @@ def merge_state(
         blob["state"] = state if state in VALID_STATES else blob.get("state")
     blob["score"] = float(score) if score is not None else score
     blob["app"] = app
+    if camera is not None:
+        blob["camera"] = camera
     blob["session_id"] = session_id
     blob["at"] = at
     return _write_blob(db, blob)
@@ -320,3 +331,94 @@ def today_summary(db: Session) -> dict:
             events[kind] = int(count)
 
     return {"date": today.isoformat(), "sessions": sessions, "events": events}
+
+
+# ── evidence frames (gallery) ─────────────────────────────────────────────────
+#
+# The `frame` blob field is LATEST-ONLY liveness — no history, gone the moment
+# the next one lands. A gallery needs the opposite: a handful of frames worth
+# looking back at, kept only when something happened. So a DETECTED frame
+# (phone/vape/distracted — see VALID_EVENT_KINDS) is its own json Trackable
+# entry, one per evidence shot, same "value_json holds the whole thing" pattern
+# `log_session` already uses. Not every frame — an evidence-only gallery is
+# what makes it worth glancing at; a frame per ~10s tick would be a filmstrip
+# nobody scrubs.
+
+
+def log_evidence(
+    db: Session,
+    *,
+    session_id: str | None,
+    kind: str,
+    started_at: str | None,
+    jpeg_b64: str,
+    activity: str | None = None,
+    evidence_id: str | None = None,
+) -> dict:
+    """Persist one evidence frame, keyed to the detection that triggered it."""
+    if kind not in VALID_EVENT_KINDS:
+        raise ValueError(f"kind must be one of {VALID_EVENT_KINDS}")
+
+    now_local = local_now(db)
+    when = _parse_at(started_at, now_local)
+    day = when.astimezone(now_local.tzinfo).date()
+
+    t = trackable_service.create(
+        db,
+        name=EVIDENCE_TRACKABLE,
+        kind="json",
+        agg="last",
+        source=SOURCE,
+        schema_hint={"description": "focus-cam evidence frames (webcam sidecar)"},
+    )
+    entry = trackable_service.log_entry(
+        db,
+        t,
+        day=day,
+        value_json={
+            "kind": kind,
+            "at": when.isoformat(),
+            "session_id": session_id,
+            "activity": activity,
+            "evidence_id": evidence_id,
+            "jpeg_b64": jpeg_b64,
+        },
+        source=SOURCE,
+    )
+    return {"ok": True, "id": entry.id if entry else None}
+
+
+def recent_evidence(db: Session, *, limit: int = 20, days_back: int = 3) -> list[dict]:
+    """The gallery read: the most recent evidence frames, newest first.
+
+    Scans a bounded window of local days rather than the whole table — evidence
+    is meant to be glanced at during/right after a session, not archived. Folded
+    in Python (not SQL) because the payload — including the frame bytes — lives
+    in unindexed `value_json`, same tradeoff `minutesByPromise` already makes on
+    this table family.
+    """
+    t = trackable_service.get_by_name(db, EVIDENCE_TRACKABLE)
+    if t is None:
+        return []
+    today = local_now(db).date()
+    start = today - timedelta(days=max(days_back - 1, 0))
+    entries = trackable_service.entries_for(db, t, start=start, end=today)
+    entries.sort(key=lambda e: (e.date, e.created_at, e.id), reverse=True)
+
+    out: list[dict] = []
+    for e in entries[:limit]:
+        payload = trackable_service.serialize_entry(e)["value_json"]
+        if not isinstance(payload, dict):
+            continue
+        jpeg_b64 = payload.get("jpeg_b64")
+        out.append(
+            {
+                "id": e.id,
+                "kind": payload.get("kind"),
+                "at": payload.get("at"),
+                "session_id": payload.get("session_id"),
+                "activity": payload.get("activity"),
+                "frame": f"data:image/jpeg;base64,{jpeg_b64}" if jpeg_b64 else None,
+            }
+        )
+    return out

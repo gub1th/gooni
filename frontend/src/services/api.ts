@@ -2065,6 +2065,10 @@ export interface FocusCamBlob {
   state: FocusCamState;
   score: number | null;
   app: string | null;
+  // Display name of the physical camera in use (e.g. "FaceTime HD Camera").
+  // null when the sidecar hasn't reported one — the indicator falls back to
+  // a generic label rather than showing nothing.
+  camera: string | null;
   session_id: string | null;
   at: string | null;
   // Live preview thumbnail (data: URL) + its timestamp. Freshness of frame_at
@@ -2084,6 +2088,23 @@ export async function fetchFocusCam(): Promise<FocusCamBlob> {
   const res = await apiFetch(`${BASE}/focus/cam`);
   if (!res.ok) throw new Error("Failed to fetch focus-cam state");
   return res.json();
+}
+
+/** One KEPT evidence frame — a detection, not a liveness tick. See /focus/cam/evidence. */
+export interface FocusCamEvidence {
+  id: number;
+  kind: "distracted" | "phone" | "vape" | "stand" | "left_desk" | null;
+  at: string | null;
+  session_id: string | null;
+  activity: string | null;
+  frame: string | null; // data: URL
+}
+
+export async function fetchFocusCamEvidence(limit = 20): Promise<FocusCamEvidence[]> {
+  const res = await apiFetch(`${BASE}/focus/cam/evidence?limit=${limit}`);
+  if (!res.ok) throw new Error("Failed to fetch focus-cam evidence");
+  const data = (await res.json()) as { items: FocusCamEvidence[] };
+  return data.items ?? [];
 }
 
 export async function setFocusCamControl(

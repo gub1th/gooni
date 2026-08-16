@@ -4,9 +4,11 @@ import { GooniAsleep } from "./GooniAsleep";
 import { FOCUS_PALETTES } from "./focusPalette";
 import { FocusExpanded } from "./FocusExpanded";
 import { FocusHistory } from "./FocusHistory";
+import { FocusSessionRecap } from "./FocusSessionRecap";
 import { TodayList, type TodayRow } from "../ambient/TodayList";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
 import { useFocusSessionStore } from "../../stores/useFocusSessionStore";
+import { useFocusRecapStore } from "../../stores/useFocusRecapStore";
 import {
   fetchFocusTotals,
   switchFocusSession,
@@ -38,6 +40,8 @@ export function FocusKiosk() {
   const theme = useGooniThemeStore((s) => s.theme);
   const pal = FOCUS_PALETTES[theme];
   const session = useFocusSessionStore((s) => s.session);
+  const recap = useFocusRecapStore((s) => s.recap);
+  const clearRecap = useFocusRecapStore((s) => s.clear);
 
   const [shortTerm, setShortTerm] = useState<FocusReminder[]>([]);
   const [totals, setTotals] = useState<FocusTotals>(EMPTY_TOTALS);
@@ -71,6 +75,12 @@ export function FocusKiosk() {
   useEffect(() => {
     if (session == null) void loadTotals();
   }, [session, loadTotals]);
+
+  // A new session starting is what makes the previous one's recap stale —
+  // clear it so landing back on `/focus` mid-session never shows an old recap.
+  useEffect(() => {
+    if (session != null) clearRecap();
+  }, [session, clearRecap]);
 
   const rows: TodayRow[] = useMemo(
     () => shortTerm
@@ -113,6 +123,8 @@ export function FocusKiosk() {
     <div style={{ position: "relative", width: "100%", height: "100%", background: frostInk.sheet, fontFamily: FONT, overflow: "hidden" }}>
       {session ? (
         <FocusExpanded />
+      ) : recap ? (
+        <FocusSessionRecap recap={recap} onClose={clearRecap} />
       ) : (
         <>
           <GooniAsleep pal={pal} />

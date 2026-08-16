@@ -10,6 +10,8 @@ Deliberately NAMESPACED under /focus/cam/* to stay clear of the Focus SYSTEM
   POST  /focus/cam/control    → UI Start/Stop sets desired control (running|idle)
   POST  /focus/cam/frame      → sidecar ships the latest preview thumbnail (~10s)
   POST  /focus/cam/events     → sidecar reports one discrete event (+1 counter)
+  POST  /focus/cam/evidence   → sidecar ships a kept evidence frame for a detection
+  GET   /focus/cam/evidence   → gallery read: recent evidence frames, newest first
   POST  /focus/cam/sessions   → sidecar reports a finished session (on stop)
   GET   /focus/cam/today      → the widget read: today's sessions + event counts
 
@@ -51,6 +53,7 @@ def post_focus_cam_state(body: dict, db: Session = Depends(get_db)):
         state=body.get("state"),
         score=body.get("score"),
         app=body.get("app"),
+        camera=body.get("camera"),
     )
     return {"ok": True, "state": blob.get("state"), "control": blob.get("control")}
 
@@ -120,6 +123,44 @@ def post_focus_cam_event(body: dict, db: Session = Depends(get_db)):
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/focus/cam/evidence")
+def post_focus_cam_evidence(body: dict, db: Session = Depends(get_db)):
+    """Sidecar ships an evidence frame for one detection (phone/vape/distracted
+    — see VALID_EVENT_KINDS). Unlike /focus/cam/frame this is KEPT, not
+    overwritten — it's the gallery's source, so only send one when something
+    was actually flagged, not on the liveness timer."""
+    jpeg_b64 = body.get("jpeg_b64")
+    if not jpeg_b64 or not isinstance(jpeg_b64, str):
+        raise HTTPException(status_code=400, detail="jpeg_b64 required")
+    if len(jpeg_b64) > _MAX_FRAME_B64_CHARS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"frame too large: {len(jpeg_b64)} chars (max {_MAX_FRAME_B64_CHARS})",
+        )
+    if not body.get("started_at"):
+        raise HTTPException(status_code=400, detail="started_at required")
+    try:
+        return focus_cam_service.log_evidence(
+            db,
+            session_id=body.get("session_id"),
+            kind=(body.get("kind") or "").strip(),
+            started_at=body.get("started_at"),
+            jpeg_b64=jpeg_b64,
+            activity=body.get("activity"),
+            evidence_id=body.get("evidence_id"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/focus/cam/evidence")
+def get_focus_cam_evidence(limit: int = 20, db: Session = Depends(get_db)):
+    """Gallery read: recent evidence frames, newest first. Capped — this is a
+    glance-back strip, not an archive browser."""
+    capped = max(1, min(limit, 60))
+    return {"items": focus_cam_service.recent_evidence(db, limit=capped)}
 
 
 @router.post("/focus/cam/sessions")

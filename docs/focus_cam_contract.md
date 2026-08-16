@@ -24,10 +24,14 @@ self-healing — a Start clicked while the sidecar was asleep takes effect on wa
 
 ```
 GET /focus/cam
-→ {control, state, score, app, session_id, at,
+→ {control, state, score, app, camera, session_id, at,
    target_reminder_id,       # int | null — the promise this session is FOR
    frame, frame_at}          # frame = data:image/jpeg;base64,… | null (see Preview frame)
 ```
+
+`camera` is the display name of the physical camera in use (e.g. `"FaceTime HD
+Camera"`), sent as part of live state (below). Optional — a sidecar that never
+sends it leaves the status indicator showing "camera" generically.
 
 Poll ~every 2s. Read `control`:
 - `running` and you're idle → start sensing, mint a `session_id`, begin reporting.
@@ -47,7 +51,7 @@ sidecar keeps working unchanged. Cleared whenever control goes `idle`.
 POST /focus/cam/state
 { "session_id": str, "at": iso8601+tz,
   "state": "focused"|"distracted"|"away"|"paused",
-  "score": float|null, "app": str|null }
+  "score": float|null, "app": str|null, "camera": str|null }
 → {ok, state, control}
 ```
 
@@ -86,8 +90,32 @@ POST /focus/cam/events
 ```
 
 Each POST is +1 on the `"focus {kind}"` daily counter (local day of `started_at`).
-`activity` / `evidence_id` are accepted now (ride in `value_json`) but unused by
-Gooni — the seam for the later VLM/evidence work.
+`activity` / `evidence_id` are accepted and ride in `value_json`. If the
+detection has a supporting frame, ship it separately as an evidence frame
+(below) — the counter event and the frame are two calls, so a sidecar that
+can't grab a frame in time still gets the count logged.
+
+## Evidence frames (gallery)
+
+```
+POST /focus/cam/evidence
+{ "session_id": str, "kind": "distracted"|"phone"|"vape"|"stand"|"left_desk",
+  "started_at": iso8601+tz, "activity": str|null, "evidence_id": str|null,
+  "jpeg_b64": str }              # base64 JPEG, no data: prefix
+→ {ok, id}
+```
+
+Unlike the liveness `/frame` endpoint, this one is KEPT — one row per call,
+not overwritten. It's the source for the focus page's evidence gallery, so
+only send a frame when something was actually flagged (a detection event you'd
+also be posting to `/focus/cam/events`), never on the ~10s liveness timer —
+the gallery is meant to be a few frames worth a glance, not a filmstrip.
+Same 200 KB base64 cap as `/frame`.
+
+```
+GET /focus/cam/evidence?limit=20
+→ { items: [{ id, kind, at, session_id, activity, frame }] }   # newest first
+```
 
 ## Session summary (on stop)
 
