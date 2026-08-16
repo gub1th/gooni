@@ -28,9 +28,6 @@ import { SurfacePanel } from "../components/shell/SurfacePanel";
 import { AppHeader, HEADER_H } from "../components/shell/AppHeader";
 import { SettingsModal } from "../components/settings/SettingsModal";
 import { useHomeChromeStore } from "../stores/useHomeChromeStore";
-import { CollapsedSidebar } from "../components/notes/CollapsedSidebar";
-import { useWindowWidth } from "../hooks/useWindowWidth";
-import { useNotesContentStore } from "../stores/useNotesContentStore";
 
 // Pushes the current theme's tokens to CSS custom properties on <html>. Components
 // read them via `var(--gooni-text, ...)` etc., with sensible light fallbacks so
@@ -95,8 +92,6 @@ function ThemeVarSync() {
   return null;
 }
 
-const SIDEBAR_BREAKPOINT = 768;
-
 // Paths that render their own chrome — sidebar stays unmounted there so
 // the public portfolio doesn't leak owner-only affordances. `/focus` is the
 // focus-system kiosk: a bare second-monitor display, so the ambient nav /
@@ -135,21 +130,9 @@ function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
   const routerState = useRouterState();
-  const windowWidth = useWindowWidth();
-  const isWide = windowWidth >= SIDEBAR_BREAKPOINT;
-  const [sidebarOpen, setSidebarOpen] = useState(isWide);
   // Settings is a MODAL over whatever page you are on (pass 9), so its open
   // state lives here rather than in the URL — it is not a destination.
   const [settingsOpen, setSettingsOpen] = useState(false);
-  useEffect(() => {
-    setSidebarOpen(isWide);
-  }, [isWide]);
-
-  // Store actions invoked by Sidebar's compose / new-chat buttons.
-  // Lifted from routes/index.tsx so the buttons work on every route.
-  const selectedSpaceId = useNotesContentStore((s) => s.selectedSpaceId);
-  const selectSpace = useNotesContentStore((s) => s.selectSpace);
-  const createNote = useNotesContentStore((s) => s.createNote);
 
   // URL-derive every Sidebar active flag. `/` is the multi-view route
   // (log / notes / eval); we pick the current view from
@@ -202,32 +185,6 @@ function AppShell() {
   useEffect(() => {
     document.documentElement.style.setProperty("--gooni-header-h", `${HEADER_H}px`);
   }, []);
-
-  // Compose / new-chat callbacks. The store actions live in Zustand
-  // already; we just call them then navigate. routes/index.tsx's
-  // useEffect on `search` repopulates / re-views accordingly.
-  async function handleCompose() {
-    const spaceId = selectedSpaceId ?? "general";
-    selectSpace(spaceId);
-    // Await the create so we have the real note id, then put it directly
-    // in the URL. Previously this fired the navigate before the API
-    // resolved → URL landed on / with note=undefined → view derived to
-    // 'dashboard' and the new note never opened. (Daniel reported
-    // "click + see network calls but stay on dashboard".)
-    const real = await createNote(spaceId);
-    navigate({
-      to: "/",
-      search: {
-        note: real?.id,
-        conv: undefined,
-        audit: undefined,
-        segment: undefined,
-        view: undefined,
-        trackables: undefined,
-      },
-      replace: true,
-    });
-  }
 
   function gotoBlank() {
     navigate({
@@ -413,42 +370,13 @@ function AppShell() {
             as the page treatment — it framed every surface as a floating
             window, which is what made them read as pasted on. */}
         <SurfaceHost isSheet={isSheet} viewKey={surfaceKey} onDismiss={gotoBlank}>
-        {isNotes && sidebarOpen && (
+        {/* Notes sidebar — always expanded when notes is the active view,
+            no collapse toggle. It's the note browser only; app-level nav
+            lives in IconRail, which stays visible alongside it. */}
+        {isNotes && (
           <Sidebar
-            isNotes={isNotes}
-            showCompose={!isNotes}
-            onLogoClick={gotoBlank}
             onAllNotes={gotoNotesView}
             onSelectNote={handleSelectNote}
-            onCompose={handleCompose}
-            onClose={() => setSidebarOpen(false)}
-          />
-        )}
-        {/* Claude-style icon rail. Renders when sidebarOpen=false instead
-            of completely hiding the sidebar — gives one-click access to
-            New chat / Search / All Notes / Memories / Audit / Settings
-            without expanding. Replaces the prior floating panel-open
-            affordance. */}
-        {isNotes && !sidebarOpen && (
-          <CollapsedSidebar
-            isNotes={isNotes}
-            isEval={isEval}
-            onOpen={() => setSidebarOpen(true)}
-            onLogoClick={gotoBlank}
-            onAllNotes={gotoNotesView}
-            onOpenEval={() =>
-              navigate({
-                to: "/",
-                search: {
-                  note: undefined,
-                  conv: undefined,
-                  audit: true,
-                  segment: undefined,
-                  view: undefined,
-                  trackables: undefined,
-                },
-              })
-            }
           />
         )}
         <div
@@ -463,11 +391,10 @@ function AppShell() {
           <Outlet />
         </div>
         </SurfaceHost>
-        {/* IconRail is the APP-level nav. Notes carries its own primary nav
-            (Sidebar / CollapsedSidebar) with a Home button already in its
-            header, so showing both was a redundant second rail eating the
-            same left edge — hidden here whenever notes owns the surface. */}
-        {!isImmersive && !isNotes && <IconRail />}
+        {/* IconRail is THE app-level nav, always present — including on
+            notes, where the Sidebar next to it is note-browser-only and
+            carries no app nav of its own. */}
+        {!isImmersive && <IconRail />}
         {!isImmersive && <FooterIsland />}
         <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
         {/* ONE sticky header, on every non-immersive surface — date, quickfind,

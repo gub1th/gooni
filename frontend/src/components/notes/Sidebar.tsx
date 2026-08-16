@@ -8,10 +8,9 @@ import { useDraftVersionStore } from "../../stores/useDraftVersionStore";
 import { useOrderingStore, applyOrder } from "../../stores/useOrderingStore";
 import {
   PenLine, FileText,
-  PanelLeftClose, ChevronDown, ChevronUp,
+  ChevronDown, ChevronUp,
   Pin as PinIcon, Tag as TagIcon,
 } from "lucide-react";
-import { GooniLogo } from "../GooniLogo";
 import { frostInk } from "../../ui";
 import { ink } from "../ambient/ambientInk";
 
@@ -32,22 +31,16 @@ const ICON_TINT = {
 const CAPPED_LIST_SIZE = 5;
 const EXPANDED_LIST_MAX_HEIGHT = 220;
 
-// Sidebar = the NOTES BROWSER (pinned/drafts/recents/tags). App-level nav
-// lives in IconRail (one rail, every surface) since the unification pass.
+// Sidebar = the NOTES BROWSER ONLY (pinned/drafts/recents/tags). Always
+// expanded when notes is the active view — no collapse toggle, no app-level
+// nav (IconRail owns that, always visible to its left).
 interface SidebarProps {
-  isNotes: boolean;
-  showCompose: boolean;
-  onLogoClick: () => void;
   // All-Notes row click. Sidebar mutates the store (selectSpace "general"),
   // AppShell does the URL nav to ?view=notes.
   onAllNotes: () => void;
   // Note-row click (pinned / draft / recent). Drives the URL to ?note=<id>
   // so the index route's search.note effect picks it up.
   onSelectNote: (id: number) => void;
-  onCompose: () => void;
-  // Collapse the sidebar — Claude-style top-right panel-close icon.
-  // AppShell owns sidebarOpen state; Sidebar just calls this.
-  onClose?: () => void;
 }
 
 // SidebarSection — labeled group (Notes / Tags). Header row has icon +
@@ -222,7 +215,7 @@ function ExpandToggle({ expanded, hiddenCount, onClick }: { expanded: boolean; h
   );
 }
 
-export function Sidebar({ isNotes, showCompose, onLogoClick, onAllNotes, onSelectNote, onCompose, onClose }: SidebarProps) {
+export function Sidebar({ onAllNotes, onSelectNote }: SidebarProps) {
   const navigate = useNavigate();
   const { selectSpace, loadNotes, selectNote, activeNoteId } = useNotesContentStore();
 
@@ -340,56 +333,6 @@ export function Sidebar({ isNotes, showCompose, onLogoClick, onAllNotes, onSelec
           // pushed the footer off the bottom whenever a session was running.
         }}
       >
-        {/* Header — logo + compose. No bottom divider (Daniel's minimal
-            redesign — sidebar reads as one continuous surface, not
-            chrome+content). */}
-        <div style={{
-          height: 52, padding: "0 12px", display: "flex", alignItems: "center",
-          justifyContent: "space-between", flexShrink: 0,
-        }}>
-          <button
-            onClick={onLogoClick}
-            title="Home"
-            style={{
-              background: "transparent",
-              border: "none", borderRadius: 8, padding: "3px 7px", cursor: "pointer",
-              fontSize: 17, fontWeight: 700,
-              fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-              color: "var(--gooni-text, #1C1C1E)", transition: "background 0.1s", outline: "none",
-              display: "flex", alignItems: "center", gap: 7,
-            }}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgb(var(--gooni-tint, 0 0 0) / 0.06)")}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
-          >
-            <GooniLogo size={20} />
-            Gooni
-          </button>
-          <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-            {showCompose && (
-              <button
-                onClick={onCompose}
-                title="New note"
-                style={{ width: 28, height: 28, borderRadius: 7, background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--gooni-text, #3C3C43)", padding: 0, flexShrink: 0, transition: "background 0.1s", outline: "none" }}
-                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgb(var(--gooni-tint, 0 0 0) / 0.06)")}
-                onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
-              >
-                <PenLine size={14} strokeWidth={1.6} />
-              </button>
-            )}
-            {onClose && (
-              <button
-                onClick={onClose}
-                title="Close sidebar"
-                style={{ width: 28, height: 28, borderRadius: 7, background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--gooni-text, #3C3C43)", padding: 0, flexShrink: 0, transition: "background 0.1s", outline: "none" }}
-                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgb(var(--gooni-tint, 0 0 0) / 0.06)")}
-                onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
-              >
-                <PanelLeftClose size={15} strokeWidth={1.7} />
-              </button>
-            )}
-          </div>
-        </div>
-
         {/* Scrollable content — thin overlay scrollbar that fades in only
             when the user is scrolling. Static chunky scrollbar Daniel
             flagged was a leftover platform default. */}
@@ -433,7 +376,7 @@ export function Sidebar({ isNotes, showCompose, onLogoClick, onAllNotes, onSelec
             label="Notes"
             Icon={FileText}
             iconColor={ICON_TINT.allNotes}
-            active={isNotes}
+            active
             onHeaderClick={handleAllNotes}
             trailingLabel="all"
             onTrailingClick={handleAllNotes}
