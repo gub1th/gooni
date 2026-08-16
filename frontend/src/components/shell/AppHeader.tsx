@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from "react";
 import { ScrollText } from "lucide-react";
 import { FONT, z } from "../../ui";
 import { ink } from "../ambient/ambientInk";
@@ -6,7 +7,7 @@ import { useHomeChromeStore } from "../../stores/useHomeChromeStore";
 import { QuickFind } from "../ambient/QuickFind";
 import { RAIL_LANE } from "../ambient/IconRail";
 import { dragRegion } from "../../services/desktop";
-import type { ApiNote } from "../../services/api";
+import { fetchSettings, type ApiNote } from "../../services/api";
 
 // ONE sticky header, on every non-immersive surface.
 //
@@ -47,13 +48,58 @@ const SIDE_RESERVE = 200;
  */
 export const HEADER_Z = z.overlay + 5;
 
-function HeaderDate() {
-  const label = new Date()
-    .toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })
-    .toLowerCase();
+// City name off an IANA tz string ("America/Los_Angeles" → "Los Angeles") —
+// the fallback the brief asks for, and in practice the only signal available
+// without a reverse-geocoding service: `navigator.geolocation` gives lat/long,
+// not a place name, and turning that into "Los Angeles" needs an external API
+// this app has no key for. What browser geolocation DOES give for free is the
+// runtime's own IANA timezone (`Intl.DateTimeFormat().resolvedOptions()`),
+// which is more likely to be current than the DB's `Settings.nudge_tz` if
+// Daniel is actually travelling — so that's preferred when available, with the
+// settings timezone as the fallback for a browser that can't resolve one.
+function tzToCity(tz: string): string {
+  const last = tz.split("/").pop() ?? tz;
+  return last.replace(/_/g, " ");
+}
+
+function HeaderClock() {
+  const [settingsTz, setSettingsTz] = useState<string | null>(null);
+  useEffect(() => {
+    void fetchSettings().then((s) => setSettingsTz(s.nudge_tz)).catch(() => {});
+  }, []);
+
+  const tz = useMemo(() => {
+    try {
+      const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (browserTz) return browserTz;
+    } catch { /* ignore */ }
+    return settingsTz ?? undefined;
+  }, [settingsTz]);
+
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(new Date()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const time = now.toLocaleTimeString(undefined, {
+    hour: "2-digit", minute: "2-digit", hour12: false, timeZone: tz,
+  });
+  const location = tz ? tzToCity(tz) : null;
+
   return (
-    <div style={{ fontSize: 11.5, color: ink(0.38), whiteSpace: "nowrap", userSelect: "none" }}>
-      {label}
+    <div style={{ display: "flex", flexDirection: "column", gap: 1, userSelect: "none" }}>
+      <div style={{
+        fontSize: 14, fontWeight: 600, color: ink(0.75), whiteSpace: "nowrap",
+        fontVariantNumeric: "tabular-nums", lineHeight: 1,
+      }}>
+        {time}
+      </div>
+      {location && (
+        <div style={{ fontSize: 9.5, color: ink(0.32), whiteSpace: "nowrap", lineHeight: 1 }}>
+          {location}
+        </div>
+      )}
     </div>
   );
 }
@@ -103,7 +149,7 @@ export function AppHeader({
         WebkitBackdropFilter: "blur(2px)",
       }}
     >
-      <HeaderDate />
+      <HeaderClock />
 
       {/* The search bar sits in the middle of the row and is the widest thing in
           it — deliberately, because pass 8 makes it the notch that carries the

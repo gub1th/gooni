@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Maximize2, Minimize2 } from "lucide-react";
+import { Maximize2, Minimize2, RefreshCw } from "lucide-react";
 import { FONT, frost, frostInk } from "../../ui";
 import { useNowTick } from "../../hooks/useNowTick";
 import { GREEN } from "./wavePath";
@@ -697,9 +697,38 @@ function FeedTiles() {
   const [whoop, setWhoop] = useState<WhoopToday | null | "err">(null);
   const [lc, setLc] = useState<LeetcodeToday | null | "err">(null);
   const [uh, setUh] = useState<UltrahumanToday | null | "err">(null);
+  const [refreshing, setRefreshing] = useState<{ whoop?: boolean; leetcode?: boolean; ultrahuman?: boolean }>({});
   // The panel can stay open for hours; without a tick the age below is frozen
   // at mount and the 36h flip could never fire while you are looking at it.
   const now = useNowTick();
+  const alive = useRef(true);
+  useEffect(() => () => { alive.current = false; }, []);
+
+  // Per-source pulls, split out of the poll loop so a manual refresh can hit
+  // ONE feed without re-fetching the other two. Same "keep the last good
+  // reading on failure" rule as before — a manual refresh that fails should
+  // not blank out a tile that was showing real data.
+  const pullWhoop = useCallback(() => (
+    fetchWhoopToday()
+      .then((d) => { if (alive.current) setWhoop(d); })
+      .catch(() => { if (alive.current) setWhoop((prev) => (prev === null ? "err" : prev)); })
+  ), []);
+  const pullLc = useCallback(() => (
+    fetchLeetcodeToday()
+      .then((d) => { if (alive.current) setLc(d); })
+      .catch(() => { if (alive.current) setLc("err"); })
+  ), []);
+  const pullUh = useCallback(() => (
+    fetchUltrahumanToday()
+      .then((d) => { if (alive.current) setUh(d); })
+      .catch(() => { if (alive.current) setUh((prev) => (prev === null ? "err" : prev)); })
+  ), []);
+
+  function manualRefresh(source: "whoop" | "leetcode" | "ultrahuman") {
+    setRefreshing((r) => ({ ...r, [source]: true }));
+    const pull = source === "whoop" ? pullWhoop : source === "leetcode" ? pullLc : pullUh;
+    void pull().finally(() => { if (alive.current) setRefreshing((r) => ({ ...r, [source]: false })); });
+  }
 
   // …and the tick alone is only half of it: an age that advances against a
   // payload fetched once at mount eventually cries "stale" about a strap that
@@ -708,31 +737,11 @@ function FeedTiles() {
   // cadence (the same one the kiosk polls on) and let the age describe data
   // that is actually current.
   useEffect(() => {
-    let alive = true;
-    // A failed whoop refetch keeps the last good reading — only the FIRST load
-    // may fall through to the error/connect state. That guard is safe ONLY
-    // because whoop carries a self-advancing age that eventually says "stale";
-    // leetcode has no freshness signal, so holding its last payload through an
-    // outage would show frozen counts forever. It clears, which is itself the
-    // honest signal.
-    const pull = () => {
-      void fetchWhoopToday()
-        .then((d) => { if (alive) setWhoop(d); })
-        .catch(() => { if (alive) setWhoop((prev) => (prev === null ? "err" : prev)); });
-      void fetchLeetcodeToday()
-        .then((d) => { if (alive) setLc(d); })
-        .catch(() => { if (alive) setLc("err"); });
-      // Same "keep the last good reading" rule the whoop pull uses — a
-      // stub/unconfigured backend 401s every poll, which would otherwise
-      // flicker the tile between real data and the connect placeholder.
-      void fetchUltrahumanToday()
-        .then((d) => { if (alive) setUh(d); })
-        .catch(() => { if (alive) setUh((prev) => (prev === null ? "err" : prev)); });
-    };
+    const pull = () => { void pullWhoop(); void pullLc(); void pullUh(); };
     pull();
     const id = window.setInterval(pull, FEED_REFRESH_MS);
-    return () => { alive = false; window.clearInterval(id); };
-  }, []);
+    return () => window.clearInterval(id);
+  }, [pullWhoop, pullLc, pullUh]);
 
   // stale-tag: the served reading may be a day-old sleep (today's hasn't synced)
   const whoopNote = whoop && whoop !== "err" && whoop.day_label ? whoop.day_label : undefined;
@@ -755,7 +764,7 @@ function FeedTiles() {
 
   return (
     <div style={{ display: "flex", gap: 14, marginTop: 16 }}>
-      <FeedTile title="whoop" note={whoopNote} footer={whoopFooter}>
+      <FeedTile title="whoop" note={whoopNote} footer={whoopFooter} onRefresh={() => manualRefresh("whoop")} refreshing={!!refreshing.whoop}>
         {whoop === null ? (
           <Dim>…</Dim>
         ) : whoop === "err" || !whoop.date ? (
@@ -774,7 +783,7 @@ function FeedTiles() {
         )}
       </FeedTile>
 
-      <FeedTile title="leetcode">
+      <FeedTile title="leetcode" onRefresh={() => manualRefresh("leetcode")} refreshing={!!refreshing.leetcode}>
         {lc === null ? (
           <Dim>…</Dim>
         ) : lc === "err" || !lc.available ? (
@@ -788,7 +797,7 @@ function FeedTiles() {
         )}
       </FeedTile>
 
-      <FeedTile title="ultrahuman">
+      <FeedTile title="ultrahuman" onRefresh={() => manualRefresh("ultrahuman")} refreshing={!!refreshing.ultrahuman}>
         {uh === null ? (
           <Dim>…</Dim>
         ) : uh === "err" || !uh.date ? (
@@ -809,12 +818,33 @@ function FeedTiles() {
   );
 }
 
-function FeedTile({ title, note, children, footer }: {
+function FeedTile({ title, note, children, footer, onRefresh, refreshing }: {
   title: string; note?: string; children: React.ReactNode; footer?: React.ReactNode;
+  /** Manual refresh — forces an immediate re-fetch of this tile's own feed,
+   * independent of the shared FEED_REFRESH_MS cadence. */
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }) {
   return (
-    <div style={{ ...GLASS, borderRadius: 18, padding: "14px 18px", minWidth: 150 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 10 }}>
+    <div style={{ ...GLASS, borderRadius: 18, padding: "14px 18px", minWidth: 150, position: "relative" }}>
+      {onRefresh && (
+        <button
+          onClick={onRefresh}
+          disabled={refreshing}
+          aria-label={`Refresh ${title}`}
+          title={`Refresh ${title}`}
+          style={{
+            position: "absolute", top: 8, right: 8, width: 18, height: 18, padding: 0,
+            borderRadius: 999, border: "none", background: "transparent", cursor: refreshing ? "default" : "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: "rgb(var(--gooni-ink, 244 245 244) / 0.3)",
+          }}
+        >
+          <RefreshCw size={11} strokeWidth={1.8} style={refreshing ? { animation: "gooni-feed-refresh-spin 0.8s linear infinite" } : undefined} />
+        </button>
+      )}
+      <style>{`@keyframes gooni-feed-refresh-spin{to{transform:rotate(360deg)}}`}</style>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 10, paddingRight: onRefresh ? 16 : 0 }}>
         <span style={{
           fontSize: 9, letterSpacing: 1.6, textTransform: "uppercase",
           color: "rgb(var(--gooni-ink, 244 245 244) / 0.35)",

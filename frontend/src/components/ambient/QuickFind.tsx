@@ -11,6 +11,7 @@ import {
   fetchFocusDashboard,
   fetchMemories,
   fetchPromises,
+  fetchRecentNotes,
   fetchTrackables,
   searchNoteTitles,
   searchNotes,
@@ -166,6 +167,10 @@ export function QuickFind({
   const [reminders, setReminders] = useState<FocusReminder[]>([]);
   const [promises, setPromises] = useState<ApiPromise[]>([]);
   const [trackables, setTrackables] = useState<Trackable[]>([]);
+  // pre-query state — the same dashboard/notes reads the home itself uses,
+  // shown before a query narrows the bar down to search results
+  const [todayTasks, setTodayTasks] = useState<FocusReminder[]>([]);
+  const [recentNotes, setRecentNotes] = useState<ApiNote[]>([]);
   const cachedAt = useRef(0);
 
   const debounceRef = useRef<number | null>(null);
@@ -175,10 +180,11 @@ export function QuickFind({
   const loadCaches = useCallback(async () => {
     if (Date.now() - cachedAt.current < CACHE_TTL_MS) return;
     cachedAt.current = Date.now();
-    const [dash, tr, pr] = await Promise.allSettled([
+    const [dash, tr, pr, notes] = await Promise.allSettled([
       fetchFocusDashboard(),
       fetchTrackables(),
       fetchPromises({ state: "active", limit: 200 }),
+      fetchRecentNotes(5),
     ]);
     if (dash.status === "fulfilled") {
       const d = dash.value;
@@ -189,9 +195,11 @@ export function QuickFind({
       const byId = new Map<number, FocusReminder>();
       for (const r of rows) byId.set(r.id, r);
       setReminders([...byId.values()]);
+      setTodayTasks(d.short_term?.today ?? []);
     }
     if (tr.status === "fulfilled") setTrackables(tr.value);
     if (pr.status === "fulfilled") setPromises(pr.value);
+    if (notes.status === "fulfilled") setRecentNotes(notes.value);
   }, []);
 
   useEffect(() => {
@@ -446,6 +454,11 @@ export function QuickFind({
   }
 
   const showPanel = open && q.trim().length > 0;
+  // Pre-query state: before typing narrows the bar to search results, show
+  // what's already loaded — today's tasks + a handful of recent notes — so
+  // the bar isn't empty space the moment it's clicked into. Gone the instant
+  // a query exists (showPanel takes over).
+  const showPreQuery = open && q.trim().length === 0 && (todayTasks.length > 0 || recentNotes.length > 0);
 
   return (
     <div
@@ -625,6 +638,52 @@ export function QuickFind({
       </div>
 
 
+      {/* pre-query state — today's tasks + recent notes, shown before a query
+          exists. Same frost treatment as the results panel, no cards: each row
+          is the identical bare-button shape the hit list uses, just grouped
+          under a section label instead of ranked by relevance. */}
+      {showPreQuery && (
+        <div
+          style={{
+            position: "absolute", top: "100%", left: 0, right: 0,
+            marginTop: 6, padding: 6, borderRadius: 20,
+            zIndex: z.overlay - 10,
+            display: "flex", flexDirection: "column", gap: 2,
+            ...frost.panel,
+            border: `1px solid ${frostInk.border}`,
+          }}
+        >
+          {todayTasks.length > 0 && (
+            <>
+              <PreQueryLabel>today</PreQueryLabel>
+              {todayTasks.slice(0, 5).map((r) => (
+                <PreQueryRow
+                  key={`task:${r.id}`}
+                  kind="promise"
+                  title={clean(r.content)}
+                  sub={reminderSub(r) || null}
+                  onClick={() => { goDash(); close(); }}
+                />
+              ))}
+            </>
+          )}
+          {recentNotes.length > 0 && (
+            <>
+              <PreQueryLabel>recent notes</PreQueryLabel>
+              {recentNotes.map((n) => (
+                <PreQueryRow
+                  key={`recent-note:${n.id}`}
+                  kind="note"
+                  title={clean(n.title) || "untitled"}
+                  sub={clean(n.excerpt) || null}
+                  onClick={() => { onOpenNote(n); close(); }}
+                />
+              ))}
+            </>
+          )}
+        </div>
+      )}
+
       {/* results */}
       {showPanel && (
         <div
@@ -700,5 +759,64 @@ export function QuickFind({
         </div>
       )}
     </div>
+  );
+}
+
+function PreQueryLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      fontSize: 9, fontWeight: 600, letterSpacing: 1.2, textTransform: "uppercase",
+      color: frostInk.faint, padding: "6px 10px 2px",
+    }}>
+      {children}
+    </div>
+  );
+}
+
+function PreQueryRow({ kind, title, sub, onClick }: {
+  kind: Kind; title: string; sub?: string | null; onClick: () => void;
+}) {
+  const c = KIND_COLOR[kind];
+  const Icon = KIND_ICON[kind];
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      onMouseDown={(e) => e.preventDefault()}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onClick={onClick}
+      style={{
+        display: "flex", alignItems: "center", gap: 8, width: "100%",
+        padding: "6px 8px", borderRadius: 14, border: "none", cursor: "pointer",
+        textAlign: "left", fontFamily: FONT,
+        background: hover ? frostInk.hover : "transparent",
+      }}
+    >
+      <span
+        style={{
+          flexShrink: 0, width: 24, height: 24, borderRadius: 10,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          background: `color-mix(in srgb, ${c} 15%, transparent)`,
+        }}
+      >
+        <Icon size={12} color={c} strokeWidth={1.9} />
+      </span>
+      <span style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0, flex: 1 }}>
+        <span style={{
+          fontSize: 12, fontWeight: 500, color: frostInk.text,
+          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+        }}>
+          {title}
+        </span>
+        {sub && (
+          <span style={{
+            fontSize: 10.5, color: frostInk.faint,
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+          }}>
+            {sub}
+          </span>
+        )}
+      </span>
+    </button>
   );
 }
