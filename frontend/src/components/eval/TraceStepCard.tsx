@@ -164,10 +164,13 @@ function serializedLength(v: unknown): number {
 
 function CodeBlock({ label, value }: { label: string; value: unknown }) {
   const [expanded, setExpanded] = useState(false);
-  const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-  // Big payloads (master_prompt, recall) get an expand button → modal that
-  // decodes JSON string escapes (\n \t \" \\ etc) into real chars so the
-  // assembled prompt is actually readable instead of one JSON-string wall.
+  const raw = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  // Payloads (esp. reply/output text) arrive with JSON string escapes still
+  // literal (\n \t \" \\ …) — decode once here so the inline preview shows
+  // real line breaks instead of a wall of "\n" characters.
+  const text = decodeEscapes(raw);
+  // Big payloads (master_prompt, recall) get an expand button → modal for a
+  // focused read.
   const showExpand = text.length > 200;
   return (
     <div>
@@ -224,10 +227,9 @@ function CodeBlock({ label, value }: { label: string; value: unknown }) {
   );
 }
 
-// Modal that renders a payload with JSON string escapes (\n \t \" \\ …) decoded
-// back to real chars — the master_prompt step stores the assembled system prompt
-// as a JSON object, so the inline <pre> shows it as one escaped string. Here the
-// reviewer can read it laid out.
+// Modal for a focused read of an already-decoded payload (see CodeBlock,
+// which decodes JSON string escapes once before either the inline preview
+// or this modal ever sees the text).
 function FormattedModal({
   label,
   text,
@@ -237,7 +239,7 @@ function FormattedModal({
   text: string;
   onClose: () => void;
 }) {
-  const formatted = decodeEscapes(text);
+  const formatted = text;
   return (
     <div
       onClick={onClose}

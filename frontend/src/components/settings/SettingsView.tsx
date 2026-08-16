@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import pkg from "../../../package.json";
 import { GOONI_THEMES, GOONI_THEME_LABELS, THEME_PALETTES, useGooniThemeStore, type GooniTheme } from "../../stores/useGooniThemeStore";
 import { useProfileStore } from "../../stores/useProfileStore";
-import { BASE as API_BASE, uploadAvatarImage, updatePublicAvatar } from "../../services/api";
+import { BASE as API_BASE, apiFetch, uploadAvatarImage, updatePublicAvatar } from "../../services/api";
 import { SettingsPanel } from "../SettingsPanel";
 import { IntegrationSection } from "../IntegrationSection";
 import { CommentAvatar } from "../notes/CommentAvatar";
@@ -460,7 +460,7 @@ function DeploymentsBlock() {
     setFlyState((s) => ({ ...s, status: "checking" }));
     const t0 = performance.now();
     try {
-      const r = await fetch(`${API_BASE}/health`, { cache: "no-store" });
+      const r = await apiFetch(`${API_BASE}/health`, { cache: "no-store" });
       if (r.ok) {
         const j = await r.json();
         if (j?.fly) setFlyInfo(j.fly);
