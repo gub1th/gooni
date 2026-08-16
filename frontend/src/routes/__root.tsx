@@ -370,11 +370,11 @@ function AppShell() {
           background: isImmersive ? "var(--gooni-bg, #FFFFFF)" : "var(--gooni-void, #000000)",
           position: "relative",
           // Reserve a permanent left lane for the persistent IconRail so nothing
-          // underlaps it. STATIC (not hover-driven) → no reflow jank. Immersive
-          // surfaces (and /focus, which owns its own full-bleed chrome) get no
-          // lane.
-          paddingLeft: isImmersive || isFocusRoute ? 0 : RAIL_LANE,
-          paddingTop: isImmersive || isFocusRoute ? 0 : HEADER_H,
+          // underlaps it. STATIC (not hover-driven) → no reflow jank. Only the
+          // immersive surface (/creative) owns its own chrome and skips it —
+          // /focus is a normal shell citizen now.
+          paddingLeft: isImmersive ? 0 : RAIL_LANE,
+          paddingTop: isImmersive ? 0 : HEADER_H,
         }}
       >
         {/* Non-home surfaces SLIDE IN as one panel over a home that stays
@@ -403,32 +403,35 @@ function AppShell() {
           <Outlet />
         </div>
         </SurfaceHost>
-        {/* /focus's own persistent, full-bleed panel — see SurfaceHost above
-            for why it can't share that one. Mounted here (not by the route
-            switch) for the same reason SurfaceHost is: a node that first
-            paints already open has no parked frame to animate FROM, so it
-            has to live for the whole session and just sit off-screen until
-            `isFocusRoute` flips it open. FocusKiosk renders its OWN IconRail
-            inside, so the shared one below stands down whenever this is up. */}
-        <SurfacePanel open={isFocusRoute} viewKey="focus" onDismiss={gotoBlank} fullBleed>
+        {/* /focus's own persistent panel — see SurfaceHost above for why it
+            can't share that one (it's gated on `location.pathname`, not a
+            search param, so it can't slot into `surfaceKey`). Mounted here
+            (not by the route switch) for the same reason SurfaceHost is: a
+            node that first paints already open has no parked frame to
+            animate FROM, so it has to live for the whole session and just
+            sit off-screen until `isFocusRoute` flips it open. It is NOT
+            `fullBleed` — /focus is a proper shell citizen now, sharing the
+            rail lane + header offset like every other surface, rather than
+            a bare kiosk that skipped them. FocusKiosk no longer renders its
+            own IconRail; the shared one below covers it. */}
+        <SurfacePanel open={isFocusRoute} viewKey="focus" onDismiss={gotoBlank}>
           <FocusKiosk />
         </SurfacePanel>
-        {/* IconRail is THE app-level nav, always present — including on
-            notes, where the Sidebar next to it is note-browser-only and
-            carries no app nav of its own. /focus renders its own, so this
-            one stands down there. */}
-        {!isImmersive && !isFocusRoute && (
+        {/* IconRail is THE app-level nav, always present on every
+            non-immersive surface — including /focus, which used to render
+            its own copy and skip the shared header/footer entirely. */}
+        {!isImmersive && (
           <IconRail onOpenSettings={() => setSettingsOpen((o) => !o)} settingsActive={settingsOpen} />
         )}
-        {!isImmersive && !isFocusRoute && <FooterIsland />}
+        {!isImmersive && <FooterIsland />}
         <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
         {/* ONE sticky header, on every non-immersive surface — date, quickfind,
             mic, log, theme. It replaces four separately-positioned fixed
             elements plus the two rival corner clusters. Settings joins it when
-            it becomes a surface; the rail still owns it. /focus stays
-            chrome-less here — it's still a bare full-bleed hub, just one that
-            now slides in rather than snapping open. */}
-        {!isImmersive && !isFocusRoute && (
+            it becomes a surface; the rail still owns it. /focus gets it too now
+            — it's a real hub with its own task list and history, not a bare
+            kiosk that should skip the shared chrome. */}
+        {!isImmersive && (
           <AppHeader
             onOpenNote={(n) => useHomeChromeStore.getState().openNote?.(n)}
             onOpenTrackables={() => navigate({ to: "/", search: { trackables: true } })}

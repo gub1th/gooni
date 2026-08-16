@@ -4,7 +4,6 @@ import { GooniAsleep } from "./GooniAsleep";
 import { FOCUS_PALETTES } from "./focusPalette";
 import { FocusExpanded } from "./FocusExpanded";
 import { FocusHistory } from "./FocusHistory";
-import { IconRail } from "../ambient/IconRail";
 import { TodayList, type TodayRow } from "../ambient/TodayList";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
 import { useFocusSessionStore } from "../../stores/useFocusSessionStore";
@@ -27,10 +26,9 @@ const EMPTY_TOTALS: FocusTotals = { today: 0, byPromise: {} };
 // `/focus` — grown from a chromeless second-monitor kiosk into a real hub
 // (2026-08-15): today's tasks (+ add), clickable session history with an
 // attribution drill-down, and the same start-a-session gesture the home's
-// task rows use. Still chromeless in the router's eyes (`isChromelessPath`) —
-// it renders its OWN IconRail rather than growing the shared shell's sheet
-// system, since the running-session view is still a bare full-bleed surface
-// and not a panel over anything.
+// task rows use. It's a normal shell citizen now — the shared IconRail,
+// AppHeader and FooterIsland all render around it (via __root's SurfacePanel,
+// no longer `fullBleed`), so this component owns none of that chrome itself.
 //
 // GooniAsleep stays the idle-state centrepiece — 2D SVG, low-opacity,
 // pointer-events:none, unchanged — with the task list and history laid over
@@ -112,9 +110,7 @@ export function FocusKiosk() {
   }
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: frostInk.sheet, fontFamily: FONT, overflow: "hidden" }}>
-      <IconRail />
-
+    <div style={{ position: "relative", width: "100%", height: "100%", background: frostInk.sheet, fontFamily: FONT, overflow: "hidden" }}>
       {session ? (
         <FocusExpanded />
       ) : (
