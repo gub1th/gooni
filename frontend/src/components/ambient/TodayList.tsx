@@ -443,6 +443,15 @@ function TaskRow({
     <div
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
+      onClick={onFocus}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onFocus();
+        }
+      }}
       style={{
         position: "relative",
         display: "flex",
@@ -450,6 +459,7 @@ function TaskRow({
         justifyContent: "flex-start",
         gap: 12,
         padding: "5px 0",
+        cursor: "pointer",
       }}
     >
       <span style={{ position: "relative", flex: "none", width: 18, height: 18 }}>
@@ -471,7 +481,10 @@ function TaskRow({
           />
         )}
         <button
-          onClick={onTick}
+          onClick={(e) => {
+            e.stopPropagation();
+            onTick();
+          }}
           aria-label={done ? `Reopen ${item.content}` : `Complete ${item.content}`}
           aria-pressed={done}
           style={{
@@ -574,7 +587,10 @@ function TaskRow({
         </div>
       ) : (
         <button
-          onClick={onFocus}
+          onClick={(e) => {
+            e.stopPropagation();
+            onFocus();
+          }}
           aria-label={`Focus on ${item.content}`}
           title="focus"
           style={{
@@ -623,7 +639,10 @@ function RowButton({
   const [hover, setHover] = useState(false);
   return (
     <button
-      onClick={onClick}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
       aria-label={label}
       title={label}
       onMouseEnter={() => setHover(true)}

@@ -4,7 +4,7 @@ import {
   FileText, Brain, LayoutGrid, CalendarDays,
   SearchCheck, type LucideIcon,
 } from "lucide-react";
-import { FONT, frost, frostInk, z } from "../../ui";
+import { FONT, frost, z } from "../../ui";
 import { GooniLogo } from "../GooniLogo";
 
 // THE app nav — a persistent centered pill of icons at the left edge (NOT a
@@ -138,20 +138,6 @@ export function IconRail() {
             {it.mascot
               ? <GooniLogo size={20} />
               : it.Icon && <it.Icon size={18} strokeWidth={1.9} color={it.color} style={{ opacity: active ? 1 : 0.72 }} />}
-
-            {/* active indicator — a small dot at the outer edge, the same
-                treatment vocabulary as everything else on this surface (no
-                fill, no shadow, just a quiet mark) */}
-            {active && (
-              <span
-                aria-hidden
-                style={{
-                  position: "absolute", left: -3, top: "50%", transform: "translateY(-50%)",
-                  width: 3, height: 3, borderRadius: 999,
-                  background: frostInk.accent,
-                }}
-              />
-            )}
 
             {/* label flyout — overlay to the right, no content push */}
             <span
