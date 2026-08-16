@@ -298,9 +298,9 @@ function IntegrationsTab() {
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <IntegrationSection
           provider="google"
-          label="Google Calendar"
+          label="Google (Calendar + Gmail)"
           icon={<GoogleCalendarLogo />}
-          blurbConfigured="Connect to let Gooni create + edit calendar events from chat."
+          blurbConfigured="Connect to let Gooni create + edit calendar events from chat and read Gmail threads."
           blurbNotConfigured="Set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URI on the backend to enable."
         />
         <IntegrationSection
