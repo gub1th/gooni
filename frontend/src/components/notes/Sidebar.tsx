@@ -368,19 +368,30 @@ export function Sidebar({ onAllNotes, onSelectNote }: SidebarProps) {
           className="gooni-sidebar-scroll"
           style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", padding: "4px 0" }}
         >
-          {/* === Notes section ===
-              Header row clickable → All Notes. "all" trailing link is
-              redundant w/ header click but keeps the explicit affordance.
-              The pen icon next to the logo owns note creation. */}
-          <SidebarSection
-            label="Notes"
-            Icon={FileText}
-            iconColor={ICON_TINT.allNotes}
-            active
-            onHeaderClick={handleAllNotes}
-            trailingLabel="all"
-            onTrailingClick={handleAllNotes}
+          {/* All Notes — a plain link row, not a section header. The sidebar is
+              always-expanded and notes-only now (no collapse toggle, no
+              app-level nav to distinguish itself from), so the green "Notes"
+              banner this used to be was announcing something nobody needed
+              announced — the GroupLabel rows below (PINNED/RECENT/DRAFTS)
+              already give the list its structure. */}
+          <button
+            onClick={handleAllNotes}
+            style={{
+              display: "flex", alignItems: "center", gap: 8,
+              width: "100%", background: "none", border: "none", cursor: "pointer",
+              padding: "7px 14px", textAlign: "left",
+              color: "rgb(var(--gooni-ink, 244 245 244) / 0.55)",
+              fontSize: 12.5, fontWeight: 500,
+              fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+              transition: "color 0.12s",
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-text, #1C1C1E)"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "rgb(var(--gooni-ink, 244 245 244) / 0.55)"; }}
           >
+            <FileText size={14} strokeWidth={1.8} color={ICON_TINT.allNotes} style={{ flexShrink: 0 }} />
+            All notes
+          </button>
+          <div>
             {orderedPinnedNotes.length > 0 && <GroupLabel label="Pinned" />}
             {orderedPinnedNotes.map((note) => (
               <SidebarChildRow
@@ -435,7 +446,7 @@ export function Sidebar({ onAllNotes, onSelectNote }: SidebarProps) {
                 onClick={() => setDraftsExpanded((v) => !v)}
               />
             )}
-          </SidebarSection>
+          </div>
 
           {allTags.length > 0 && (
             <>

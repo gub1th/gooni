@@ -103,7 +103,7 @@ export function AllNotesDiscovery({ onSelectNote, onCompose }: AllNotesDiscovery
         flex: 1,
         height: "100%",
         overflowY: "auto",
-        background: "var(--gooni-bg, #FFFFFF)",
+        background: ctok.sheet,
         fontFamily: FONT,
       }}
     >
@@ -131,14 +131,14 @@ export function AllNotesDiscovery({ onSelectNote, onCompose }: AllNotesDiscovery
               style={{
                 fontSize: 26,
                 fontWeight: 700,
-                color: "var(--gooni-text, #1C1C1E)",
+                color: ctok.text,
                 letterSpacing: "-0.4px",
                 marginBottom: 4,
               }}
             >
               All Notes
             </div>
-            <div style={{ fontSize: 13, color: "var(--gooni-muted, #8E8E93)" }}>
+            <div style={{ fontSize: 13, color: ctok.muted }}>
               Find a note across every space — or start a new one.
             </div>
           </div>
@@ -150,9 +150,9 @@ export function AllNotesDiscovery({ onSelectNote, onCompose }: AllNotesDiscovery
               style={{
                 height: 32, padding: "0 12px", borderRadius: 8,
                 background: cleanConfirm ? ctok.danger : "transparent",
-                border: cleanConfirm ? "none" : "1px solid rgba(0,0,0,0.10)",
+                border: cleanConfirm ? "none" : `1px solid ${ctok.border}`,
                 cursor: "pointer",
-                color: cleanConfirm ? "#fff" : "var(--gooni-muted, #8E8E93)",
+                color: cleanConfirm ? "#fff" : ctok.muted,
                 fontSize: 12.5, fontWeight: 500,
                 fontFamily: FONT,
                 display: "inline-flex", alignItems: "center", gap: 6,
@@ -172,7 +172,7 @@ export function AllNotesDiscovery({ onSelectNote, onCompose }: AllNotesDiscovery
                 borderRadius: 8,
                 border: "none",
                 background: ctok.text,
-                color: ctok.card,
+                color: ctok.sheet,
                 fontFamily: FONT,
                 fontSize: 12.5,
                 fontWeight: 500,
@@ -192,14 +192,13 @@ export function AllNotesDiscovery({ onSelectNote, onCompose }: AllNotesDiscovery
             alignItems: "center",
             gap: 12,
             padding: "14px 18px",
-            background: "var(--gooni-card, #FFFFFF)",
-            border: "1px solid rgba(0,0,0,0.10)",
+            background: ctok.card,
+            border: `1px solid ${ctok.border}`,
             borderRadius: 12,
-            boxShadow: "0 4px 20px rgba(0,0,0,0.04)",
             marginBottom: 24,
           }}
         >
-          <Search size={18} strokeWidth={1.7} color="var(--gooni-muted, #8E8E93)" />
+          <Search size={18} strokeWidth={1.7} color={ctok.muted} />
           <input
             ref={inputRef}
             value={query}
@@ -211,12 +210,12 @@ export function AllNotesDiscovery({ onSelectNote, onCompose }: AllNotesDiscovery
               outline: "none",
               fontSize: 15,
               fontFamily: FONT,
-              color: "var(--gooni-text, #1C1C1E)",
+              color: ctok.text,
               background: "transparent",
             }}
           />
           {searching && (
-            <span style={{ fontSize: 11, color: "var(--gooni-muted, #8E8E93)" }}>searching…</span>
+            <span style={{ fontSize: 11, color: ctok.muted }}>searching…</span>
           )}
         </div>
 
@@ -233,14 +232,14 @@ export function AllNotesDiscovery({ onSelectNote, onCompose }: AllNotesDiscovery
               fontSize: 11.5,
               letterSpacing: 1.2,
               textTransform: "uppercase",
-              color: "var(--gooni-muted, #8E8E93)",
+              color: ctok.muted,
               fontWeight: 600,
               margin: 0,
             }}
           >
             {showResults ? "Search results" : "Recent"}
           </h3>
-          <span style={{ fontSize: 11, color: "var(--gooni-muted, #8E8E93)" }}>
+          <span style={{ fontSize: 11, color: ctok.muted }}>
             {visible.length} {visible.length === 1 ? "note" : "notes"}
           </span>
         </div>
@@ -250,7 +249,7 @@ export function AllNotesDiscovery({ onSelectNote, onCompose }: AllNotesDiscovery
             style={{
               padding: "48px 16px",
               textAlign: "center",
-              color: "var(--gooni-muted, #8E8E93)",
+              color: ctok.muted,
               fontSize: 13.5,
             }}
           >
@@ -293,8 +292,8 @@ function NoteRow({
         alignItems: "stretch",
         gap: 14,
         padding: "12px 14px",
-        background: "var(--gooni-card, #FFFFFF)",
-        border: "1px solid rgba(0,0,0,0.06)",
+        background: ctok.card,
+        border: `1px solid ${ctok.border}`,
         borderRadius: 10,
         cursor: "pointer",
         textAlign: "left",
@@ -303,13 +302,11 @@ function NoteRow({
       }}
       onMouseEnter={(e) => {
         const el = e.currentTarget as HTMLButtonElement;
-        el.style.background = "rgba(0,0,0,0.025)";
-        el.style.borderColor = "rgba(0,0,0,0.12)";
+        el.style.background = ctok.cardRaised;
       }}
       onMouseLeave={(e) => {
         const el = e.currentTarget as HTMLButtonElement;
-        el.style.background = "var(--gooni-card, #FFFFFF)";
-        el.style.borderColor = "rgba(0,0,0,0.06)";
+        el.style.background = ctok.card;
       }}
     >
       {/* Thumbnail (image preview if present, else FileText icon as a
@@ -321,11 +318,11 @@ function NoteRow({
           flexShrink: 0,
           borderRadius: 8,
           overflow: "hidden",
-          background: "rgba(0,0,0,0.04)",
+          background: ctok.cardRaised,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          color: "var(--gooni-muted, #B0B0B5)",
+          color: ctok.faint,
         }}
       >
         {thumb ? (
@@ -345,7 +342,7 @@ function NoteRow({
           style={{
             fontSize: 14.5,
             fontWeight: 600,
-            color: "var(--gooni-text, #1C1C1E)",
+            color: ctok.text,
             lineHeight: 1.35,
             overflow: "hidden",
             textOverflow: "ellipsis",
@@ -358,7 +355,7 @@ function NoteRow({
           <div
             style={{
               fontSize: 12.5,
-              color: "var(--gooni-muted, #8E8E93)",
+              color: ctok.muted,
               lineHeight: 1.5,
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -376,7 +373,7 @@ function NoteRow({
             alignItems: "center",
             gap: 10,
             fontSize: 11,
-            color: "var(--gooni-muted, #8E8E93)",
+            color: ctok.muted,
             marginTop: 2,
           }}
         >

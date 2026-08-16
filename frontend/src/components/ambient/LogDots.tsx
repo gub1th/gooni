@@ -119,6 +119,9 @@ export function LogDots({
   const [noteDraft, setNoteDraft] = useState(""); // today's daily-log note
   const [labelEditId, setLabelEditId] = useState<number | null>(null); // boolean tag editor
   const [labelDraft, setLabelDraft] = useState("");
+  // embedded (matrix) mode only — opens the fill overlay on top, independent
+  // of the home's per-day dismiss (see dailyFill.ts)
+  const [showFill, setShowFill] = useState(false);
   const editRef = useRef<HTMLInputElement | null>(null);
   const labelRef = useRef<HTMLInputElement | null>(null);
 
@@ -275,14 +278,43 @@ export function LogDots({
     // Full-screen route view: the SurfacePanel it slides in inside already
     // supplies the frame, the backdrop and the slide/dismiss motion, so this
     // just fills the panel's content slot — same shape as MemoriesView /
-    // CalendarPanel next to it.
+    // CalendarPanel next to it. It used to wrap LogTable in its own frosted,
+    // rounded, margined GLASS card (the same treatment the centered popover
+    // form of this component wears) — floating a second bordered panel inside
+    // the surface panel read as a different chrome language from every other
+    // alternate page (memories/audit render flush, a plain header over a flat
+    // sheet). Dropped in favor of that same header-over-sheet shape.
     return (
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "hidden", fontFamily: FONT, background: "var(--gooni-void, #000000)" }}>
-        <div style={{ flex: 1, minHeight: 0, padding: 20, boxSizing: "border-box", display: "flex" }}>
-          <div style={{ ...GLASS, borderRadius: 16, position: "relative", overflow: "hidden", flex: 1, minWidth: 0, display: "flex" }}>
-            <LogTable />
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "hidden", fontFamily: FONT, background: frostInk.sheet }}>
+        <div style={{ padding: "20px 24px 4px", flexShrink: 0, display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16 }}>
+          <div>
+            <div style={{ fontSize: 26, fontWeight: 700, color: frostInk.text, letterSpacing: "-0.4px", marginBottom: 4 }}>
+              Trackables
+            </div>
+            <div style={{ fontSize: 13, color: frostInk.muted }}>
+              The record — history and trends across every trackable.
+            </div>
           </div>
+          {/* the daily fill's other entry point (see dailyFill.ts): reaching
+              it from TODAY is the ritual path, but a dismissed-for-today row
+              disappears until tomorrow with nothing left on the home to bring
+              it back — this button is always here regardless of that state. */}
+          <button
+            onClick={() => setShowFill(true)}
+            style={{
+              flexShrink: 0, height: 32, padding: "0 14px", borderRadius: 8,
+              border: `1px solid ${frostInk.border}`, background: "transparent",
+              color: frostInk.muted, fontSize: 12.5, fontWeight: 500, fontFamily: FONT,
+              cursor: "pointer",
+            }}
+          >
+            log today
+          </button>
         </div>
+        <div style={{ flex: 1, minHeight: 0, padding: "12px 24px 24px", boxSizing: "border-box", display: "flex" }}>
+          <LogTable />
+        </div>
+        {showFill && <LogDots mode="fill" onClose={() => setShowFill(false)} />}
       </div>
     );
   }
