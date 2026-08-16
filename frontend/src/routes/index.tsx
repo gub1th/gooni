@@ -186,7 +186,17 @@ function LogPage() {
       {createPortal(
         <div
           aria-hidden={view !== "home"}
-          style={view === "home" ? undefined : { pointerEvents: "none" }}
+          style={{
+            pointerEvents: view === "home" ? undefined : "none",
+            // A small right-to-left slide, echoing SurfacePanel's own
+            // entrance, so returning to home from a non-home surface reads as
+            // arriving rather than just being uncovered the instant the panel
+            // clears it. Subtle on purpose — the home is the anchor, not
+            // another page, so this is a nudge (12px) rather than the full
+            // viewport-width slide the panel itself does.
+            transform: view === "home" ? "translateX(0)" : "translateX(12px)",
+            transition: "transform 260ms cubic-bezier(0.32, 0.72, 0, 1)",
+          }}
         >
           <AmbientHome
             covered={view !== "home"}

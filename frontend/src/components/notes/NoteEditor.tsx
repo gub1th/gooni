@@ -1531,7 +1531,12 @@ export function NoteEditor({
           : {
               flex: 1,
               height: "100vh",
-              background: "var(--gooni-card, #FFFFFF)",
+              // The void, not the app-card color — this surface sits next to
+              // the Sidebar over the same dark ground as memories/audit, and
+              // `--gooni-card` (a themed mid-gray in dark mode) read as a
+              // lighter slab against it (the "notes has a gray background"
+              // complaint).
+              background: ctok.sheet,
               display: "flex",
               flexDirection: "column",
               overflow: "hidden",
@@ -1581,8 +1586,9 @@ export function NoteEditor({
           left: 0,
           right: 0,
           height: 84,
-          background:
-            "linear-gradient(to bottom, var(--gooni-card, #FFFFFF) 35%, transparent 100%)",
+          background: embedded
+            ? "linear-gradient(to bottom, var(--gooni-card, #FFFFFF) 35%, transparent 100%)"
+            : `linear-gradient(to bottom, ${ctok.sheet} 35%, transparent 100%)`,
           pointerEvents: "none",
           zIndex: 5,
         }}
