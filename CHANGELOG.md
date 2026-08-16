@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.252.0 — 2026-08-16 (minor)
+
+- feat(focus): WhatsApp distraction alert for browser activity, not just phone Shortcuts (#525)
+
 ## 0.251.1 — 2026-08-16 (patch)
 
 - fix(notes): cleanup deletes only truly empty notes, not short real content (#524)
