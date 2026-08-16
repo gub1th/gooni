@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import type { ApiMemory } from "../../services/api";
 import { NeuralBrain } from "../animations/NeuralBrain";
 import { frostInk as ctok, FONT } from "../../ui";
+import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
 
 
 interface MemoryBrainProps {
@@ -327,11 +328,161 @@ export function MemoryBrain({
   );
 }
 
-// Full-screen graph view, opened by clicking the brain — the same bubble
-// layout blown up to the whole viewport, with room for every memory rather
-// than the inline strip's capped 12. Restores a click affordance the brain
-// button carried ("Visualize notes" title, an `onClick` prop it never
-// received) that had gone dead: nothing wired it to anything.
+// ── Force-directed graph (restored) ─────────────────────────────────────────
+// The full-screen graph used to be the same fan layout blown up — this brings
+// back the earlier force-directed sim (custom physics, no library — mirrors
+// the pre-v2-nuke `ExploreModal.tsx` notes graph, which ran the identical
+// repel/spring/damping loop over notes instead of memories). Nodes are typed
+// by memory kind (color = PALETTE, shared with the inline bubbles + the
+// /memories table so a "goal" reads the same color everywhere); edges connect
+// memories that are actually related given what `/memories` already returns
+// (no API change): a supersession chain, memories extracted from the same
+// note, and memories sharing a recall `key`. Nodes drift toward a per-TYPE
+// anchor point arranged in a ring, which is what produces the type clustering
+// — the sim still free-floats within a cluster so it doesn't look like a pie
+// chart. Gooni (NeuralBrain) sits fixed at the canvas center as the anchor
+// the whole graph orbits.
+
+interface GraphEdge {
+  from: number;
+  to: number;
+  weight: number; // 0..1, drives both spring strength and line opacity
+}
+
+interface SimNode {
+  memory: ApiMemory;
+  x: number; y: number;
+  vx: number; vy: number;
+  radius: number;
+  anchorX: number; anchorY: number; // per-type cluster target
+  lastFlash: number;
+}
+
+// Real relations only, derived from fields `/memories` already returns:
+// supersession (a memory that replaced another), co-extraction (same source
+// note), and shared recall slot (same `key`). No embeddings, no guessing.
+function buildMemoryEdges(memories: ApiMemory[]): GraphEdge[] {
+  const edges: GraphEdge[] = [];
+  const ids = new Set(memories.map((m) => m.id));
+
+  for (const m of memories) {
+    if (m.superseded_by != null && ids.has(m.superseded_by)) {
+      edges.push({ from: m.id, to: m.superseded_by, weight: 0.95 });
+    }
+  }
+
+  function starEdges(groupBy: (m: ApiMemory) => string | number | null, weight: number) {
+    const groups = new Map<string | number, ApiMemory[]>();
+    for (const m of memories) {
+      const k = groupBy(m);
+      if (k == null) continue;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k)!.push(m);
+    }
+    for (const group of groups.values()) {
+      if (group.length < 2) continue;
+      const [head, ...rest] = group;
+      for (const g of rest) edges.push({ from: head.id, to: g.id, weight });
+    }
+  }
+  starEdges((m) => m.source_note_id, 0.35);
+  starEdges((m) => m.key, 0.5);
+
+  return edges;
+}
+
+function buildSimNodes(memories: ApiMemory[], width: number, height: number): SimNode[] {
+  const types = Array.from(new Set(memories.map((m) => m.type)));
+  const ringR = Math.min(width, height) * 0.32;
+  const cx = width / 2;
+  const cy = height / 2;
+  const anchorFor = new Map<string, { x: number; y: number }>();
+  types.forEach((t, i) => {
+    const angle = (i / Math.max(1, types.length)) * Math.PI * 2 - Math.PI / 2;
+    anchorFor.set(t, { x: cx + Math.cos(angle) * ringR, y: cy + Math.sin(angle) * ringR });
+  });
+  return memories.map((m) => {
+    const anchor = anchorFor.get(m.type) ?? { x: cx, y: cy };
+    const jitter = 30;
+    return {
+      memory: m,
+      x: anchor.x + (Math.random() - 0.5) * jitter,
+      y: anchor.y + (Math.random() - 0.5) * jitter,
+      vx: 0, vy: 0,
+      radius: 4 + m.confidence * 5,
+      anchorX: anchor.x, anchorY: anchor.y,
+      lastFlash: -Infinity,
+    };
+  });
+}
+
+function stepGraph(
+  nodes: SimNode[],
+  edges: GraphEdge[],
+  nodeIndex: Map<number, SimNode>,
+  width: number,
+  height: number,
+) {
+  const REPULSION = 2200;
+  const SPRING_K = 0.02;
+  const IDEAL_EDGE_LEN = 70;
+  const ANCHOR_K = 0.006; // pull toward this node's type cluster
+  const BRAIN_REPEL_R = 70; // keep clear of the center Gooni
+  const DAMPING = 0.82;
+  const MAX_SPEED = 12;
+  const cx = width / 2, cy = height / 2;
+
+  for (let i = 0; i < nodes.length; i++) {
+    const a = nodes[i];
+    for (let j = i + 1; j < nodes.length; j++) {
+      const b = nodes[j];
+      let dx = a.x - b.x;
+      let dy = a.y - b.y;
+      let distSq = dx * dx + dy * dy;
+      if (distSq < 0.01) {
+        dx = (Math.random() - 0.5) * 0.5;
+        dy = (Math.random() - 0.5) * 0.5;
+        distSq = dx * dx + dy * dy + 0.01;
+      }
+      const dist = Math.sqrt(distSq);
+      const f = REPULSION / distSq;
+      a.vx += (dx / dist) * f; a.vy += (dy / dist) * f;
+      b.vx -= (dx / dist) * f; b.vy -= (dy / dist) * f;
+    }
+  }
+  for (const e of edges) {
+    const a = nodeIndex.get(e.from);
+    const b = nodeIndex.get(e.to);
+    if (!a || !b) continue;
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 0.0001;
+    const f = (dist - IDEAL_EDGE_LEN) * SPRING_K * (0.5 + e.weight);
+    a.vx += (dx / dist) * f; a.vy += (dy / dist) * f;
+    b.vx -= (dx / dist) * f; b.vy -= (dy / dist) * f;
+  }
+  for (const n of nodes) {
+    n.vx += (n.anchorX - n.x) * ANCHOR_K;
+    n.vy += (n.anchorY - n.y) * ANCHOR_K;
+    // Soft repel from the center Gooni so nodes don't sit on top of it.
+    const dx = n.x - cx, dy = n.y - cy;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 0.0001;
+    if (dist < BRAIN_REPEL_R) {
+      const f = (BRAIN_REPEL_R - dist) * 0.4;
+      n.vx += (dx / dist) * f; n.vy += (dy / dist) * f;
+    }
+    n.vx *= DAMPING; n.vy *= DAMPING;
+    const sp = Math.sqrt(n.vx * n.vx + n.vy * n.vy);
+    if (sp > MAX_SPEED) { n.vx *= MAX_SPEED / sp; n.vy *= MAX_SPEED / sp; }
+    n.x += n.vx; n.y += n.vy;
+  }
+}
+
+// Full-screen graph view, opened by clicking the brain — a force-directed
+// sim over every memory rather than the inline strip's capped 12, with nodes
+// clustered by type and edges for real relations (supersession / same note /
+// same key). Restores a click affordance the brain button carried
+// ("Visualize notes" title, an `onClick` prop it never received) that had
+// gone dead: nothing wired it to anything.
 function MemoryGraphModal({
   memories,
   onClose,
@@ -342,7 +493,11 @@ function MemoryGraphModal({
   navigate: ReturnType<typeof useNavigate>;
 }) {
   const [selected, setSelected] = useState<ApiMemory | null>(null);
-  const layout = useMemo(() => computeLayout(memories), [memories]);
+  const [hovered, setHovered] = useState<ApiMemory | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const theme = useGooniThemeStore((s) => s.theme);
+  const edges = useMemo(() => buildMemoryEdges(memories), [memories]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -352,11 +507,155 @@ function MemoryGraphModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const W = 900;
-  const H = 560;
-  const cx = W / 2;
-  const cy = H - 90;
-  const BRAIN_SIZE = 88;
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const panel = panelRef.current;
+    if (!canvas || !panel || memories.length === 0) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    let panelW = panel.clientWidth;
+    let panelH = panel.clientHeight;
+    function resize() {
+      panelW = panel!.clientWidth;
+      panelH = panel!.clientHeight;
+      const dpr = window.devicePixelRatio || 1;
+      canvas!.width = panelW * dpr;
+      canvas!.height = panelH * dpr;
+      canvas!.style.width = `${panelW}px`;
+      canvas!.style.height = `${panelH}px`;
+      ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    resize();
+    const ro = new ResizeObserver(resize);
+    ro.observe(panel);
+
+    const nodes = buildSimNodes(memories, panelW, panelH);
+    const nodeIndex = new Map(nodes.map((n) => [n.memory.id, n]));
+    let hoveredNode: SimNode | null = null;
+
+    // Pre-warm so the graph opens already settled, not mid-explosion.
+    for (let i = 0; i < 160; i++) stepGraph(nodes, edges, nodeIndex, panelW, panelH);
+
+    // Random periodic flashes — same "neurons firing" feel as the notes graph.
+    const FLASH_DURATION_MS = 520;
+    const flashInterval = setInterval(() => {
+      if (!nodes.length) return;
+      nodes[Math.floor(Math.random() * nodes.length)].lastFlash = performance.now();
+    }, 900);
+
+    function toCanvasCoords(clientX: number, clientY: number) {
+      const rect = canvas!.getBoundingClientRect();
+      return { x: clientX - rect.left, y: clientY - rect.top };
+    }
+    function hitTest(clientX: number, clientY: number): SimNode | null {
+      const c = toCanvasCoords(clientX, clientY);
+      for (let i = nodes.length - 1; i >= 0; i--) {
+        const n = nodes[i];
+        const dx = n.x - c.x, dy = n.y - c.y;
+        const r = Math.max(7, n.radius + 4);
+        if (dx * dx + dy * dy <= r * r) return n;
+      }
+      return null;
+    }
+    function onMove(e: PointerEvent) {
+      const h = hitTest(e.clientX, e.clientY);
+      if (h !== hoveredNode) {
+        hoveredNode = h;
+        setHovered(h?.memory ?? null);
+        canvas!.style.cursor = h ? "pointer" : "default";
+      }
+    }
+    function onDown(e: PointerEvent) {
+      const h = hitTest(e.clientX, e.clientY);
+      if (h) setSelected((prev) => (prev?.id === h.memory.id ? null : h.memory));
+    }
+    canvas.addEventListener("pointermove", onMove);
+    canvas.addEventListener("pointerdown", onDown);
+
+    const C = theme === "dark"
+      ? { bg: "#0C0C0C", edgeRGB: "255,255,255", labelBg: "#E5E5E7", labelText: "#1C1C1E" }
+      : { bg: "#f7f6f2", edgeRGB: "17,17,19", labelBg: "#1C1C1E", labelText: "#FFFFFF" };
+
+    let raf = 0;
+    function frame() {
+      stepGraph(nodes, edges, nodeIndex, panelW, panelH);
+
+      ctx!.clearRect(0, 0, panelW, panelH);
+      ctx!.fillStyle = C.bg;
+      ctx!.fillRect(0, 0, panelW, panelH);
+
+      const now = performance.now();
+      for (const e of edges) {
+        const a = nodeIndex.get(e.from);
+        const b = nodeIndex.get(e.to);
+        if (!a || !b) continue;
+        ctx!.strokeStyle = `rgba(${C.edgeRGB},${0.08 + e.weight * 0.22})`;
+        ctx!.lineWidth = 0.6 + e.weight * 1.6;
+        ctx!.beginPath();
+        ctx!.moveTo(a.x, a.y);
+        ctx!.lineTo(b.x, b.y);
+        ctx!.stroke();
+      }
+      for (const n of nodes) {
+        const isHover = hoveredNode === n;
+        const flashAge = now - n.lastFlash;
+        const flashT = Math.max(0, 1 - flashAge / FLASH_DURATION_MS);
+        const intensity = isHover ? 1 : flashT;
+        const palette = paletteFor(n.memory.type);
+
+        ctx!.fillStyle = palette.accent;
+        ctx!.beginPath();
+        ctx!.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
+        ctx!.fill();
+
+        if (intensity > 0.05) {
+          ctx!.strokeStyle = `rgba(74,222,128,${0.5 * intensity})`;
+          ctx!.lineWidth = 2;
+          ctx!.beginPath();
+          ctx!.arc(n.x, n.y, n.radius + 4 + 3 * intensity, 0, Math.PI * 2);
+          ctx!.stroke();
+        }
+      }
+
+      if (hoveredNode) {
+        const label = `${hoveredNode.memory.type} · ${hoveredNode.memory.content.slice(0, 48)}${hoveredNode.memory.content.length > 48 ? "…" : ""}`;
+        ctx!.font = `600 12px ${FONT}`;
+        const metrics = ctx!.measureText(label);
+        const padX = 8;
+        const boxW = metrics.width + padX * 2;
+        const boxH = 22;
+        const boxX = hoveredNode.x - boxW / 2;
+        const boxY = hoveredNode.y + hoveredNode.radius + 10;
+        ctx!.fillStyle = C.labelBg;
+        ctx!.beginPath();
+        const r = 6;
+        ctx!.moveTo(boxX + r, boxY);
+        ctx!.arcTo(boxX + boxW, boxY, boxX + boxW, boxY + boxH, r);
+        ctx!.arcTo(boxX + boxW, boxY + boxH, boxX, boxY + boxH, r);
+        ctx!.arcTo(boxX, boxY + boxH, boxX, boxY, r);
+        ctx!.arcTo(boxX, boxY, boxX + boxW, boxY, r);
+        ctx!.closePath();
+        ctx!.fill();
+        ctx!.fillStyle = C.labelText;
+        ctx!.textBaseline = "middle";
+        ctx!.fillText(label, boxX + padX, boxY + boxH / 2 + 0.5);
+      }
+
+      raf = requestAnimationFrame(frame);
+    }
+    raf = requestAnimationFrame(frame);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      clearInterval(flashInterval);
+      ro.disconnect();
+      canvas.removeEventListener("pointermove", onMove);
+      canvas.removeEventListener("pointerdown", onDown);
+    };
+  }, [memories, edges, theme]);
+
+  const BRAIN_SIZE = 64;
   const brainOuterW = BRAIN_SIZE + 12;
   const brainOuterH = BRAIN_SIZE * 1.125 + 12;
 
@@ -375,8 +674,8 @@ function MemoryGraphModal({
       <div
         style={{
           position: "relative",
-          width: "min(94vw, 960px)",
-          height: "min(88vh, 640px)",
+          width: "min(94vw, 1040px)",
+          height: "min(88vh, 680px)",
           background: ctok.card,
           border: `1px solid ${ctok.hairline}`,
           borderRadius: 16,
@@ -384,11 +683,11 @@ function MemoryGraphModal({
           display: "flex", flexDirection: "column",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", zIndex: 2 }}>
           <div>
             <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: ctok.text }}>memory graph</p>
             <p style={{ margin: "2px 0 0", fontSize: 11.5, color: ctok.muted }}>
-              {memories.length} memor{memories.length === 1 ? "y" : "ies"} · click a node to peek
+              {memories.length} memor{memories.length === 1 ? "y" : "ies"} · {edges.length} link{edges.length === 1 ? "" : "s"} · click a node to peek
             </p>
           </div>
           <button
@@ -401,86 +700,31 @@ function MemoryGraphModal({
           >×</button>
         </div>
 
-        <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
-          <svg
-            width="100%" height="100%"
-            viewBox={`0 0 ${W} ${H}`}
-            preserveAspectRatio="xMidYMid meet"
-            style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
-          >
-            {memories.map((m, i) => {
-              const pos = layout.get(m.id);
-              if (!pos) return null;
-              const tx = cx + Math.cos(pos.angle) * pos.radius * 3.4;
-              const ty = cy + Math.sin(pos.angle) * pos.radius * 2.2;
-              const accent = paletteFor(m.type).accent;
-              return (
-                <line
-                  key={m.id}
-                  x1={cx} y1={cy} x2={tx} y2={ty}
-                  stroke={accent} strokeWidth={1} strokeDasharray="3 3"
-                  style={{ animation: `memory-line-pulse 3.2s ease-in-out infinite ${i * 0.15}s` }}
-                />
-              );
-            })}
-          </svg>
-          <style>{`
-            @keyframes memory-line-pulse {
-              0%, 100% { opacity: 0.30; }
-              50%      { opacity: 0.55; }
-            }
-          `}</style>
+        <div ref={panelRef} style={{ position: "relative", flex: 1, minHeight: 0 }}>
+          <canvas ref={canvasRef} style={{ display: "block", position: "absolute", inset: 0 }} />
 
+          {/* Gooni, fixed at the canvas center — everything else orbits it. */}
           <div style={{
-            position: "absolute", left: "50%", bottom: 40, transform: "translateX(-50%)",
+            position: "absolute", left: "50%", top: "50%",
+            transform: "translate(-50%, -50%)",
             width: brainOuterW, height: brainOuterH,
             display: "flex", alignItems: "center", justifyContent: "center",
+            pointerEvents: "none",
           }}>
             <NeuralBrain size={BRAIN_SIZE} />
           </div>
 
-          {memories.map((m) => {
-            const pos = layout.get(m.id);
-            if (!pos) return null;
-            const tx = cx + Math.cos(pos.angle) * pos.radius * 3.4;
-            const ty = cy + Math.sin(pos.angle) * pos.radius * 2.2;
-            const palette = paletteFor(m.type);
-            const isSelected = selected?.id === m.id;
-            return (
-              <button
-                key={m.id}
-                onClick={() => setSelected(isSelected ? null : m)}
-                style={{
-                  position: "absolute",
-                  left: `${(tx / W) * 100}%`,
-                  top: `${(ty / H) * 100}%`,
-                  transform: "translate(-50%, -50%)",
-                  padding: "5px 11px",
-                  borderRadius: 999,
-                  background: palette.bg,
-                  color: palette.fg,
-                  border: `1px solid ${isSelected ? palette.accent : palette.border}`,
-                  boxShadow: isSelected ? `0 0 0 3px ${palette.accent}33` : "none",
-                  fontFamily: FONT, fontSize: 11.5, fontWeight: 500,
-                  cursor: "pointer",
-                  maxWidth: 200,
-                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                  display: "inline-flex", alignItems: "center", gap: 5,
-                }}
-                title={m.content}
-              >
-                <span style={{ fontSize: 9.5, opacity: 0.7, textTransform: "uppercase", letterSpacing: 0.4 }}>{m.type}</span>
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {m.content.length > 32 ? m.content.slice(0, 32) + "…" : m.content}
-                </span>
-              </button>
-            );
-          })}
+          {memories.length === 0 && (
+            <div style={{
+              position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
+              fontSize: 13, color: ctok.muted,
+            }}>No memories yet.</div>
+          )}
 
           {selected && (
             <div
               style={{
-                position: "absolute", left: "50%", bottom: brainOuterH + 60, transform: "translateX(-50%)",
+                position: "absolute", left: "50%", bottom: 20, transform: "translateX(-50%)",
                 width: 320, maxWidth: "90%", background: ctok.sheet,
                 borderRadius: 12, border: `1px solid ${ctok.hairline}`,
                 padding: "12px 14px", zIndex: 5,
@@ -527,6 +771,9 @@ function MemoryGraphModal({
               </div>
             </div>
           )}
+
+          {/* Suppress unused-var warning for `hovered` (re-renders for cursor + tooltip). */}
+          <span style={{ display: "none" }}>{hovered?.id ?? ""}</span>
         </div>
       </div>
     </div>
