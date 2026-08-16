@@ -367,6 +367,21 @@ export function fmtMinutes(mins: number): string {
   return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
 }
 
+/** `40s` / `12m` / `1h 20m`. The seconds twin of `fmtMinutes`, mirroring the
+ * backend's `activity_context.fmt_dur` — session-scoped sensor spans are often
+ * under a minute, and `fmtMinutes` renders those as `—`, which reads as "no
+ * data" when the honest answer is "forty seconds". Rounded at the RENDER
+ * boundary, same rule: the fractional seconds are the honest sum. */
+export function fmtDuration(seconds: number): string {
+  const s = Math.round(Math.max(0, seconds));
+  if (s < 60) return `${s}s`;
+  const mins = Math.floor(s / 60);
+  if (mins < 60) return `${mins}m`;
+  const h = Math.floor(mins / 60);
+  const rem = mins % 60;
+  return rem ? `${h}h ${String(rem).padStart(2, "0")}m` : `${h}h`;
+}
+
 // ── the quiet sensor line (after-the-fact by design) ─────────────────────────
 // Most-recent-known values on the existing feed cadence. There is deliberately
 // no realtime "what am I looking at right now" endpoint: the timer already

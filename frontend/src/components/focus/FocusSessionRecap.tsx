@@ -1,14 +1,21 @@
 import { FONT } from "../../ui";
 import { FOCUS_PALETTES } from "./focusPalette";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
-import { fmtMinutes } from "../../services/focusTime";
+import { fmtDuration, fmtMinutes } from "../../services/focusTime";
+import { type SessionCountRow, type SessionEvidence, type SessionNameRow } from "../../services/api";
 
 // The richer post-session breakdown. Replaces what used to be nothing —
 // `endFocusSession` just cleared the session and the view fell straight back
 // to `GooniAsleep`. This is deliberately built ONLY from data the session
-// itself produced (segments, evidence frames it triggered) rather than any
-// invented score: the house rule is deterministic-over-LLM for anything
-// user-facing that ranks or summarizes, and there is no model call here at all.
+// itself produced (segments, and what the sensors recorded inside its window)
+// rather than any invented score: the house rule is deterministic-over-LLM for
+// anything user-facing that ranks or summarizes, and there is no model call
+// here at all.
+//
+// The sensor half is session-scoped (`GET /focus/session-activity` over the
+// session's exact `[start, stop)`). It used to fold `/focus/cam/evidence` — a
+// table nothing writes to yet — which is why it said "nothing flagged" through
+// sessions the camera had been firing all the way through.
 
 export interface RecapDay {
   date: string;
@@ -32,7 +39,25 @@ export interface SessionRecapData {
   spanEnd: number;
   perDay: RecapDay[];
   timeline: RecapTimelineSegment[];
+  /** Camera detections that fired INSIDE the session window, by kind. */
   eventsByKind: Record<string, number>;
+  /** Kept evidence frames from the same window, newest first. */
+  evidence: SessionEvidence[];
+  /** Ranked hosts / apps / phone events for the window. */
+  browser: SessionNameRow[];
+  apps: SessionNameRow[];
+  device: SessionCountRow[];
+  /** Seconds the ranked heads above are NOT showing, per layer. Kept apart
+   *  rather than summed: the browser IS one of the apps, so one number over
+   *  both would claim more hidden time than there is. */
+  browserOtherSec: number;
+  appOtherSec: number;
+  /** Union of both interval layers over the window, or `null` when the read
+   *  FAILED — distinct from `0`, which means the sensors genuinely saw nothing.
+   *  The two get different copy, because they are opposite claims. */
+  observedSeconds: number | null;
+  /** Caps that bit on the activity read — shown rather than silently applied. */
+  warnings: string[];
   completionFrame: string | null;
 }
 
@@ -43,6 +68,31 @@ const KIND_LABEL: Record<string, string> = {
   stand: "stood up",
   left_desk: "left desk",
 };
+
+function timeLabel(iso: string | null): string {
+  const d = iso ? new Date(iso.endsWith("Z") || iso.includes("+") ? iso : `${iso}Z`) : null;
+  if (!d || Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+/** One name/value line. Three sections render the same row, so it is one
+ *  component rather than three copies of the same flex rule. */
+function Row({
+  pal,
+  left,
+  right,
+}: {
+  pal: (typeof FOCUS_PALETTES)[keyof typeof FOCUS_PALETTES];
+  left: string;
+  right: string;
+}) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 12.5, padding: "3px 0", color: pal.ink2 }}>
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{left}</span>
+      <span style={{ fontVariantNumeric: "tabular-nums" }}>{right}</span>
+    </div>
+  );
+}
 
 interface Props {
   recap: SessionRecapData;
@@ -146,22 +196,98 @@ export function FocusSessionRecap({ recap, onClose }: Props) {
         </div>
       )}
 
+      {/* what you were on — hosts and apps observed INSIDE the session window,
+          straight off the sensors. No percentage, no verdict: the same line
+          `focus_attribution` and `activity_context` both refuse to cross. */}
+      {(recap.browser.length > 0 || recap.apps.length > 0) && (
+        <div style={{ width: "100%", maxWidth: 420, marginTop: 24 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.1em", color: pal.ink3, marginBottom: 8 }}>
+            WHAT THE SENSORS SAW
+          </div>
+          {recap.browser.map((r) => (
+            <Row key={`b-${r.name}`} pal={pal} left={r.label} right={fmtDuration(r.seconds)} />
+          ))}
+          {recap.apps.map((r) => (
+            <Row key={`a-${r.name}`} pal={pal} left={r.label} right={fmtDuration(r.seconds)} />
+          ))}
+          {/* A truncated head read as the whole is how "that's everything"
+              becomes a lie — so each layer's tail says how much it is hiding. */}
+          {recap.browserOtherSec > 0 && (
+            <div style={{ fontSize: 11, color: pal.ink3, marginTop: 4 }}>
+              + {fmtDuration(recap.browserOtherSec)} across other sites
+            </div>
+          )}
+          {recap.appOtherSec > 0 && (
+            <div style={{ fontSize: 11, color: pal.ink3, marginTop: 2 }}>
+              + {fmtDuration(recap.appOtherSec)} across other apps
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* phone — pre-aggregated device pings that landed inside the window */}
+      {recap.device.length > 0 && (
+        <div style={{ width: "100%", maxWidth: 420, marginTop: 24 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.1em", color: pal.ink3, marginBottom: 8 }}>
+            PHONE
+          </div>
+          {recap.device.map((d) => (
+            <Row key={d.name} pal={pal} left={d.label} right={String(d.count)} />
+          ))}
+        </div>
+      )}
+
       {/* detection events — what the camera flagged, if anything */}
       <div style={{ width: "100%", maxWidth: 420, marginTop: 24 }}>
         <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.1em", color: pal.ink3, marginBottom: 8 }}>
           DETECTION EVENTS
         </div>
         {totalEvents === 0 ? (
-          <div style={{ fontSize: 12.5, color: pal.ink3 }}>nothing flagged</div>
+          // "nothing flagged" is a claim about the CAMERA, and an unreachable
+          // server is not evidence for it — so a failed read says so instead.
+          <div style={{ fontSize: 12.5, color: pal.ink3 }}>
+            {recap.observedSeconds == null ? "couldn't read the sensors" : "nothing flagged"}
+          </div>
         ) : (
           eventEntries.map(([kind, n]) => (
-            <div key={kind} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, padding: "3px 0", color: pal.ink2 }}>
-              <span>{KIND_LABEL[kind] ?? kind}</span>
-              <span>{n}</span>
-            </div>
+            <Row key={kind} pal={pal} left={KIND_LABEL[kind] ?? kind} right={String(n)} />
           ))
         )}
+        {recap.evidence.length > 0 && (
+          <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+            {recap.evidence.slice(0, 8).map((it) =>
+              it.frame ? (
+                <img
+                  key={it.id}
+                  src={it.frame}
+                  alt={KIND_LABEL[it.kind ?? ""] ?? it.kind ?? "evidence"}
+                  title={`${KIND_LABEL[it.kind ?? ""] ?? it.kind ?? ""} · ${timeLabel(it.at)}`}
+                  style={{
+                    width: 72, height: 54, objectFit: "cover",
+                    borderRadius: 8, border: `1px solid ${pal.rule}`,
+                  }}
+                />
+              ) : null,
+            )}
+          </div>
+        )}
       </div>
+
+      {/* Observed ≠ elapsed. An uninstalled extension and a genuinely quiet
+          session are the same rows and opposite claims, so this states what the
+          SENSORS covered rather than letting the numbers above imply it. */}
+      {recap.observedSeconds != null && recap.spanMs > 0 && (
+        <div style={{ fontSize: 11, color: pal.ink3, marginTop: 18, maxWidth: 420, textAlign: "center" }}>
+          {recap.observedSeconds > 0
+            ? `sensors observed ${fmtDuration(recap.observedSeconds)} of this session`
+            : "no device activity recorded during this session (sensors may be off)"}
+        </div>
+      )}
+      {recap.warnings.map((w) => (
+        <div key={w} style={{ fontSize: 10.5, color: pal.ink3, marginTop: 6, maxWidth: 420, textAlign: "center" }}>
+          {w}
+        </div>
+      ))}
 
       <button
         onClick={onClose}

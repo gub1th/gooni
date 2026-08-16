@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { FONT } from "../../ui";
 import { FOCUS_PALETTES } from "./focusPalette";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
-import { FEED_REFRESH_MS, fetchFocusCam, fetchFocusCamEvidence, type FocusCamBlob } from "../../services/api";
+import { FEED_REFRESH_MS, fetchFocusCam, type FocusCamBlob, type SessionActivity } from "../../services/api";
 import { parseServerDate } from "../../utils/date";
 
 // Can't tell if the camera is on, which one, or whether anything's been
@@ -15,6 +15,8 @@ import { parseServerDate } from "../../utils/date";
 // otherwise silently claim "on" while nothing is actually being sensed.
 const STALE_MS = 40_000;
 
+// `stand` and `left_desk` are not lapses — same split `focus_cam_service.
+// VIOLATION_EVENT_KINDS` makes server-side.
 const VIOLATION_KINDS = new Set(["distracted", "phone", "vape"]);
 
 type DetectionStatus = "on" | "off" | "error";
@@ -27,29 +29,39 @@ function statusOf(blob: FocusCamBlob | null): DetectionStatus {
 }
 
 interface Props {
-  sinceMs: number | null;
+  /** THIS session's activity, polled once by `FocusExpanded`. `null` while the
+   *  first read is in flight or after it failed — the count simply doesn't
+   *  render, since a failed read is not evidence of a clean session. */
+  activity: SessionActivity | null;
 }
 
-export function FocusCameraStatus({ sinceMs }: Props) {
+export function FocusCameraStatus({ activity }: Props) {
   const theme = useGooniThemeStore((s) => s.theme);
   const pal = FOCUS_PALETTES[theme];
   const [blob, setBlob] = useState<FocusCamBlob | null>(null);
-  const [violations, setViolations] = useState(0);
 
+  // The flagged count comes from the session's camera EVENTS, not from kept
+  // evidence frames. It used to count frames, which meant it read zero all
+  // session for as long as the sidecar posts detections (`/focus/cam/events`)
+  // without posting a frame for them (`/focus/cam/evidence`) — which is the
+  // state it is in today. The event is the detection; the frame is optional
+  // proof of one.
+  const violations = (activity?.camera_events ?? [])
+    .filter((e) => VIOLATION_KINDS.has(e.kind))
+    .reduce((n, e) => n + e.count, 0);
+
+  // The control blob stays its OWN fetch, deliberately: it is liveness (which
+  // camera, is a frame still arriving), not a rollup over a window, so it has
+  // no business riding the session-scoped read.
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      const [b, ev] = await Promise.allSettled([fetchFocusCam(), fetchFocusCamEvidence(40)]);
-      if (cancelled) return;
-      if (b.status === "fulfilled") setBlob(b.value);
-      if (ev.status === "fulfilled") {
-        const count = ev.value.filter((it) => {
-          if (!it.kind || !VIOLATION_KINDS.has(it.kind)) return false;
-          if (sinceMs == null) return true;
-          const at = it.at ? parseServerDate(it.at)?.getTime() : null;
-          return at != null && at >= sinceMs;
-        }).length;
-        setViolations(count);
+      try {
+        const b = await fetchFocusCam();
+        if (!cancelled) setBlob(b);
+      } catch {
+        // best-effort — the indicator falls back to "off", which is the safe
+        // read: claiming "sensing" off a failed fetch is the one lie here
       }
     };
     void load();
@@ -58,7 +70,7 @@ export function FocusCameraStatus({ sinceMs }: Props) {
       cancelled = true;
       window.clearInterval(iv);
     };
-  }, [sinceMs]);
+  }, []);
 
   const status = statusOf(blob);
   const dotColor = status === "on" ? pal.accent : status === "error" ? pal.warn : pal.ink3;

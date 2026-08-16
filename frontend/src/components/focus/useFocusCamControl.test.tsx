@@ -27,9 +27,11 @@ vi.mock("../../services/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../services/api")>();
   return {
     ...actual,
-    // the sensor line's three reads — irrelevant here, kept quiet
+    // the sensor line's reads — irrelevant here, kept quiet
     apiFetch: vi.fn(async () => ({ ok: false })),
-    fetchFocusCamToday: vi.fn(async () => ({ sessions: [], events: {} })),
+    fetchSessionActivity: vi.fn(async () => {
+      throw new Error("not under test");
+    }),
     fetchFocusDashboard: vi.fn(async () => ({ short_term: {}, long_term: [], rollups: [] })),
     updateFocusReminder: vi.fn(async () => ({})),
     setFocusCamControl: vi.fn(async (control: string, id?: number | null) => {

@@ -1959,6 +1959,69 @@ export async function fetchFocusAttribution(
   return res.json();
 }
 
+// ── Session-scoped activity (GET /focus/session-activity) ───────────────────
+// THE read for the focus surface. `/focus/cam/today` and `/focus/dashboard`'s
+// rollups answer for the local DAY — right for the ambient home, wrong for a
+// twenty-minute session, which is how the footer came to say "17 signals today"
+// and the recap "nothing flagged". One window in, every sensor out.
+
+export interface SessionCameraEvent {
+  kind: string;
+  count: number;
+}
+
+export interface SessionEvidence {
+  id: number;
+  kind: string | null;
+  at: string;
+  session_id: string | null;
+  activity: string | null;
+  /** data: URL, ready to render. null when the frame bytes are missing. */
+  frame: string | null;
+}
+
+export interface SessionNameRow {
+  name: string;
+  label: string;
+  seconds: number;
+  intervals: number;
+}
+
+export interface SessionCountRow {
+  name: string;
+  label: string;
+  count: number;
+}
+
+export interface SessionActivity {
+  since: string;
+  until: string;
+  window_seconds: number;
+  camera_events: SessionCameraEvent[];
+  camera_evidence: SessionEvidence[];
+  /** `other_sec` is the ranked tail — a head shown as the whole is a lie. */
+  browser: { top: SessionNameRow[]; other_sec: number };
+  app: { top: SessionNameRow[]; other_sec: number };
+  device: { top: SessionCountRow[]; other_count: number };
+  /** Union of both interval layers. A claim about the SENSORS, not the human. */
+  observed_seconds: number;
+  coverage: number | null;
+  /** caps that bit on this read — surfaced rather than silently truncating */
+  warnings: string[];
+}
+
+export async function fetchSessionActivity(
+  since: Date | string,
+  until?: Date | string | null,
+): Promise<SessionActivity> {
+  const q = new URLSearchParams();
+  q.set("since", since instanceof Date ? since.toISOString() : since);
+  if (until) q.set("until", until instanceof Date ? until.toISOString() : until);
+  const res = await apiFetch(`${BASE}/focus/session-activity?${q}`);
+  if (!res.ok) throw new Error("Failed to fetch session activity");
+  return res.json();
+}
+
 // ── Focus reminder/promise CRUD (rail add / edit / delete) ──────────────────
 // The rail sections are backed by Promise rows served through the focus adapter
 // (the `reminders` table was dropped in `b8f3d1c07a45`); the returned
@@ -2078,34 +2141,19 @@ export interface FocusCamBlob {
   frame_at: string | null;
 }
 
-export interface FocusCamToday {
-  date: string;
-  sessions: Record<string, unknown>[];
-  events: Record<string, number>;
-}
-
 export async function fetchFocusCam(): Promise<FocusCamBlob> {
   const res = await apiFetch(`${BASE}/focus/cam`);
   if (!res.ok) throw new Error("Failed to fetch focus-cam state");
   return res.json();
 }
 
-/** One KEPT evidence frame — a detection, not a liveness tick. See /focus/cam/evidence. */
-export interface FocusCamEvidence {
-  id: number;
-  kind: "distracted" | "phone" | "vape" | "stand" | "left_desk" | null;
-  at: string | null;
-  session_id: string | null;
-  activity: string | null;
-  frame: string | null; // data: URL
-}
-
-export async function fetchFocusCamEvidence(limit = 20): Promise<FocusCamEvidence[]> {
-  const res = await apiFetch(`${BASE}/focus/cam/evidence?limit=${limit}`);
-  if (!res.ok) throw new Error("Failed to fetch focus-cam evidence");
-  const data = (await res.json()) as { items: FocusCamEvidence[] };
-  return data.items ?? [];
-}
+// NOTE: `fetchFocusCamToday` and `fetchFocusCamEvidence` are GONE from the
+// client (the routes stay — the sidecar and any future day-scoped surface still
+// have them). Both answered for a local DAY / the last few days and were being
+// rendered under a SESSION's clock, which is how the focus footer came to say
+// "17 signals today". Everything the focus surface reads about a session now
+// comes from `fetchSessionActivity` above. Reach for a day-scoped fetcher again
+// only for a day-scoped surface.
 
 export async function setFocusCamControl(
   control: FocusCamControl,
@@ -2119,12 +2167,6 @@ export async function setFocusCamControl(
     body: JSON.stringify({ control, target_reminder_id: targetReminderId ?? null }),
   });
   if (!res.ok) throw new Error("Failed to set focus-cam control");
-  return res.json();
-}
-
-export async function fetchFocusCamToday(): Promise<FocusCamToday> {
-  const res = await apiFetch(`${BASE}/focus/cam/today`);
-  if (!res.ok) throw new Error("Failed to fetch focus-cam today");
   return res.json();
 }
 

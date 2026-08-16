@@ -12,6 +12,7 @@ Endpoints:
   PATCH  /focus/reminders/{id}    edit fields OR toggle state/done
   DELETE /focus/reminders/{id}    hard-delete
   GET    /focus/attribution       observed attention per commitment (timer-bound)
+  GET    /focus/session-activity  every sensor's answer for ONE explicit window
   GET    /focus/dashboard         assembled glanceable payload
 """
 
@@ -376,6 +377,52 @@ def attribution(
         end_day=end_date,
         promise_id=promise_id,
     )
+
+
+# ── Session-scoped activity ──────────────────────────────────────────────────
+
+
+def _parse_instant(raw: str, field: str) -> datetime:
+    """An ISO instant from the client → the naive UTC the sensors store in.
+
+    Same conversion `_parse_due` does for `due_at`: an offset-aware input is
+    converted to UTC BEFORE tzinfo is dropped (keeping its wall-clock digits
+    would land the window hours off), a naive one is taken as already-UTC.
+    """
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail=f"bad {field}: {raw!r}")
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc)
+    return dt.replace(tzinfo=None)
+
+
+@router.get("/focus/session-activity")
+def session_activity(
+    since: str,
+    until: str | None = None,
+    db: Session = Depends(get_db),
+):
+    """Everything the sensors saw between two instants — camera events, kept
+    evidence frames, browser and app time, and phone pings.
+
+    THE window is the caller's, which is the whole point: the focus surface asks
+    with `since = session start` (and `until = session end` for the recap), so
+    the numbers it renders describe the SESSION. `/focus/cam/today` and
+    `/focus/dashboard`'s rollups answer for the local DAY and are still right
+    for the surfaces that want a day — they were simply the wrong scope for
+    this one.
+
+    Read-only: no Trackable, no row, no migration. See `focus_session_activity`
+    for why the fold reuses `focus_attribution`'s overlap machinery rather than
+    restating it.
+    """
+    from ..services import focus_session_activity
+
+    start = _parse_instant(since, "since")
+    end = _parse_instant(until, "until") if until else None
+    return focus_session_activity.session_activity(db, since=start, until=end)
 
 
 # ── Dashboard ────────────────────────────────────────────────────────────────
