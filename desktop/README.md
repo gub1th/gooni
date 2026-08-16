@@ -39,7 +39,7 @@ What it buys is:
 cd desktop
 npm install
 npm start           # runs against https://gooni-bot.fly.dev
-npm test            # node:test, zero deps — 109 tests, no Electron needed
+npm test            # node:test, zero deps — 138 tests, no Electron needed
 
 npm start -- --capture   # open the capture overlay instead of the window
 ```
@@ -59,10 +59,11 @@ then **Reload config**.
   "authPassword": "",
   "sidecar": {
     "enabled": true,
-    "command": "",                          // ← REQUIRED for supervision
+    "command": "",                          // empty ⇒ auto-detect tries first, see below
     "args": [],
     "cwd": "",
-    "env": {}
+    "env": {},
+    "cameraIndex": null                     // set by the tray's camera picker
   },
   "appSensor": { /* … */ }                  // see The frontmost-app sensor
 }
@@ -125,6 +126,36 @@ Output goes to `~/Library/Logs/gooni-desktop/sidecar.log` (tray ▸ Focus cam �
 **Open log…**), plus a 500-line in-memory tail. Supervisor commentary is prefixed
 `[shell]` so it is never mistaken for something the sidecar printed.
 
+### Auto-detect
+
+`sidecar.command` empty in the config file no longer means "supervise nothing".
+On every startup and every **Reload config**, `src/sidecarDetect.js` scans a
+short list of known focus-cam install paths (currently just
+`~/Desktop/projects/focus-cam/.venv/bin/python`) and, if found, fills
+`command`/`args`/`cwd` in memory — never on disk, and never over a `command`
+you set yourself. `cwd` is derived from the SAME path the interpreter was found
+at (the venv's project root), because `python -m focus_cam.sidecar` only
+resolves the package when launched from there — the sidecar isn't
+pip-installed. Default args: `-u -m focus_cam.sidecar --camera 1` (camera 1 is
+this Mac's built-in face cam; camera 0 is a Continuity desk cam that misses the
+face — see the camera picker below to confirm or change it). When detection is
+what filled the command, the tray's Focus cam submenu says so:
+`Focus cam: auto-detected at ~/Desktop/projects/focus-cam`. A manually-set
+`command` is left byte-for-byte alone and gets no such label.
+
+### Camera picker
+
+Tray ▸ Focus cam ▸ **Camera** runs `python -m focus_cam --list-cameras`
+against the same interpreter the supervisor uses and lists what it finds as
+radio items, the current selection checked. Picking one persists
+`sidecar.cameraIndex` to `config.json` and restarts the sidecar so it takes
+effect immediately. `cameraIndex: null` (the default) means no override — the
+index baked into `args` by auto-detection wins. **Detect cameras…** re-runs the
+scan on demand; it also runs once automatically whenever the sidecar (re)starts
+with a configured command. `src/cameraList.js`'s parser is deliberately
+forgiving about the sidecar's exact output shape (JSON array or plain text,
+one camera per line) since that command lives outside this repo.
+
 ## The menu bar
 
 Silent when healthy — an ambient app that decorates the menu bar at rest is
@@ -136,6 +167,15 @@ noise. It shows **⚠** and names the problem when any of these is true:
 - `apiUrl` is localhost.
 
 All of them, not just the first: a fresh install has three at once.
+
+**Launch at login** is a checkbox in the tray (default on — an ambient app
+should start on boot). It calls `app.setLoginItemSettings()`, which only does
+anything in a **packaged** build: `npm start` runs `node_modules/.bin/electron`,
+so registering a login item there would put *Electron* — not Gooni — in the
+user's login items, pointed at a path inside a checkout that may not exist
+tomorrow. Unpackaged, the checkbox still reflects and persists the preference
+in `config.json`; it just skips the OS-level registration until a real build
+picks it up.
 
 The app sensor's ordinary state (`App sensor: 31 buffered`) is a menu row, not a
 headline. A backlog is normal — the machine was offline — and a permanent

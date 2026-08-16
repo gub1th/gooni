@@ -15,11 +15,14 @@
 
 const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, shell, nativeImage, screen, dialog, powerMonitor } = require("electron");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { spawn, execFile } = require("node:child_process");
 
 const configModule = require("./config");
 const { SidecarSupervisor, describe, isUnhealthy } = require("./sidecar");
+const sidecarDetect = require("./sidecarDetect");
+const { listCameras } = require("./cameraList");
 const { buildMenuTemplate, summarize } = require("./traymenu");
 const { GooniApi } = require("./api");
 const tokenModule = require("./token");
@@ -56,6 +59,8 @@ let tray = null;
 let mainWindow = null;
 let captureWindow = null;
 let sidecar = null;
+let sidecarAutoDetected = null; // path shown in the tray, or null when not auto-detected
+let cameras = [];
 let appSensor = null;
 let api = null;
 let harvestedToken = "";
@@ -120,6 +125,24 @@ function canExecute(command) {
   }
 }
 
+/**
+ * Fold auto-detection + the tray's camera override into the sidecar config the
+ * supervisor actually spawns. Never mutates `config.sidecar` — that stays what
+ * was on disk (or what env overrode), so an unconfigured file still LOOKS
+ * unconfigured; `sidecarAutoDetected` is the side channel the tray reads to
+ * say where it found the install instead.
+ */
+function effectiveSidecarConfig() {
+  const detection = sidecarDetect.detectSidecar({ existsSync: fs.existsSync, homeDir: os.homedir() });
+  const resolved = sidecarDetect.resolveSidecarConfig(config.sidecar, detection);
+  sidecarAutoDetected = resolved.autoDetected ? resolved.detectedFrom : null;
+  let sidecarCfg = resolved.sidecar;
+  if (config.sidecar.cameraIndex !== null && config.sidecar.cameraIndex !== undefined) {
+    sidecarCfg = { ...sidecarCfg, args: sidecarDetect.withCameraIndex(sidecarCfg.args, config.sidecar.cameraIndex) };
+  }
+  return sidecarCfg;
+}
+
 function createSidecar() {
   sidecar = new SidecarSupervisor({
     spawnImpl: spawn,
@@ -133,8 +156,36 @@ function createSidecar() {
       logStream.write(`${new Date(line.at).toISOString()} ${line.stream === "stderr" ? "ERR" : "out"} ${line.text}\n`);
     },
   });
-  sidecar.configure(config.sidecar);
+  sidecar.configure(effectiveSidecarConfig());
   sidecar.start();
+  detectCameras().catch((e) => console.warn("[gooni] camera detection skipped:", e?.message));
+}
+
+/**
+ * Ask the sidecar interpreter what cameras it can see. Best-effort: an
+ * unconfigured or not-yet-installed sidecar can't answer this, and that must
+ * not be an error dialog — the picker just stays empty with a "Detect
+ * cameras…" retry, same as any other "nothing here yet" state in this app.
+ */
+async function detectCameras() {
+  const cfg = effectiveSidecarConfig();
+  if (!cfg.command) return;
+  cameras = await listCameras({ execFileImpl: execFile, command: cfg.command, cwd: cfg.cwd, env: { ...process.env, ...(cfg.env || {}) } });
+  refreshTray();
+}
+
+/** Persist the picked camera, then restart so it takes effect immediately —
+ * a saved-but-not-applied selection would look like the picker did nothing. */
+async function selectCamera(index) {
+  config.sidecar.cameraIndex = index;
+  try {
+    configModule.save(userDataDir(), config);
+  } catch (e) {
+    console.error("[gooni] could not persist camera selection:", e.message);
+  }
+  sidecar.configure(effectiveSidecarConfig());
+  await sidecar.restart();
+  refreshTray();
 }
 
 // ── frontmost-app sensor ─────────────────────────────────────────────────────
@@ -457,12 +508,16 @@ function refreshTray() {
   const { source } = currentToken();
   const sensorStatus = appSensor ? appSensor.status() : null;
   const summary = summarize({ config, sidecar: status, tokenSource: source, appSensor: sensorStatus });
+  const effSidecar = effectiveSidecarConfig();
 
   const template = buildMenuTemplate({
     config,
     sidecar: status,
     tokenSource: source,
     appSensor: sensorStatus,
+    sidecarAutoDetected,
+    cameras,
+    currentCameraIndex: sidecarDetect.currentCameraIndex(effSidecar.args),
     // Unpackaged, the OS registration is deliberately skipped (see
     // applyLaunchAtLogin), so the checkbox reflects the stored preference —
     // otherwise it would silently uncheck itself every dev run.
@@ -471,7 +526,7 @@ function refreshTray() {
       open: showMain,
       capture: showCapture,
       startSidecar: () => {
-        sidecar.configure(config.sidecar);
+        sidecar.configure(effectiveSidecarConfig());
         sidecar.start();
       },
       stopSidecar: () => sidecar.stop(),
@@ -481,6 +536,8 @@ function refreshTray() {
         if (fs.existsSync(file)) shell.openPath(file);
         else dialog.showErrorBox("No sidecar log yet", `Nothing has been written to ${file}.`);
       },
+      detectCameras: () => detectCameras().catch((e) => console.error("[gooni] camera detection failed:", e?.message)),
+      selectCamera: (index) => selectCamera(index).catch((e) => console.error("[gooni] camera switch failed:", e?.message)),
       toggleLaunchAtLogin: (item) => setLaunchAtLogin(item.checked),
       openConfig: () => shell.openPath(configPath),
       reloadConfig: () => reloadConfig().catch((e) => console.error("[gooni] reload failed:", e?.message)),
@@ -553,16 +610,21 @@ function sameSidecar(a, b) {
 
 async function reloadConfig() {
   const before = config;
+  const beforeEffective = effectiveSidecarConfig();
   loadConfig();
   registerHotkey();
 
   // `configure()` only stores; a running child keeps its old command until it is
   // replaced. Restart ONLY when the sidecar config actually changed — a reload
   // that tore down the camera process every time would make the menu item
-  // something you learn not to press.
-  sidecar.configure(config.sidecar);
-  if (!sameSidecar(before.sidecar, config.sidecar)) {
+  // something you learn not to press. Compared on the EFFECTIVE config (after
+  // auto-detect + camera override), not the raw file, so a reload after
+  // installing focus-cam for the first time still restarts into it.
+  const afterEffective = effectiveSidecarConfig();
+  sidecar.configure(afterEffective);
+  if (!sameSidecar(beforeEffective, afterEffective)) {
     await sidecar.restart();
+    detectCameras().catch((e) => console.warn("[gooni] camera detection skipped:", e?.message));
   }
 
   // The sensor reads its cadence at construction, so a changed knob needs a new

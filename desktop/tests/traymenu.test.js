@@ -114,3 +114,46 @@ test("Start/Stop reflect whether it is actually up", () => {
   assert.equal(stopped.find((i) => i.id === "sidecar:start").enabled, true);
   assert.equal(stopped.find((i) => i.id === "sidecar:stop").enabled, false);
 });
+
+test("auto-detection is stated in the sidecar submenu when it's what filled the command", () => {
+  const withDetection = buildMenuTemplate({
+    config: DEPLOYED, sidecar: HEALTHY, tokenSource: "harvested", launchAtLogin: false,
+    sidecarAutoDetected: "/Users/dani/Desktop/projects/focus-cam", handlers: {},
+  }).find((i) => i.id === "sidecar").submenu;
+  assert.match(withDetection.find((i) => i.id === "sidecar:autodetected").label, /auto-detected.*focus-cam/);
+
+  const manual = buildMenuTemplate({
+    config: DEPLOYED, sidecar: HEALTHY, tokenSource: "harvested", launchAtLogin: false,
+    sidecarAutoDetected: null, handlers: {},
+  }).find((i) => i.id === "sidecar").submenu;
+  assert.equal(manual.find((i) => i.id === "sidecar:autodetected"), undefined, "a manual config gets no auto-detected label");
+});
+
+test("camera submenu lists detected cameras with the current one checked, or a retry when there are none", () => {
+  const withCameras = buildMenuTemplate({
+    config: DEPLOYED, sidecar: HEALTHY, tokenSource: "harvested", launchAtLogin: false,
+    cameras: [{ index: 0, name: "Continuity Camera" }, { index: 1, name: "FaceTime HD Camera" }],
+    currentCameraIndex: 1,
+    handlers: {},
+  }).find((i) => i.id === "sidecar").submenu.find((i) => i.id === "sidecar:cameras").submenu;
+  assert.equal(withCameras.find((i) => i.id === "sidecar:camera:0").checked, false);
+  assert.equal(withCameras.find((i) => i.id === "sidecar:camera:1").checked, true);
+  assert.ok(withCameras.find((i) => i.id === "sidecar:camera:detect"));
+
+  const noCameras = buildMenuTemplate({
+    config: DEPLOYED, sidecar: HEALTHY, tokenSource: "harvested", launchAtLogin: false,
+    cameras: [], currentCameraIndex: 1, handlers: {},
+  }).find((i) => i.id === "sidecar").submenu.find((i) => i.id === "sidecar:cameras").submenu;
+  assert.ok(noCameras.find((i) => i.id === "sidecar:camera:none"));
+});
+
+test("selecting a camera calls the handler with its index", () => {
+  const calls = [];
+  const submenu = buildMenuTemplate({
+    config: DEPLOYED, sidecar: HEALTHY, tokenSource: "harvested", launchAtLogin: false,
+    cameras: [{ index: 2, name: "USB Webcam" }], currentCameraIndex: 2,
+    handlers: { selectCamera: (i) => calls.push(i) },
+  }).find((i) => i.id === "sidecar").submenu.find((i) => i.id === "sidecar:cameras").submenu;
+  submenu.find((i) => i.id === "sidecar:camera:2").click();
+  assert.deepEqual(calls, [2]);
+});

@@ -61,6 +61,12 @@ const DEFAULTS = Object.freeze({
     args: [],
     cwd: "",
     env: {},
+    /**
+     * Explicit camera override, set by the tray's camera picker. `null` means
+     * "no override" — whatever index is baked into `args` (or auto-detection's
+     * default) wins. Persisted so a picked camera survives a restart.
+     */
+    cameraIndex: null,
   }),
   /**
    * The frontmost-app sensor — the OS half of "what did I actually do today".
@@ -135,6 +141,16 @@ function asStringArray(raw) {
     .filter((v) => v.length > 0);
 }
 
+/** `null` (no override) is a legitimate value, not an omission — only coerce a
+ * present-but-junk value down to `null` rather than defaulting it back up,
+ * since a bad value should read as "no override" and not as a hidden reset to
+ * some other camera. */
+function asCameraIndex(raw) {
+  if (raw === null || raw === undefined) return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
 function asStringMap(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const out = {};
@@ -175,6 +191,7 @@ function mergeConfig(fileConfig = {}, env = {}) {
       args: asStringArray(file.sidecar?.args),
       cwd: file.sidecar?.cwd ?? base.sidecar.cwd,
       env: asStringMap(file.sidecar?.env),
+      cameraIndex: asCameraIndex(file.sidecar?.cameraIndex),
     },
     appSensor: {
       enabled: file.appSensor?.enabled ?? base.appSensor.enabled,
