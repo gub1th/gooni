@@ -77,6 +77,7 @@ vi.mock("../../services/api", () => ({
   fetchMemories: vi.fn(async () => ({ total: 0, memories: [], next_cursor: null, has_more: false })),
   fetchTrackables: vi.fn(async () => [trackable]),
   fetchPromises: vi.fn(async () => [promise]),
+  fetchRecentNotes: vi.fn(async () => []),
   fetchFocusDashboard: vi.fn(async () => ({
     circles: [],
     overflow_topics: [],
