@@ -61,6 +61,13 @@ test("sidecar args/env are coerced to the shapes spawn needs", () => {
   assert.deepEqual(cfg.sidecar.env, { PORT: "8001" });
 });
 
+test("sidecar.cameraIndex defaults to null (no override) and coerces junk to null", () => {
+  assert.equal(mergeConfig({}, {}).sidecar.cameraIndex, null);
+  assert.equal(mergeConfig({ sidecar: { cameraIndex: 1 } }, {}).sidecar.cameraIndex, 1);
+  assert.equal(mergeConfig({ sidecar: { cameraIndex: "not a number" } }, {}).sidecar.cameraIndex, null);
+  assert.equal(mergeConfig({ sidecar: { cameraIndex: -1 } }, {}).sidecar.cameraIndex, null, "a negative index is not a real camera");
+});
+
 test("GOONI_SIDECAR_CMD overrides the command", () => {
   const cfg = mergeConfig({ sidecar: { command: "python3" } }, { GOONI_SIDECAR_CMD: "/opt/cam" });
   assert.equal(cfg.sidecar.command, "/opt/cam");

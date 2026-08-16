@@ -51,7 +51,17 @@ function summarize({ config, sidecar, tokenSource, appSensor = null }) {
   return { ok: true, text: `Gooni — ${hostOf(config.apiUrl)}`, problems: [] };
 }
 
-function buildMenuTemplate({ config, sidecar, tokenSource, appSensor = null, launchAtLogin, handlers = {} }) {
+function buildMenuTemplate({
+  config,
+  sidecar,
+  tokenSource,
+  appSensor = null,
+  launchAtLogin,
+  sidecarAutoDetected = null,
+  cameras = null,
+  currentCameraIndex = null,
+  handlers = {},
+}) {
   const summary = summarize({ config, sidecar, tokenSource, appSensor });
   const items = [];
 
@@ -77,6 +87,16 @@ function buildMenuTemplate({ config, sidecar, tokenSource, appSensor = null, lau
   if (sidecar.command) {
     sidecarItems.push({ id: "sidecar:command", label: sidecar.command, enabled: false });
   }
+  // Auto-detection is only worth stating when it's what put the command there —
+  // a manually-configured sidecar shouldn't carry a label implying the shell
+  // guessed it.
+  if (sidecarAutoDetected) {
+    sidecarItems.push({
+      id: "sidecar:autodetected",
+      label: `Focus cam: auto-detected at ${sidecarAutoDetected}`,
+      enabled: false,
+    });
+  }
   if (sidecar.restarts > 0) {
     sidecarItems.push({
       id: "sidecar:restarts",
@@ -90,6 +110,26 @@ function buildMenuTemplate({ config, sidecar, tokenSource, appSensor = null, lau
   sidecarItems.push({ id: "sidecar:stop", label: "Stop", enabled: !canStart, click: handlers.stopSidecar });
   sidecarItems.push({ id: "sidecar:restart", label: "Restart", click: handlers.restartSidecar });
   sidecarItems.push({ id: "sidecar:log", label: "Open log…", click: handlers.openSidecarLog });
+  sidecarItems.push({ type: "separator" });
+
+  const cameraItems = [];
+  if (Array.isArray(cameras) && cameras.length) {
+    for (const cam of cameras) {
+      cameraItems.push({
+        id: `sidecar:camera:${cam.index}`,
+        label: `${cam.index}: ${cam.name}`,
+        type: "radio",
+        checked: cam.index === currentCameraIndex,
+        click: () => handlers.selectCamera?.(cam.index),
+      });
+    }
+    cameraItems.push({ type: "separator" });
+  } else {
+    cameraItems.push({ id: "sidecar:camera:none", label: "No cameras detected yet", enabled: false });
+    cameraItems.push({ type: "separator" });
+  }
+  cameraItems.push({ id: "sidecar:camera:detect", label: "Detect cameras…", click: handlers.detectCameras });
+  sidecarItems.push({ id: "sidecar:cameras", label: "Camera", submenu: cameraItems });
 
   items.push({
     id: "sidecar",
