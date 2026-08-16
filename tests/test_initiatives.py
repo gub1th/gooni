@@ -150,6 +150,13 @@ def test_corpus():
         # Superseded memories are history, not current initiative material.
         db.add(Memory(type="fact", content="old belief", is_active=False,
                       embedding=json.dumps(vec(0, 0.01))))
+        # Raw prompt dumps that leaked into memories are not thoughts.
+        db.add(Memory(type="fact",
+                      content='{ "system": "Daniel\'s current intent: ship" }',
+                      embedding=json.dumps(vec(0, 0.015))))
+        db.add(Memory(type="fact",
+                      content='  {"messages": [{"role": "user"}]}',
+                      embedding=json.dumps(vec(0, 0.016))))
         db.add(Note(title="system design drilling", tags='["thought-batch"]',
                     embedding=json.dumps(vec(0, 0.02))))
         db.add(Note(title="an ordinary note", tags='["daily"]',
@@ -172,6 +179,11 @@ def test_corpus():
         check("a row with no embedding is skipped",
               "no embedding here" not in texts)
         check("a superseded memory is excluded", "old belief" not in texts)
+        check("a prompt-dump memory is excluded",
+              not any("current intent" in t or "messages" in t for t in texts),
+              str(texts))
+        check("a JSON-ish memory that is NOT a dump survives",
+              isvc._is_prompt_dump('{"note": "braces but not a prompt"}') is False)
         check("a non-thought-batch note is excluded",
               "an ordinary note" not in texts)
         check("a thought-batch outside the window is excluded",

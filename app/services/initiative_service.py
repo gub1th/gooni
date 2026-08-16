@@ -78,6 +78,20 @@ from .focus_service import BATCH_TAG
 # one says nothing about what he is doing now.
 THOUGHT_WINDOW_DAYS = 30
 
+# Raw system-prompt dumps that got saved as memories (the first production run
+# surfaced rows starting `{ "system": "Daniel's current intent:` …). They are
+# not thoughts, and their JSON scaffolding pollutes the embedding space —
+# every dump is near every other dump, so they seed a fake cluster and drag
+# real rows toward it. Matched on the RAW content before `_clean`, since the
+# JSON structure is exactly what identifies them. Filtered rows are COUNTED
+# and logged, never silently dropped.
+_PROMPT_DUMP_RE = re.compile(r'^\s*\{\s*"(?:system|messages|prompt|role)"\s*:')
+
+
+def _is_prompt_dump(content: str | None) -> bool:
+    return bool(content) and _PROMPT_DUMP_RE.match(content) is not None
+
+
 # Hard ceiling on rows fed to the clusterer, newest-first per source. Pairwise
 # cosine is O(n²), and the pure-Python path costs ~90µs a pair at 1536 dims —
 # 1200 items is ~700k pairs, about a minute on a background thread and instant
@@ -87,12 +101,17 @@ MAX_ITEMS = 1200
 # ── clustering ───────────────────────────────────────────────────────────────
 
 # DBSCAN's neighbourhood radius in COSINE DISTANCE (1 - cosine similarity), so
-# 0.40 means "similarity ≥ 0.60". That is deliberately looser than any matcher
+# 0.30 means "similarity ≥ 0.70". That is deliberately looser than any matcher
 # in this codebase (promise auto-close sits at 0.85) because those decide
 # whether two texts mean the SAME thing and this decides whether they are about
 # the same AREA OF LIFE — "mercor onsite thursday" and "grind system design"
-# are not paraphrases and belong in one initiative.
-EPS = 0.40
+# are not paraphrases and belong in one initiative. Shipped at 0.40 and
+# tightened 2026-08-16 after the first production run: on a corpus dominated by
+# one topic, 0.40 chained 552 of 982 rows into a single "Gooni development"
+# mega-cluster via DBSCAN's transitive absorption. 0.30 asks for enough
+# within-cluster coherence that sub-areas (focus sessions, orchestrator, UI)
+# separate instead of bridging.
+EPS = 0.30
 
 # Minimum neighbours (INCLUDING the point itself) for a core point. 2 would make
 # any coincidental pair an initiative; 3 asks for a little corroboration while
@@ -217,11 +236,17 @@ def collect_items(db: Session) -> tuple[list[Item], bool]:
         .limit(MAX_ITEMS)
         .all()
     )
+    dumps_skipped = 0
     for mid, content, at, emb in rows:
+        if _is_prompt_dump(content):
+            dumps_skipped += 1
+            continue
         vec = _parse_vec(emb)
         text = _clean(content)
         if vec and text:
             items.append(Item("memory", mid, text, vec, at))
+    if dumps_skipped:
+        print(f"[initiatives] skipped {dumps_skipped} prompt-dump memor(y/ies)")
 
     # Thought-batches — a run of Claude's thinking, `title` is its label. LIKE
     # against the JSON tags column is the documented pattern for low-cardinality
