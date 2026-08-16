@@ -63,37 +63,104 @@ export function FocusHistory({ pal }: { pal: FocusPalette }) {
   );
 }
 
+/**
+ * Rows are now CLICKABLE (2026-08-15): a session's minutes on their own don't
+ * answer "what was I actually doing" — that's exactly what the attribution
+ * layer is for, and `p.browser`/`p.app` (the promise-level top names over the
+ * whole window) were already sitting unused in the fetched response. Expanding
+ * costs no second fetch.
+ */
 function FocusHistoryRow({ p, pal }: { p: AttributedPromise; pal: FocusPalette }) {
+  const [open, setOpen] = useState(false);
   const maxMin = Math.max(1, ...p.days.map((d) => d.focused_minutes));
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-      <div
+    <div>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
         style={{
-          flex: 1, minWidth: 0, fontSize: 13, color: p.promise_exists ? pal.ink2 : pal.ink3,
-          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-          textDecoration: p.state === "kept" ? "line-through" : "none",
+          display: "flex", alignItems: "center", gap: 10, width: "100%",
+          border: "none", background: "transparent", padding: 0, cursor: "pointer", textAlign: "left",
         }}
-        title={p.title}
       >
-        {p.title}
+        <div
+          style={{
+            flex: 1, minWidth: 0, fontSize: 13, color: p.promise_exists ? pal.ink2 : pal.ink3,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            textDecoration: p.state === "kept" ? "line-through" : "none",
+          }}
+          title={p.title}
+        >
+          {p.title}
+        </div>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 18 }}>
+          {p.days.slice().reverse().map((d) => (
+            <span
+              key={d.date}
+              title={`${d.date}: ${fmtMinutes(d.focused_minutes)}${d.precise ? "" : " (upper bound)"}`}
+              style={{
+                width: 4,
+                height: Math.max(2, (d.focused_minutes / maxMin) * 18),
+                borderRadius: 1,
+                background: d.focused_minutes > 0 ? pal.accent : pal.rule,
+                opacity: d.precise ? 1 : 0.55,
+              }}
+            />
+          ))}
+        </div>
+        <div style={{ fontSize: 12, color: pal.ink3, fontVariantNumeric: "tabular-nums", minWidth: 42, textAlign: "right" }}>
+          {fmtMinutes(p.focused_minutes)}
+        </div>
+      </button>
+      {open && <FocusHistoryBreakdown p={p} pal={pal} />}
+    </div>
+  );
+}
+
+/** Top hosts/apps the sensors saw during this promise's sessions, over the window. */
+function FocusHistoryBreakdown({ p, pal }: { p: AttributedPromise; pal: FocusPalette }) {
+  const noData = p.browser.top.length === 0 && p.app.top.length === 0;
+  return (
+    <div style={{ padding: "8px 0 10px 4px", display: "flex", flexDirection: "column", gap: 8 }}>
+      {noData ? (
+        <div style={{ fontSize: 11.5, color: pal.ink3 }}>no device activity observed</div>
+      ) : (
+        <>
+          <AttributionColumn label="browser" layer={p.browser} pal={pal} />
+          <AttributionColumn label="apps" layer={p.app} pal={pal} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function AttributionColumn({
+  label,
+  layer,
+  pal,
+}: {
+  label: string;
+  layer: AttributedPromise["browser"];
+  pal: FocusPalette;
+}) {
+  if (layer.top.length === 0) return null;
+  return (
+    <div>
+      <div style={{ fontSize: 10, letterSpacing: 0.8, textTransform: "uppercase", color: pal.ink3, marginBottom: 4 }}>
+        {label}
       </div>
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 18 }}>
-        {p.days.slice().reverse().map((d) => (
-          <span
-            key={d.date}
-            title={`${d.date}: ${fmtMinutes(d.focused_minutes)}${d.precise ? "" : " (upper bound)"}`}
-            style={{
-              width: 4,
-              height: Math.max(2, (d.focused_minutes / maxMin) * 18),
-              borderRadius: 1,
-              background: d.focused_minutes > 0 ? pal.accent : pal.rule,
-              opacity: d.precise ? 1 : 0.55,
-            }}
-          />
+      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        {layer.top.map((n) => (
+          <div key={n.name} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12.5, color: pal.ink2 }}>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.label}</span>
+            <span style={{ flex: "none", fontVariantNumeric: "tabular-nums", color: pal.ink3 }}>
+              {fmtMinutes(Math.round(n.seconds / 60))}
+            </span>
+          </div>
         ))}
-      </div>
-      <div style={{ fontSize: 12, color: pal.ink3, fontVariantNumeric: "tabular-nums", minWidth: 42, textAlign: "right" }}>
-        {fmtMinutes(p.focused_minutes)}
+        {layer.other_sec > 0 && (
+          <div style={{ fontSize: 11.5, color: pal.ink3 }}>+ {fmtMinutes(Math.round(layer.other_sec / 60))} more</div>
+        )}
       </div>
     </div>
   );

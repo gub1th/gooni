@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   FileText, Brain, LayoutGrid, CalendarDays,
-  SearchCheck, type LucideIcon,
+  SearchCheck, Target, type LucideIcon,
 } from "lucide-react";
 import { FONT, frost, z } from "../../ui";
 import { GooniLogo } from "../GooniLogo";
@@ -12,9 +12,11 @@ import { GooniLogo } from "../GooniLogo";
 // it doesn't wall off the ambient void. Icons at rest; each flies out its label
 // on hover (an OVERLAY to the right — no reflow).
 //
-// It carries NO focus entry, deliberately: focus has exactly one door and it is
-// a task row on the home. The widget entries it used to auto-list are gone with
-// the widget system; `Trackables` (the log matrix) replaced the calendar one.
+// Focus (`/focus`) got a rail entry (2026-08-15) — the page grew from a
+// chromeless kiosk into a real hub (today's tasks + `+ add` + clickable
+// session history), so it needs a way in besides starting a session from a
+// task row. The widget entries it used to auto-list are gone with the widget
+// system; `Trackables` (the log matrix) replaced the calendar one.
 
 const INK = "rgb(var(--gooni-ink, 244 245 244)";
 
@@ -34,6 +36,7 @@ const ICON_TINT = {
   Notes:      "#7B93B0", // muted slate blue
   Memories:   "#9C8FAD", // muted violet
   Audit:      "#6FA3A8", // muted teal
+  Focus:      "#B08A7A", // muted terracotta
 } as const;
 
 /**
@@ -70,6 +73,9 @@ export function IconRail() {
     { label: "Notes", Icon: FileText, color: ICON_TINT.Notes, go: () => nav({ view: "notes" }) },
     { label: "Memories", Icon: Brain, color: ICON_TINT.Memories, go: () => nav({ view: "memories" }) },
     { label: "Audit", Icon: SearchCheck, color: ICON_TINT.Audit, go: () => nav({ audit: true }) },
+    // Own route, not a search param on "/" — everything else on this rail is
+    // a view of the index route, but focus is its own chromeless-ish page.
+    { label: "Focus", Icon: Target, color: ICON_TINT.Focus, go: () => void navigate({ to: "/focus" }) },
   ];
 
   // Which item is "current" — read straight off the URL (same signals
@@ -90,7 +96,9 @@ export function IconRail() {
   const isCalendar = onIndex && calendarFlag;
   const isTrackables = onIndex && trackablesFlag;
   const isHome = onIndex && !isNotes && !isEval && !isMemories && !isCalendar && !isTrackables;
+  const isFocus = routerState.location.pathname === "/focus";
   const activeLabel: string =
+    isFocus ? "Focus" :
     isEval ? "Audit" :
     isNotes ? "Notes" :
     isMemories ? "Memories" :
