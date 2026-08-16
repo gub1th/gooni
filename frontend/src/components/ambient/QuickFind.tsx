@@ -45,6 +45,15 @@ import {
 //   trackable  → same deal: one small list, filtered locally.
 //   memory     → server-side `q` filter, debounced with the semantic pass.
 
+// Dropdown ground for both the pre-query and results panels. `frost.panel`'s
+// 55% tint let the wave + proactive line bleed through under the rows, so the
+// panels keep panel's blur but take a near-opaque tint mixed over the themed
+// void (`--gooni-void` tracks light/dark; dark fallback matches frost's).
+const DROPDOWN_SURFACE = {
+  ...frost.panel,
+  background: "color-mix(in srgb, var(--gooni-void, #0a0d0c) 94%, transparent)",
+} as const;
+
 const KIND_COLOR = {
   // Kind identity, NOT the app accent. The token file's "green is the only
   // accent" rule is about emphasis; these five are labels — a note has to read
@@ -649,7 +658,7 @@ export function QuickFind({
             marginTop: 6, padding: 6, borderRadius: 20,
             zIndex: z.overlay - 10,
             display: "flex", flexDirection: "column", gap: 2,
-            ...frost.panel,
+            ...DROPDOWN_SURFACE,
             border: `1px solid ${frostInk.border}`,
           }}
         >
@@ -694,7 +703,7 @@ export function QuickFind({
             marginTop: 6, padding: 6, borderRadius: 20,
             zIndex: z.overlay - 10,
             display: "flex", flexDirection: "column", gap: 2,
-            ...frost.panel,
+            ...DROPDOWN_SURFACE,
             border: `1px solid ${frostInk.border}`,
           }}
         >
