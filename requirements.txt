@@ -11,3 +11,13 @@ python-telegram-bot>=21.0
 mcp[cli]>=1.0.0,<2
 boto3>=1.34.0
 dateparser>=1.2.0
+# NOT added, deliberately: numpy / scikit-learn. The initiative synthesizer
+# (app/services/initiative_service.py) needs DBSCAN over cosine distance, which
+# is a sklearn one-liner — but sklearn+numpy is ~100MB of image and tens of MB
+# resident on a 512MB Fly machine that already runs a watchdog because it has
+# been OOM-killed before. The algorithm is ~40 lines and exactly specified, so
+# the service implements it directly and uses numpy for the distance matrix
+# ONLY if it happens to be importable (both paths are asserted identical by
+# tests/test_initiatives.py). Adding `numpy` here would buy the fast path for
+# ~20MB if the corpus ever outgrows the pure loop; adding sklearn buys nothing
+# the module doesn't already do.

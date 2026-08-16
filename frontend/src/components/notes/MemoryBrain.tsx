@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import type { ApiMemory } from "../../services/api";
+import { fetchInitiatives } from "../../services/api";
+import type { ApiInitiatives, ApiMemory } from "../../services/api";
 import { NeuralBrain } from "../animations/NeuralBrain";
 import { frostInk as ctok, FONT } from "../../ui";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
@@ -328,20 +329,38 @@ export function MemoryBrain({
   );
 }
 
-// ── Force-directed graph (restored) ─────────────────────────────────────────
-// The full-screen graph used to be the same fan layout blown up — this brings
-// back the earlier force-directed sim (custom physics, no library — mirrors
-// the pre-v2-nuke `ExploreModal.tsx` notes graph, which ran the identical
-// repel/spring/damping loop over notes instead of memories). Nodes are typed
-// by memory kind (color = PALETTE, shared with the inline bubbles + the
-// /memories table so a "goal" reads the same color everywhere); edges connect
-// memories that are actually related given what `/memories` already returns
-// (no API change): a supersession chain, memories extracted from the same
-// note, and memories sharing a recall `key`. Nodes drift toward a per-TYPE
-// anchor point arranged in a ring, which is what produces the type clustering
-// — the sim still free-floats within a cluster so it doesn't look like a pie
-// chart. Gooni (NeuralBrain) sits fixed at the canvas center as the anchor
-// the whole graph orbits.
+// ── Force-directed graph ────────────────────────────────────────────────────
+// A custom-physics sim (no library — mirrors the pre-v2-nuke `ExploreModal.tsx`
+// notes graph, which ran the identical repel/spring/damping loop). Edges connect
+// memories that are actually related given what `/memories` already returns (no
+// API change): a supersession chain, memories extracted from the same note, and
+// memories sharing a recall `key`. Nodes drift toward a per-GROUP anchor
+// arranged in a ring, which is what produces the visible clustering — the sim
+// still free-floats within a group so it doesn't look like a pie chart. Gooni
+// (NeuralBrain) sits fixed at the ring's center as the anchor everything orbits.
+//
+// **What a group IS changed with the initiative synthesizer (2026-08-16).** It
+// used to be the memory TYPE — but `fact`/`episode`/`routine` is a property of
+// how a row was extracted, not of what Daniel is doing, so a graph grouped by it
+// told you the shape of the extractor. The primary grouping is now the
+// INITIATIVE (`GET /initiatives`): clusters found by DBSCAN over the embedding
+// space across memories, thought-batches and active promises, each named by a
+// cheap model. Type survives as a small badge — the ring drawn around each node
+// — because it is still real information, just not the organizing one.
+//
+// Two rules the grouping has to keep:
+//   · **Type grouping is the FALLBACK, not the dead code path.** Before the
+//     first synthesis has ever run (and whenever the fetch fails) the snapshot
+//     is legitimately empty, and a graph that renders one undifferentiated blob
+//     in that state is worse than the old one. `buildGroups` falls back to type
+//     and the header says which mode is on screen.
+//   · **Uncategorized is a real group.** DBSCAN noise means "this row belongs to
+//     nothing", which is an answer. It gets its own dim band rather than being
+//     hidden or quietly folded into the nearest cluster.
+//
+// The edges are deliberately NOT redrawn from the clustering: co-membership is
+// already expressed by position and colour, and minting a line between every
+// pair in a cluster would assert a specific relation that nothing measured.
 
 interface GraphEdge {
   from: number;
@@ -349,14 +368,51 @@ interface GraphEdge {
   weight: number; // 0..1, drives both spring strength and line opacity
 }
 
+// One spatial + colour group. Built either from initiatives (primary) or from
+// memory types (fallback), so everything downstream — anchors, colours, headers
+// — reads one shape and neither mode is a special case in the sim.
+interface Group {
+  key: string;
+  label: string;
+  color: string;
+  // Uncategorized: rendered dim, in its own band, and never given a ring slot.
+  dim: boolean;
+  count: number;
+  anchorX: number;
+  anchorY: number;
+}
+
 interface SimNode {
   memory: ApiMemory;
+  group: Group;
   x: number; y: number;
   vx: number; vy: number;
   radius: number;
-  anchorX: number; anchorY: number; // per-type cluster target
+  anchorX: number; anchorY: number; // per-group cluster target
+  // Uncategorized nodes spread ACROSS their band instead of piling on one
+  // point — they have nothing in common, so a tight knot would imply they do.
+  // Drawn ONCE and kept, so a resize re-lays the band without reshuffling who
+  // sits where; re-rolling it would make every resize look like a new graph.
+  spreadX: number;
   lastFlash: number;
 }
+
+// Per-initiative identity hues. Deliberate identity colours (the same instinct
+// as QuickFind's per-kind hues and Topic's palette), cycled by cluster rank so
+// the biggest initiative always gets the first one and the graph doesn't
+// reshuffle its colours between refreshes.
+const INITIATIVE_HUES = [
+  "#4ADE80", // green
+  "#60A5FA", // blue
+  "#A78BFA", // violet
+  "#FB923C", // amber
+  "#F87171", // rose
+  "#2DD4BF", // teal
+  "#E879F9", // orchid
+  "#FACC15", // gold
+];
+const UNCATEGORIZED_COLOR = "#6B7280"; // dim grey — present, deliberately quiet
+const UNCATEGORIZED_KEY = "__uncategorized__";
 
 // Real relations only, derived from fields `/memories` already returns:
 // supersession (a memory that replaced another), co-extraction (same source
@@ -391,26 +447,138 @@ function buildMemoryEdges(memories: ApiMemory[]): GraphEdge[] {
   return edges;
 }
 
-function buildSimNodes(memories: ApiMemory[], width: number, height: number): SimNode[] {
-  const types = Array.from(new Set(memories.map((m) => m.type)));
-  const ringR = Math.min(width, height) * 0.32;
+// Height reserved at the bottom for DBSCAN noise. A band rather than another
+// ring slot: "belongs to no initiative" is a different KIND of answer from
+// "belongs to this one", and giving it a peer slot on the ring would read as a
+// thirteenth initiative called uncategorized.
+const UNCAT_BAND = 108;
+// How wide the noise nodes fan out inside that band.
+const UNCAT_SPREAD = 300;
+
+export interface GroupAssignment {
+  groups: Group[];
+  // memory id → group key. A memory the synthesizer never saw (written since
+  // the last refresh) has no entry and lands in uncategorized — which is true:
+  // it belongs to no *known* initiative yet.
+  memberOf: Map<number, string>;
+  mode: "initiative" | "type";
+}
+
+/**
+ * Decide the grouping and lay out each group's anchor.
+ *
+ * `initiatives` is the `GET /initiatives` payload, or null when it hasn't
+ * loaded / failed / never been synthesized — in which case this falls back to
+ * grouping by memory type so the graph is never a single undifferentiated blob.
+ *
+ * Exported so the layout rule is testable without standing up a canvas.
+ */
+export function buildGroups(
+  memories: ApiMemory[],
+  initiatives: ApiInitiatives | null,
+  width: number,
+  height: number,
+): GroupAssignment {
+  const memberOf = new Map<number, string>();
+  const named: { key: string; label: string; count: number }[] = [];
+  let mode: "initiative" | "type" = "type";
+
+  const clusters = initiatives?.clusters ?? [];
+  if (clusters.length > 0) {
+    mode = "initiative";
+    const present = new Set(memories.map((m) => m.id));
+    clusters.forEach((c, i) => {
+      const key = `i${i}`;
+      let hit = 0;
+      for (const item of c.items) {
+        // An initiative spans three primitives; only its MEMORY members are
+        // nodes here. The label still counts the whole cluster (`c.size`) —
+        // see the header — so the graph never implies an initiative is only
+        // as big as the memories in it.
+        if (item.type !== "memory" || !present.has(item.id)) continue;
+        memberOf.set(item.id, key);
+        hit++;
+      }
+      // A cluster with no memory members on this canvas gets no anchor — an
+      // empty ring slot is a gap the eye reads as a missing group.
+      if (hit > 0) named.push({ key, label: c.label, count: hit });
+    });
+  }
+
+  if (mode === "type") {
+    for (const t of Array.from(new Set(memories.map((m) => m.type)))) {
+      named.push({
+        key: `t${t}`,
+        label: t,
+        count: memories.filter((m) => m.type === t).length,
+      });
+    }
+    for (const m of memories) memberOf.set(m.id, `t${m.type}`);
+  }
+
+  const uncatCount = memories.filter((m) => !memberOf.has(m.id)).length;
+  const bandH = uncatCount > 0 ? UNCAT_BAND : 0;
+  const stageH = Math.max(120, height - bandH);
   const cx = width / 2;
-  const cy = height / 2;
-  const anchorFor = new Map<string, { x: number; y: number }>();
-  types.forEach((t, i) => {
-    const angle = (i / Math.max(1, types.length)) * Math.PI * 2 - Math.PI / 2;
-    anchorFor.set(t, { x: cx + Math.cos(angle) * ringR, y: cy + Math.sin(angle) * ringR });
+  const cy = stageH / 2;
+  const ringR = Math.min(width, stageH) * 0.32;
+
+  const groups: Group[] = named.map((n, i) => {
+    const angle = (i / Math.max(1, named.length)) * Math.PI * 2 - Math.PI / 2;
+    return {
+      key: n.key,
+      label: n.label,
+      color: mode === "initiative"
+        ? INITIATIVE_HUES[i % INITIATIVE_HUES.length]
+        : paletteFor(n.label).accent,
+      dim: false,
+      count: n.count,
+      anchorX: cx + Math.cos(angle) * ringR,
+      anchorY: cy + Math.sin(angle) * ringR,
+    };
   });
+
+  if (uncatCount > 0) {
+    groups.push({
+      key: UNCATEGORIZED_KEY,
+      label: "uncategorized",
+      color: UNCATEGORIZED_COLOR,
+      dim: true,
+      count: uncatCount,
+      anchorX: cx,
+      anchorY: height - bandH / 2,
+    });
+  }
+
+  return { groups, memberOf, mode };
+}
+
+export function stageHeightFor(
+  memories: ApiMemory[],
+  assignment: GroupAssignment,
+  height: number,
+): number {
+  const hasUncat = memories.some((m) => !assignment.memberOf.has(m.id));
+  return Math.max(120, height - (hasUncat ? UNCAT_BAND : 0));
+}
+
+function buildSimNodes(memories: ApiMemory[], assignment: GroupAssignment): SimNode[] {
+  const byKey = new Map(assignment.groups.map((g) => [g.key, g]));
+  const uncat = byKey.get(UNCATEGORIZED_KEY);
   return memories.map((m) => {
-    const anchor = anchorFor.get(m.type) ?? { x: cx, y: cy };
-    const jitter = 30;
+    const g = byKey.get(assignment.memberOf.get(m.id) ?? "") ?? uncat ?? assignment.groups[0];
+    const spreadX = g?.dim ? (Math.random() - 0.5) * UNCAT_SPREAD : 0;
+    const jitterY = g?.dim ? 50 : 30;
     return {
       memory: m,
-      x: anchor.x + (Math.random() - 0.5) * jitter,
-      y: anchor.y + (Math.random() - 0.5) * jitter,
+      group: g,
+      x: (g?.anchorX ?? 0) + spreadX + (Math.random() - 0.5) * 20,
+      y: (g?.anchorY ?? 0) + (Math.random() - 0.5) * jitterY,
       vx: 0, vy: 0,
       radius: 4 + m.confidence * 5,
-      anchorX: anchor.x, anchorY: anchor.y,
+      anchorX: (g?.anchorX ?? 0) + spreadX,
+      anchorY: g?.anchorY ?? 0,
+      spreadX,
       lastFlash: -Infinity,
     };
   });
@@ -421,16 +589,25 @@ function stepGraph(
   edges: GraphEdge[],
   nodeIndex: Map<number, SimNode>,
   width: number,
-  height: number,
+  // The RING's height, not the canvas's — the brain sits at the ring center,
+  // which is above the uncategorized band. Passing the canvas height instead
+  // would repel nodes away from a point Gooni isn't drawn on.
+  stageH: number,
 ) {
   const REPULSION = 2200;
   const SPRING_K = 0.02;
   const IDEAL_EDGE_LEN = 70;
-  const ANCHOR_K = 0.006; // pull toward this node's type cluster
+  // Cluster gravity — the pull toward this node's GROUP anchor, and the force
+  // that makes the grouping legible at all. Raised from 0.006 with the
+  // initiative grouping: there are now more groups than there were types, so
+  // the same pull left neighbouring clusters bleeding into each other. Still
+  // deliberately gentle — crank it much past this and the sim stops being a
+  // graph and becomes a pie chart with dots in it.
+  const ANCHOR_K = 0.011;
   const BRAIN_REPEL_R = 70; // keep clear of the center Gooni
   const DAMPING = 0.82;
   const MAX_SPEED = 12;
-  const cx = width / 2, cy = height / 2;
+  const cx = width / 2, cy = stageH / 2;
 
   for (let i = 0; i < nodes.length; i++) {
     const a = nodes[i];
@@ -477,12 +654,10 @@ function stepGraph(
   }
 }
 
-// Full-screen graph view, opened by clicking the brain — a force-directed
-// sim over every memory rather than the inline strip's capped 12, with nodes
-// clustered by type and edges for real relations (supersession / same note /
-// same key). Restores a click affordance the brain button carried
-// ("Visualize notes" title, an `onClick` prop it never received) that had
-// gone dead: nothing wired it to anything.
+// Full-screen graph view, opened by clicking the brain — a force-directed sim
+// over every memory rather than the inline strip's capped 12, grouped by
+// INITIATIVE (see the section comment above) with edges for real relations
+// (supersession / same note / same key).
 function MemoryGraphModal({
   memories,
   onClose,
@@ -494,10 +669,27 @@ function MemoryGraphModal({
 }) {
   const [selected, setSelected] = useState<ApiMemory | null>(null);
   const [hovered, setHovered] = useState<ApiMemory | null>(null);
+  const [initiatives, setInitiatives] = useState<ApiInitiatives | null>(null);
+  // The RING's height. Gooni is drawn as a DOM overlay, not on the canvas, so
+  // it needs the same number the sim uses — otherwise it sits at the canvas
+  // center while the ring is centered above the uncategorized band.
+  const [stageTop, setStageTop] = useState<number | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const theme = useGooniThemeStore((s) => s.theme);
   const edges = useMemo(() => buildMemoryEdges(memories), [memories]);
+
+  // A pure cache read server-side (the clustering ran overnight), so this is
+  // safe on mount. A failure leaves `initiatives` null, which is exactly the
+  // never-synthesized state — the graph falls back to type grouping rather than
+  // rendering nothing. Guarded against a late resolve after unmount.
+  useEffect(() => {
+    let live = true;
+    fetchInitiatives()
+      .then((r) => { if (live) setInitiatives(r); })
+      .catch(() => { /* falls back to type grouping */ });
+    return () => { live = false; };
+  }, []);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -516,6 +708,13 @@ function MemoryGraphModal({
 
     let panelW = panel.clientWidth;
     let panelH = panel.clientHeight;
+    let assignment = buildGroups(memories, initiatives, panelW, panelH);
+    let stageH = stageHeightFor(memories, assignment, panelH);
+
+    const nodes = buildSimNodes(memories, assignment);
+    const nodeIndex = new Map(nodes.map((n) => [n.memory.id, n]));
+    let hoveredNode: SimNode | null = null;
+
     function resize() {
       panelW = panel!.clientWidth;
       panelH = panel!.clientHeight;
@@ -525,17 +724,30 @@ function MemoryGraphModal({
       canvas!.style.width = `${panelW}px`;
       canvas!.style.height = `${panelH}px`;
       ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      // Re-lay the ring for the new box and re-point every node at its group's
+      // new anchor. The membership is unchanged (it comes from the snapshot,
+      // not the geometry) so nodes keep their colour and their neighbours and
+      // simply drift to the new slot — without this the anchors stay pinned to
+      // the box the modal opened at and the whole ring slides off a resized one.
+      assignment = buildGroups(memories, initiatives, panelW, panelH);
+      stageH = stageHeightFor(memories, assignment, panelH);
+      const byKey = new Map(assignment.groups.map((g) => [g.key, g]));
+      for (const n of nodes) {
+        const g = byKey.get(n.group?.key ?? "") ?? assignment.groups[0];
+        if (!g) continue;
+        n.group = g;
+        n.anchorX = g.anchorX + n.spreadX;
+        n.anchorY = g.anchorY;
+      }
+      setStageTop(stageH);
     }
     resize();
     const ro = new ResizeObserver(resize);
     ro.observe(panel);
 
-    const nodes = buildSimNodes(memories, panelW, panelH);
-    const nodeIndex = new Map(nodes.map((n) => [n.memory.id, n]));
-    let hoveredNode: SimNode | null = null;
-
     // Pre-warm so the graph opens already settled, not mid-explosion.
-    for (let i = 0; i < 160; i++) stepGraph(nodes, edges, nodeIndex, panelW, panelH);
+    for (let i = 0; i < 160; i++) stepGraph(nodes, edges, nodeIndex, panelW, stageH);
 
     // Random periodic flashes — same "neurons firing" feel as the notes graph.
     const FLASH_DURATION_MS = 520;
@@ -579,11 +791,56 @@ function MemoryGraphModal({
 
     let raf = 0;
     function frame() {
-      stepGraph(nodes, edges, nodeIndex, panelW, panelH);
+      stepGraph(nodes, edges, nodeIndex, panelW, stageH);
+      // Read per-frame, not captured: `resize` reassigns both.
+      const cxRing = panelW / 2;
+      const cyRing = stageH / 2;
 
       ctx!.clearRect(0, 0, panelW, panelH);
       ctx!.fillStyle = C.bg;
       ctx!.fillRect(0, 0, panelW, panelH);
+
+      // The uncategorized band, drawn FIRST so it reads as ground the dim
+      // nodes sit on rather than a box drawn over them. A hairline, not a
+      // filled panel — this is a separate area, not a second surface.
+      const uncat = assignment.groups.find((g) => g.dim);
+      if (uncat) {
+        const bandTop = stageH;
+        ctx!.strokeStyle = `rgba(${C.edgeRGB},0.10)`;
+        ctx!.lineWidth = 1;
+        ctx!.beginPath();
+        ctx!.moveTo(20, bandTop);
+        ctx!.lineTo(panelW - 20, bandTop);
+        ctx!.stroke();
+      }
+
+      // Group headers. Each named group's label sits just OUTSIDE its ring
+      // slot (pushed radially away from the center) so it labels the cluster
+      // without landing under its own nodes.
+      ctx!.textBaseline = "middle";
+      for (const g of assignment.groups) {
+        ctx!.font = `600 11px ${FONT}`;
+        if (g.dim) {
+          ctx!.fillStyle = `rgba(${C.edgeRGB},0.34)`;
+          ctx!.textAlign = "left";
+          ctx!.fillText(`uncategorized · ${g.count}`, 22, stageH + 16);
+          continue;
+        }
+        const dx = g.anchorX - cxRing;
+        const dy = g.anchorY - cyRing;
+        const d = Math.sqrt(dx * dx + dy * dy) || 1;
+        const lx = g.anchorX + (dx / d) * 46;
+        const ly = g.anchorY + (dy / d) * 46;
+        // Anchor the text away from the center so a label on the left of the
+        // ring doesn't run back across its own cluster.
+        ctx!.textAlign = dx < -8 ? "right" : dx > 8 ? "left" : "center";
+        ctx!.fillStyle = g.color;
+        ctx!.fillText(g.label, lx, ly);
+        ctx!.font = `500 10px ${FONT}`;
+        ctx!.fillStyle = `rgba(${C.edgeRGB},0.38)`;
+        ctx!.fillText(String(g.count), lx, ly + 13);
+      }
+      ctx!.textAlign = "left";
 
       const now = performance.now();
       for (const e of edges) {
@@ -602,24 +859,45 @@ function MemoryGraphModal({
         const flashAge = now - n.lastFlash;
         const flashT = Math.max(0, 1 - flashAge / FLASH_DURATION_MS);
         const intensity = isHover ? 1 : flashT;
-        const palette = paletteFor(n.memory.type);
 
-        ctx!.fillStyle = palette.accent;
+        // Fill = the INITIATIVE. Uncategorized nodes are drawn at reduced
+        // alpha, which is what makes "belongs to nothing" read as quieter
+        // rather than as a thirteenth colour competing with the real ones.
+        ctx!.globalAlpha = n.group?.dim && !isHover ? 0.45 : 1;
+        ctx!.fillStyle = n.group?.color ?? UNCATEGORIZED_COLOR;
         ctx!.beginPath();
         ctx!.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
         ctx!.fill();
+
+        // The TYPE badge. A ring in the type's hue rather than a letter: at
+        // 4-9px a glyph is unreadable, and the hue is already the shared
+        // per-type identity colour the inline bubbles and the /memories table
+        // use. The tooltip and the peek card still name the type in words.
+        ctx!.strokeStyle = paletteFor(n.memory.type).accent;
+        ctx!.lineWidth = 1.5;
+        ctx!.beginPath();
+        ctx!.arc(n.x, n.y, n.radius + 1.6, 0, Math.PI * 2);
+        ctx!.stroke();
+        ctx!.globalAlpha = 1;
 
         if (intensity > 0.05) {
           ctx!.strokeStyle = `rgba(74,222,128,${0.5 * intensity})`;
           ctx!.lineWidth = 2;
           ctx!.beginPath();
-          ctx!.arc(n.x, n.y, n.radius + 4 + 3 * intensity, 0, Math.PI * 2);
+          ctx!.arc(n.x, n.y, n.radius + 5 + 3 * intensity, 0, Math.PI * 2);
           ctx!.stroke();
         }
       }
 
       if (hoveredNode) {
-        const label = `${hoveredNode.memory.type} · ${hoveredNode.memory.content.slice(0, 48)}${hoveredNode.memory.content.length > 48 ? "…" : ""}`;
+        // Initiative first, then type, then the content — the tooltip is where
+        // the grouping is stated in WORDS, since the node itself only carries
+        // it as colour.
+        const g = hoveredNode.group;
+        const prefix = assignment.mode === "initiative" && g && !g.dim
+          ? `${g.label} · ${hoveredNode.memory.type}`
+          : hoveredNode.memory.type;
+        const label = `${prefix} · ${hoveredNode.memory.content.slice(0, 48)}${hoveredNode.memory.content.length > 48 ? "…" : ""}`;
         ctx!.font = `600 12px ${FONT}`;
         const metrics = ctx!.measureText(label);
         const padX = 8;
@@ -653,11 +931,23 @@ function MemoryGraphModal({
       canvas.removeEventListener("pointermove", onMove);
       canvas.removeEventListener("pointerdown", onDown);
     };
-  }, [memories, edges, theme]);
+    // `initiatives` arrives after mount, so the sim rebuilds once when the
+    // snapshot lands — regrouping every node from type to initiative. That is
+    // the intended behaviour, not a wasted rebuild: it is the only moment the
+    // grouping can change.
+  }, [memories, edges, theme, initiatives]);
 
   const BRAIN_SIZE = 64;
   const brainOuterW = BRAIN_SIZE + 12;
   const brainOuterH = BRAIN_SIZE * 1.125 + 12;
+
+  // Say which grouping is on screen. Two modes that look similar and mean very
+  // different things ("these rows are about one project" vs "these rows were
+  // extracted the same way") must not be told apart by guessing at the colours.
+  const nInitiatives = initiatives?.clusters?.length ?? 0;
+  const groupingNote = nInitiatives > 0
+    ? `grouped by ${nInitiatives} initiative${nInitiatives === 1 ? "" : "s"}`
+    : "grouped by type — no initiatives synthesized yet";
 
   return (
     <div
@@ -687,7 +977,7 @@ function MemoryGraphModal({
           <div>
             <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: ctok.text }}>memory graph</p>
             <p style={{ margin: "2px 0 0", fontSize: 11.5, color: ctok.muted }}>
-              {memories.length} memor{memories.length === 1 ? "y" : "ies"} · {edges.length} link{edges.length === 1 ? "" : "s"} · click a node to peek
+              {memories.length} memor{memories.length === 1 ? "y" : "ies"} · {edges.length} link{edges.length === 1 ? "" : "s"} · {groupingNote} · click a node to peek
             </p>
           </div>
           <button
@@ -703,9 +993,14 @@ function MemoryGraphModal({
         <div ref={panelRef} style={{ position: "relative", flex: 1, minHeight: 0 }}>
           <canvas ref={canvasRef} style={{ display: "block", position: "absolute", inset: 0 }} />
 
-          {/* Gooni, fixed at the canvas center — everything else orbits it. */}
+          {/* Gooni, fixed at the RING's center — everything else orbits it.
+              `stageTop` is the ring height the sim uses; before the first
+              measurement it falls back to the canvas center, which is also the
+              exact answer whenever there is no uncategorized band. */}
           <div style={{
-            position: "absolute", left: "50%", top: "50%",
+            position: "absolute",
+            left: "50%",
+            top: stageTop == null ? "50%" : stageTop / 2,
             transform: "translate(-50%, -50%)",
             width: brainOuterW, height: brainOuterH,
             display: "flex", alignItems: "center", justifyContent: "center",

@@ -41,4 +41,5 @@ ROUTER_MODULES = [
     "app_activity",
     "display",
     "proactive",
+    "initiatives",
 ]

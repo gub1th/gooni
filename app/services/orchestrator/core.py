@@ -23,6 +23,7 @@ from .prompt_blocks import (
     ENTRY_SUMMARIZE_THRESHOLD,
     OBJECT_KINDS_BLOCK,
     _build_ack,
+    _build_initiative_block,
     _build_overlay_block,
     _build_state_block,
     _build_just_extracted_block,
@@ -782,6 +783,19 @@ class Orchestrator:
         except Exception as e:
             print(f"[overlay_block] build failed: {e}")
 
+        # What Daniel is working on THIS MONTH, one altitude above the two
+        # blocks before it. state_block lists open rows and overlay_block
+        # ranks them; neither can say "this is the interview thread again",
+        # because that isn't a property of any row — it's the shape of the
+        # corpus. Every source, same reason. A pure cache read (the
+        # clustering + labeling ran on a background loop overnight), so it
+        # costs nothing on the turn.
+        initiative_block = ""
+        try:
+            initiative_block = _build_initiative_block(db)
+        except Exception as e:
+            print(f"[initiative_block] build failed: {e}")
+
         # ReAct PLAN step REMOVED (audit 2026-06-10). It was a serial
         # gpt-4o-mini call whose state_summary arg was hardcoded "" — the
         # planner saw only the message + tool names and emitted a 2-line
@@ -834,6 +848,7 @@ class Orchestrator:
             time_block,
             state_block,
             overlay_block,
+            initiative_block,
             just_extracted_block,
             rollup_block,
             memory_context,

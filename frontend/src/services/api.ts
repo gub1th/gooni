@@ -1279,6 +1279,52 @@ export async function fetchMemoryStats(): Promise<{ total: number; by_type: Reco
   return res.json();
 }
 
+// ── Initiatives ────────────────────────────────────────────────────────────
+// The synthesizer's cached snapshot: what Daniel is currently working on,
+// clustered out of memories + thought-batches + active promises once a day and
+// labeled by a cheap model (see app/services/initiative_service.py). A pure
+// cache read — the endpoint never clusters, so this is safe to call on mount.
+export interface ApiInitiativeItem {
+  type: "memory" | "thought" | "promise";
+  id: number;
+  text: string;
+}
+
+export interface ApiInitiative {
+  label: string;
+  size: number;
+  summary: string;
+  by_type: Record<string, number>;
+  items: ApiInitiativeItem[];
+}
+
+export interface ApiInitiatives {
+  // null until the first synthesis has ever run. Clients render "not
+  // synthesized yet", never a placeholder initiative.
+  built_at: string | null;
+  item_count: number;
+  clusters: ApiInitiative[];
+  // DBSCAN noise — rows that belong to no initiative. Counted, never dropped:
+  // a synthesis that silently discards part of its corpus reads as complete
+  // coverage of it.
+  uncategorized: { count: number; items: ApiInitiativeItem[] };
+  // Clusters found vs clusters served — `clusters` is capped server-side.
+  total_clusters: number;
+  truncated: boolean;
+}
+
+export async function fetchInitiatives(): Promise<ApiInitiatives> {
+  const res = await apiFetch(`${BASE}/initiatives`);
+  if (!res.ok) throw new Error("Failed to fetch initiatives");
+  return res.json();
+}
+
+export async function refreshInitiatives(): Promise<ApiInitiatives> {
+  const res = await apiFetch(`${BASE}/initiatives/refresh`, { method: "POST" });
+  if (!res.ok) throw new Error("Failed to refresh initiatives");
+  return res.json();
+}
+
 export async function deleteMemory(id: number): Promise<void> {
   const res = await apiFetch(`${BASE}/memories/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to delete memory");
