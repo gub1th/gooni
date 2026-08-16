@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { Mic, StickyNote } from "lucide-react";
 import type { Editor } from "@tiptap/react";
 import { FONT, frostInk } from "../../ui";
@@ -161,6 +162,7 @@ export function AmbientHome({
   /** a surface panel is sliding over the home — stand every affordance down */
   covered?: boolean;
 } = {}) {
+  const navigate = useNavigate();
   const energyRef = useRef(0);
   const activeRef = useRef(0);
 
@@ -907,11 +909,14 @@ export function AmbientHome({
     // this instant recorded and stays wrong until the 30s poll. The store went
     // A → B in one batch, so the null-transition effect never sees it.
     void loadTotals();
-    // Deliberately NO navigate. Focus is a STATE, not a place: starting it must
-    // leave you exactly where you were working, with the banner picking the
-    // session up. Sending you to /focus is what the last cut did, and being
-    // moved to a page you then had to navigate back from is the whole reason
-    // this was reworked.
+  }
+
+  // Clicking a TODAY row: start the session on it (unless it's already the one
+  // running) and open `/focus` — the kiosk view onto whatever the store says is
+  // running, so this is safe to fire even when a session is already live.
+  function openFocusRow(item: FocusReminder) {
+    if (session?.promiseId !== item.id) void startFocus(item);
+    void navigate({ to: "/focus" });
   }
 
   const needsWake = voiceMode && !armed; // show the tap-to-wake veil
@@ -1163,7 +1168,7 @@ export function AmbientHome({
             sessionRow={sessionRow}
             onTick={(item) => void onTick(item)}
             onAdd={onAdd}
-            onFocus={(item) => void startFocus(item)}
+            onFocus={openFocusRow}
             onTogglePause={() => {
               const st = useFocusSessionStore.getState();
               if (st.session?.running) st.pause();
