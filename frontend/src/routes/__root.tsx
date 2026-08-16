@@ -382,25 +382,43 @@ function AppShell() {
             as the page treatment — it framed every surface as a floating
             window, which is what made them read as pasted on. */}
         <SurfaceHost isSheet={isSheet} viewKey={surfaceKey} onDismiss={gotoBlank}>
-        {/* Notes sidebar — always expanded when notes is the active view,
-            no collapse toggle. It's the note browser only; app-level nav
-            lives in IconRail, which stays visible alongside it. */}
-        {isNotes && (
-          <Sidebar
-            onAllNotes={gotoNotesView}
-            onSelectNote={handleSelectNote}
-          />
-        )}
+        {/* ONE child, ALWAYS — the panel's own box must never change shape when
+            a surface mounts. The notes sidebar used to be a second flex child of
+            the panel itself, appearing and disappearing with the view, so the
+            panel went from one child to two in the very commit that starts its
+            slide. That is the commit in which the panel's border box stopped
+            tracking its own transform, which is the whole of "notes doesn't
+            slide". Everything that varies per surface now varies INSIDE this
+            row; the panel above it is invariant. */}
         <div
           style={{
             flex: 1,
             display: "flex",
             minWidth: 0,
-            position: "relative",
+            height: "100%",
             overflow: "hidden",
           }}
         >
-          <Outlet />
+          {/* Notes sidebar — always expanded when notes is the active view,
+              no collapse toggle. It's the note browser only; app-level nav
+              lives in IconRail, which stays visible alongside it. */}
+          {isNotes && (
+            <Sidebar
+              onAllNotes={gotoNotesView}
+              onSelectNote={handleSelectNote}
+            />
+          )}
+          <div
+            style={{
+              flex: 1,
+              display: "flex",
+              minWidth: 0,
+              position: "relative",
+              overflow: "hidden",
+            }}
+          >
+            <Outlet />
+          </div>
         </div>
         </SurfaceHost>
         {/* /focus's own persistent panel — see SurfaceHost above for why it

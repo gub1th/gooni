@@ -7,6 +7,7 @@ import { useHomeChromeStore } from "../../stores/useHomeChromeStore";
 import { QuickFind } from "../ambient/QuickFind";
 import { RAIL_LANE } from "../ambient/IconRail";
 import { dragRegion } from "../../services/desktop";
+import { useDisplayLocationStore } from "../../stores/useDisplayLocationStore";
 import { fetchSettings, type ApiNote } from "../../services/api";
 
 // ONE sticky header, on every non-immersive surface.
@@ -48,18 +49,29 @@ const SIDE_RESERVE = 200;
  */
 export const HEADER_Z = z.overlay + 5;
 
-// City name off an IANA tz string ("America/Los_Angeles" → "Los Angeles") —
-// the fallback the brief asks for, and in practice the only signal available
-// without a reverse-geocoding service: `navigator.geolocation` gives lat/long,
-// not a place name, and turning that into "Los Angeles" needs an external API
-// this app has no key for. What browser geolocation DOES give for free is the
-// runtime's own IANA timezone (`Intl.DateTimeFormat().resolvedOptions()`),
-// which is more likely to be current than the DB's `Settings.nudge_tz` if
-// Daniel is actually travelling — so that's preferred when available, with the
-// settings timezone as the fallback for a browser that can't resolve one.
-function tzToCity(tz: string): string {
-  const last = tz.split("/").pop() ?? tz;
-  return last.replace(/_/g, " ");
+/**
+ * The timezone's ABBREVIATION for a given moment — "PDT" in summer, "PST" in
+ * winter, so it is a live fact rather than a label.
+ *
+ * This replaces printing the IANA zone's trailing path segment as if it were a
+ * city. "America/Los_Angeles" is the name of a set of offset RULES, and its
+ * city is only the representative one: San Francisco, San Diego, Portland and
+ * Seattle all live in it. The captain is in SF and the header said "Los
+ * Angeles" — not a formatting slip, a category error, and one no prettifying
+ * can fix. A place name has to be told to us; see `useDisplayLocationStore`.
+ *
+ * Intl falls back to a GMT offset ("GMT+7") for zones with no common
+ * abbreviation. That is still true and still not a city, so it is fine to show.
+ */
+export function tzAbbreviation(at: Date, tz: string | undefined): string | null {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz, timeZoneName: "short",
+    }).formatToParts(at);
+    return parts.find((p) => p.type === "timeZoneName")?.value ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function HeaderClock() {
@@ -67,6 +79,7 @@ function HeaderClock() {
   useEffect(() => {
     void fetchSettings().then((s) => setSettingsTz(s.nudge_tz)).catch(() => {});
   }, []);
+  const override = useDisplayLocationStore((s) => s.displayLocation);
 
   const tz = useMemo(() => {
     try {
@@ -76,24 +89,53 @@ function HeaderClock() {
     return settingsTz ?? undefined;
   }, [settingsTz]);
 
+  // Ticks ON the minute rather than every 30s. A 30s poll against a display
+  // whose smallest unit is a minute shows the wrong minute for up to half of
+  // every one of them; this re-arms itself at each boundary so it also can't
+  // drift. (`Date.now() % 60_000` finds the boundary because every real UTC
+  // offset is a whole number of minutes.)
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
-    const id = window.setInterval(() => setNow(new Date()), 30_000);
-    return () => window.clearInterval(id);
+    let id = 0;
+    function schedule() {
+      id = window.setTimeout(() => {
+        setNow(new Date());
+        schedule();
+      }, 60_000 - (Date.now() % 60_000) + 50);
+    }
+    schedule();
+    return () => window.clearTimeout(id);
   }, []);
 
+  // Both read the SAME `now` and the SAME zone, so the date can never disagree
+  // with the time beside it across a midnight tick.
+  const date = now
+    .toLocaleDateString(undefined, {
+      weekday: "short", month: "short", day: "numeric", timeZone: tz,
+    })
+    .toLowerCase();
   const time = now.toLocaleTimeString(undefined, {
     hour: "2-digit", minute: "2-digit", hour12: false, timeZone: tz,
   });
-  const location = tz ? tzToCity(tz) : null;
+  // A typed place name wins; otherwise the zone abbreviation. Never a city
+  // guessed from the zone id.
+  const location = override || tzAbbreviation(now, tz);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 1, userSelect: "none" }}>
-      <div style={{
-        fontSize: 14, fontWeight: 600, color: ink(0.75), whiteSpace: "nowrap",
-        fontVariantNumeric: "tabular-nums", lineHeight: 1,
-      }}>
-        {time}
+    <div style={{ display: "flex", flexDirection: "column", gap: 2, userSelect: "none" }}>
+      {/* Date stays LEFTMOST, as it was before the clock landed — the clock was
+          meant to join it and replaced it instead. Baseline-aligned so the two
+          read as one line rather than two stacked labels. */}
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, whiteSpace: "nowrap" }}>
+        <div style={{ fontSize: 11.5, color: ink(0.38), lineHeight: 1 }}>
+          {date}
+        </div>
+        <div style={{
+          fontSize: 14, fontWeight: 600, color: ink(0.75),
+          fontVariantNumeric: "tabular-nums", lineHeight: 1,
+        }}>
+          {time}
+        </div>
       </div>
       {location && (
         <div style={{ fontSize: 9.5, color: ink(0.32), whiteSpace: "nowrap", lineHeight: 1 }}>

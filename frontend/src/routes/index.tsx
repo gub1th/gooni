@@ -188,27 +188,28 @@ function LogPage() {
           aria-hidden={view !== "home"}
           style={{
             pointerEvents: view === "home" ? undefined : "none",
-            // A small right-to-left slide, echoing SurfacePanel's own
-            // entrance, so returning to home from a non-home surface reads as
-            // arriving rather than just being uncovered the instant the panel
-            // clears it. Subtle on purpose — the home is the anchor, not
-            // another page, so this is a nudge (12px) rather than the full
-            // viewport-width slide the panel itself does.
+            // NO TRANSFORM HERE. EVER. Not an identity one, not a 12px nudge.
             //
-            // The resting-home value MUST be `undefined`, not "translateX(0)".
-            // AmbientHome's stage root is `position: fixed; inset: 0` — ANY
-            // transform on an ancestor (even an identity one) makes that
-            // ancestor the containing block for fixed descendants, per CSS.
-            // A permanent `translateX(0)` here collapsed the wrapper (its only
-            // child is now out of flow) to a ~0-size box, so the wave/TODAY
-            // list rendered pinned to that box instead of the viewport — the
-            // home-goes-blank-on-refresh bug. Transitioning between a set
-            // transform and `undefined` still animates smoothly (the browser
-            // treats a missing transform as the identity for interpolation),
-            // so the slide-in survives; only the settled state drops the
-            // property so fixed descendants measure against the viewport again.
-            transform: view === "home" ? undefined : "translateX(12px)",
-            transition: "transform 260ms cubic-bezier(0.32, 0.72, 0, 1)",
+            // AmbientHome's stage root is `position: fixed; inset: 0`, and ANY
+            // transform on an ancestor makes that ancestor the containing block
+            // for its fixed descendants, per CSS. This wrapper's only child is
+            // then out of flow, so the wrapper itself lays out as a zero-height
+            // box at the end of the document — measured live while a surface was
+            // open: wrapper rect `[12, 2029, 1200x0]`, and the stage inside it
+            // inheriting exactly that. The home was not merely dimmed behind the
+            // panel, it was COLLAPSED AND SCROLLED OFF THE BOTTOM.
+            //
+            // That was the whole of "the panel just disappears instead of
+            // revealing the home": the exit slide worked, but there was nothing
+            // underneath it to reveal. The nudge this replaced was added to make
+            // the return read as an arrival; it cost the arrival its subject.
+            // The reveal comes from SurfacePanel sliding OUT to the right over a
+            // home that stayed exactly where it was — which is the stronger read
+            // anyway, because the home is the anchor and anchors do not move.
+            //
+            // If a future pass wants the home itself to move, it must animate a
+            // descendant INSIDE AmbientHome that has no fixed children, never
+            // this wrapper.
           }}
         >
           <AmbientHome
