@@ -1,6 +1,12 @@
 {
   "manifest_version": 3,
-  "name": "Gooni Browser Sensor",
+  "name": "Gooni Extension",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
   "version": "0.1.0",
   "description": "Records which tab actually has focus, buffers locally, and ships intervals to Gooni.",
   "background": {
@@ -10,7 +16,13 @@
   "permissions": ["tabs", "idle", "storage", "alarms", "favicon"],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Gooni usage"
+    "default_title": "Gooni usage",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
   },
   "chrome_url_overrides": {
     "newtab": "newtab.html"
