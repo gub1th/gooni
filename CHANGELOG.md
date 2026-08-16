@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.246.0 — 2026-08-16 (minor)
+
+- feat: feed tile refresh buttons, header clock, quickfind pre-query state (#511)
+
 ## 0.245.7 — 2026-08-16 (patch)
 
 - fix(proactive): exclude Gooni's own URLs from off-task tension + doing fold (#509)
