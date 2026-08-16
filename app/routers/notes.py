@@ -518,15 +518,17 @@ def notes_graph(db: Session = Depends(get_db)):
 
 @router.post("/notes/cleanup")
 def cleanup_empty_notes(dry_run: bool = False, db: Session = Depends(get_db)):
-    """Delete notes with no real content. "Real content" = any plaintext
-    >= 6 chars after stripping HTML, OR any embedded media (img/video/iframe).
-    Pinned notes are always preserved (explicit user intent). Empty drafts
-    are NOT preserved.
+    """Delete only truly empty notes. "Real content" = ANY non-whitespace
+    plaintext after stripping HTML (however short — "gym" is a real note),
+    OR any embedded media (img/video/iframe), OR a real title. Pinned notes
+    are always preserved (explicit user intent). Empty untitled drafts are
+    NOT preserved.
 
-    The image carve-out matters because a note that's just a pasted
-    screenshot strips down to "" plaintext under the old rule and would
-    have been swept. Media tags count as content even though they don't
-    contribute characters.
+    The old >= 6-char plaintext threshold swept real few-word notes (a
+    "decided to skip gym today" thought is content); length is no longer a
+    criterion. The media carve-out matters because a note that's just a
+    pasted screenshot strips down to "" plaintext. A titled-but-bodyless
+    note is kept too — the title is content the user typed.
     """
     import re
 
@@ -534,13 +536,15 @@ def cleanup_empty_notes(dry_run: bool = False, db: Session = Depends(get_db)):
     tag_strip_re = re.compile(r"<[^>]+>")
     ws_re = re.compile(r"\s+")
 
-    def _has_real_content(html: str | None) -> bool:
+    def _has_real_content(html: str | None, title: str | None = None) -> bool:
+        if title and title.strip() and title.strip().lower() != "untitled":
+            return True
         if not html:
             return False
         if media_re.search(html):
             return True
         text_only = ws_re.sub(" ", tag_strip_re.sub(" ", html)).strip()
-        return len(text_only) >= 6
+        return len(text_only) > 0
 
     non_pinned = (
         db.query(Note)
@@ -554,12 +558,12 @@ def cleanup_empty_notes(dry_run: bool = False, db: Session = Depends(get_db)):
     )
     deleted_ids = []
     for n in non_pinned:
-        if not _has_real_content(n.content):
+        if not _has_real_content(n.content, n.title):
             deleted_ids.append(n.id)
             if not dry_run:
                 db.delete(n)
     preserved_pinned_empty = sum(
-        1 for n in pinned_empty if not _has_real_content(n.content)
+        1 for n in pinned_empty if not _has_real_content(n.content, n.title)
     )
     if not dry_run:
         db.commit()
