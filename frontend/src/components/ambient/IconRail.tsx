@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   FileText, Brain, LayoutGrid, CalendarDays,
-  SearchCheck, Target, type LucideIcon,
+  SearchCheck, Target, Settings, type LucideIcon,
 } from "lucide-react";
 import { FONT, frost, z } from "../../ui";
 import { GooniLogo } from "../GooniLogo";
@@ -37,6 +37,7 @@ const ICON_TINT = {
   Memories:   "#9C8FAD", // muted violet
   Audit:      "#6FA3A8", // muted teal
   Focus:      "#B08A7A", // muted terracotta
+  Settings:   "#8C97A6", // muted steel
 } as const;
 
 /**
@@ -59,7 +60,15 @@ interface NavItem {
   go: () => void;
 }
 
-export function IconRail() {
+export function IconRail({
+  onOpenSettings,
+  settingsActive = false,
+}: {
+  /** Settings is a modal, not a route — the rail asks the shell to open it
+   * rather than navigating, same as AppHeader's gear. */
+  onOpenSettings?: () => void;
+  settingsActive?: boolean;
+}) {
   const navigate = useNavigate();
   const [hovered, setHovered] = useState<string | null>(null);
 
@@ -76,6 +85,11 @@ export function IconRail() {
     // Own route, not a search param on "/" — everything else on this rail is
     // a view of the index route, but focus is its own chromeless-ish page.
     { label: "Focus", Icon: Target, color: ICON_TINT.Focus, go: () => void navigate({ to: "/focus" }) },
+    // Modal, not a route — go() asks the shell to open it rather than
+    // navigating, so "active" below reads settingsActive instead of the URL.
+    ...(onOpenSettings
+      ? [{ label: "Settings", Icon: Settings, color: ICON_TINT.Settings, go: onOpenSettings } satisfies NavItem]
+      : []),
   ];
 
   // Which item is "current" — read straight off the URL (same signals
@@ -119,7 +133,7 @@ export function IconRail() {
         }}
       >
         {items.map((it) => {
-          const active = it.label === activeLabel;
+          const active = it.label === "Settings" ? settingsActive : it.label === activeLabel;
           return (
           <button
             key={it.label}

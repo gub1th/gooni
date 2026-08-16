@@ -33,6 +33,10 @@ import {
 
 const TRAIL_DAYS = 6;
 
+// Which body the embedded (Trackables tab) surface shows — persisted so the
+// tab remembers whether you were last looking at the record or logging today.
+const EMBEDDED_MODE_KEY = "gooni_trackables_embedded_mode";
+
 // The sanctioned frost level plus a hairline — NOT a hand-rolled recipe, and
 // NOT a drop shadow. This surface carried `0 18px 60px rgba(0,0,0,0.55)`, which
 // violated the rule the 2026-08-02 pass set on the ambient home: frost and a
@@ -119,9 +123,16 @@ export function LogDots({
   const [noteDraft, setNoteDraft] = useState(""); // today's daily-log note
   const [labelEditId, setLabelEditId] = useState<number | null>(null); // boolean tag editor
   const [labelDraft, setLabelDraft] = useState("");
-  // embedded (matrix) mode only — opens the fill overlay on top, independent
-  // of the home's per-day dismiss (see dailyFill.ts)
-  const [showFill, setShowFill] = useState(false);
+  // embedded (Trackables tab) only — which body shows: the record (matrix) or
+  // today's log (fill). A TOGGLE, not a stacked overlay: same panel, animated
+  // crossfade between the two, independent of the home's per-day dismiss (see
+  // dailyFill.ts). Persisted so reopening the tab remembers where you left it.
+  const [embeddedMode, setEmbeddedMode] = useState<"matrix" | "fill">(() => {
+    try { return localStorage.getItem(EMBEDDED_MODE_KEY) === "fill" ? "fill" : "matrix"; } catch { return "matrix"; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(EMBEDDED_MODE_KEY, embeddedMode); } catch { /* ignore */ }
+  }, [embeddedMode]);
   const editRef = useRef<HTMLInputElement | null>(null);
   const labelRef = useRef<HTMLInputElement | null>(null);
 
@@ -274,6 +285,105 @@ export function LogDots({
     } catch { /* ignore */ }
   }
 
+  // The dots/add-trackable/note body — shared verbatim between the popover
+  // card's collapsed layer and the embedded surface's "fill" layer, so the two
+  // entry points can't drift into two different logging UIs.
+  const fillBody = loading ? (
+    <div style={{ color: "rgb(var(--gooni-ink, 244 245 244) / 0.35)", fontSize: 13 }}>loading…</div>
+  ) : (
+    <>
+    <div style={{ display: "flex", gap: 34, alignItems: "flex-end" }}>
+      {rows.map((row) => (
+        <Column
+          key={row.t.id}
+          row={row}
+          readOnly={isReadOnlyRollup(row.t)}
+          editing={editId === row.t.id}
+          draft={draft}
+          editRef={editRef}
+          onToggle={() => void toggleBool(row)}
+          onOpenNumber={() => openNumber(row)}
+          onDraft={setDraft}
+          onCommit={() => void commitNumber(row)}
+          onCancel={() => setEditId(null)}
+          labelEditing={labelEditId === row.t.id}
+          labelDraft={labelDraft}
+          labelRef={labelRef}
+          onOpenLabel={() => openLabel(row)}
+          onLabelDraft={setLabelDraft}
+          onLabelCommit={() => void commitLabel(row)}
+          onLabelCancel={() => setLabelEditId(null)}
+        />
+      ))}
+
+      {/* add trackable */}
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+        <div style={{ height: 66 }} />
+        {adding ? (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+            <input
+              autoFocus
+              value={addName}
+              onChange={(e) => setAddName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") void addTrackable(); if (e.key === "Escape") setAdding(false); }}
+              placeholder="name"
+              style={{
+                width: 84, fontSize: 12, padding: "5px 8px", borderRadius: 8, textAlign: "center",
+                border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.25)", background: "rgb(var(--gooni-surf, 11 15 13) / 0.6)",
+                color: "rgb(var(--gooni-ink, 244 245 244))", outline: "none", fontFamily: FONT,
+              }}
+            />
+            <button
+              onClick={() => setAddKind((k) => (k === "boolean" ? "numeric" : "boolean"))}
+              style={{
+                fontSize: 10, padding: "2px 8px", borderRadius: 999, cursor: "pointer",
+                border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.2)", background: "transparent",
+                color: "rgb(var(--gooni-ink, 244 245 244) / 0.6)", fontFamily: FONT,
+              }}
+            >
+              {addKind === "boolean" ? "yes/no" : "number"}
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setAdding(true)}
+            aria-label="Add trackable"
+            style={{
+              width: 18, height: 18, borderRadius: 999, cursor: "pointer",
+              border: "1.5px dashed rgb(var(--gooni-ink, 244 245 244) / 0.3)", background: "transparent",
+              color: "rgb(var(--gooni-ink, 244 245 244) / 0.4)", display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 13, lineHeight: 1, padding: 0,
+            }}
+          >
+            +
+          </button>
+        )}
+        <div style={{ fontSize: 11, color: "rgb(var(--gooni-ink, 244 245 244) / 0.45)", marginTop: 12 }}>add</div>
+        {/* mirror Column's tag slot so the row stays bottom-aligned */}
+        <div style={{ height: 13, marginTop: 1 }} />
+      </div>
+    </div>
+
+    {/* today's note — a freeform "what happened" line under the metrics */}
+    {today && (
+      <div style={{ width: "min(560px, 88%)", borderTop: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.08)", paddingTop: 13 }}>
+        <input
+          value={noteDraft}
+          onChange={(e) => setNoteDraft(e.target.value)}
+          onBlur={commitTodayNote}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitTodayNote(); (e.currentTarget as HTMLInputElement).blur(); } }}
+          placeholder="what happened today?"
+          spellCheck={false}
+          style={{
+            width: "100%", background: "transparent", border: "none", outline: "none",
+            color: "rgb(var(--gooni-ink, 244 245 244))", fontFamily: FONT, fontSize: 13.5, textAlign: "center", caretColor: GREEN,
+          }}
+        />
+      </div>
+    )}
+    </>
+  );
+
   if (embedded) {
     // Full-screen route view: the SurfacePanel it slides in inside already
     // supplies the frame, the backdrop and the slide/dismiss motion, so this
@@ -284,6 +394,12 @@ export function LogDots({
     // the surface panel read as a different chrome language from every other
     // alternate page (memories/audit render flush, a plain header over a flat
     // sheet). Dropped in favor of that same header-over-sheet shape.
+    //
+    // "log today" is a TOGGLE now, not a stacked overlay (it used to mount a
+    // second full LogDots fixed over the matrix). Both bodies stay mounted —
+    // only opacity/scale/pointer-events swap — so the crossfade has something
+    // to fade FROM and toggling never re-fetches or flashes.
+    const isFill = embeddedMode === "fill";
     return (
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "hidden", fontFamily: FONT, background: frostInk.sheet }}>
         <div style={{ padding: "20px 24px 4px", flexShrink: 0, display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16 }}>
@@ -292,15 +408,11 @@ export function LogDots({
               Trackables
             </div>
             <div style={{ fontSize: 13, color: frostInk.muted }}>
-              The record — history and trends across every trackable.
+              {isFill ? "Today — tick, type, tag." : "The record — history and trends across every trackable."}
             </div>
           </div>
-          {/* the daily fill's other entry point (see dailyFill.ts): reaching
-              it from TODAY is the ritual path, but a dismissed-for-today row
-              disappears until tomorrow with nothing left on the home to bring
-              it back — this button is always here regardless of that state. */}
           <button
-            onClick={() => setShowFill(true)}
+            onClick={() => setEmbeddedMode((m) => (m === "matrix" ? "fill" : "matrix"))}
             style={{
               flexShrink: 0, height: 32, padding: "0 14px", borderRadius: 8,
               border: `1px solid ${frostInk.border}`, background: "transparent",
@@ -308,13 +420,36 @@ export function LogDots({
               cursor: "pointer",
             }}
           >
-            log today
+            {isFill ? "view record" : "log today"}
           </button>
         </div>
-        <div style={{ flex: 1, minHeight: 0, padding: "12px 24px 24px", boxSizing: "border-box", display: "flex" }}>
-          <LogTable />
+        <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+          {/* matrix layer */}
+          <div
+            style={{
+              position: "absolute", inset: 0, padding: "12px 24px 24px", boxSizing: "border-box", display: "flex",
+              opacity: isFill ? 0 : 1, transform: isFill ? "scale(0.98)" : "scale(1)",
+              pointerEvents: isFill ? "none" : "auto",
+              transition: "opacity 220ms ease, transform 220ms cubic-bezier(0.22,1,0.36,1)",
+            }}
+          >
+            <LogTable />
+          </div>
+          {/* fill layer */}
+          <div
+            style={{
+              position: "absolute", inset: 0, padding: 24, boxSizing: "border-box",
+              overflowY: "auto", display: "flex", flexDirection: "column", alignItems: "center",
+              justifyContent: "center", gap: 20,
+              opacity: isFill ? 1 : 0, transform: isFill ? "scale(1)" : "scale(0.98)",
+              pointerEvents: isFill ? "auto" : "none",
+              transition: "opacity 220ms ease 40ms, transform 220ms cubic-bezier(0.22,1,0.36,1) 40ms",
+            }}
+          >
+            {fillBody}
+            {!loading && <FeedTiles />}
+          </div>
         </div>
-        {showFill && <LogDots mode="fill" onClose={() => setShowFill(false)} />}
       </div>
     );
   }
@@ -378,101 +513,7 @@ export function LogDots({
               transition: "opacity 180ms ease",
             }}
           >
-            {loading ? (
-              <div style={{ color: "rgb(var(--gooni-ink, 244 245 244) / 0.35)", fontSize: 13 }}>loading…</div>
-            ) : (
-              <>
-              <div style={{ display: "flex", gap: 34, alignItems: "flex-end" }}>
-                {rows.map((row) => (
-                  <Column
-                    key={row.t.id}
-                    row={row}
-                    readOnly={isReadOnlyRollup(row.t)}
-                    editing={editId === row.t.id}
-                    draft={draft}
-                    editRef={editRef}
-                    onToggle={() => void toggleBool(row)}
-                    onOpenNumber={() => openNumber(row)}
-                    onDraft={setDraft}
-                    onCommit={() => void commitNumber(row)}
-                    onCancel={() => setEditId(null)}
-                    labelEditing={labelEditId === row.t.id}
-                    labelDraft={labelDraft}
-                    labelRef={labelRef}
-                    onOpenLabel={() => openLabel(row)}
-                    onLabelDraft={setLabelDraft}
-                    onLabelCommit={() => void commitLabel(row)}
-                    onLabelCancel={() => setLabelEditId(null)}
-                  />
-                ))}
-
-                {/* add trackable */}
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                  <div style={{ height: 66 }} />
-                  {adding ? (
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                      <input
-                        autoFocus
-                        value={addName}
-                        onChange={(e) => setAddName(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter") void addTrackable(); if (e.key === "Escape") setAdding(false); }}
-                        placeholder="name"
-                        style={{
-                          width: 84, fontSize: 12, padding: "5px 8px", borderRadius: 8, textAlign: "center",
-                          border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.25)", background: "rgb(var(--gooni-surf, 11 15 13) / 0.6)",
-                          color: "rgb(var(--gooni-ink, 244 245 244))", outline: "none", fontFamily: FONT,
-                        }}
-                      />
-                      <button
-                        onClick={() => setAddKind((k) => (k === "boolean" ? "numeric" : "boolean"))}
-                        style={{
-                          fontSize: 10, padding: "2px 8px", borderRadius: 999, cursor: "pointer",
-                          border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.2)", background: "transparent",
-                          color: "rgb(var(--gooni-ink, 244 245 244) / 0.6)", fontFamily: FONT,
-                        }}
-                      >
-                        {addKind === "boolean" ? "yes/no" : "number"}
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setAdding(true)}
-                      aria-label="Add trackable"
-                      style={{
-                        width: 18, height: 18, borderRadius: 999, cursor: "pointer",
-                        border: "1.5px dashed rgb(var(--gooni-ink, 244 245 244) / 0.3)", background: "transparent",
-                        color: "rgb(var(--gooni-ink, 244 245 244) / 0.4)", display: "flex", alignItems: "center", justifyContent: "center",
-                        fontSize: 13, lineHeight: 1, padding: 0,
-                      }}
-                    >
-                      +
-                    </button>
-                  )}
-                  <div style={{ fontSize: 11, color: "rgb(var(--gooni-ink, 244 245 244) / 0.45)", marginTop: 12 }}>add</div>
-                  {/* mirror Column's tag slot so the row stays bottom-aligned */}
-                  <div style={{ height: 13, marginTop: 1 }} />
-                </div>
-              </div>
-
-              {/* today's note — a freeform "what happened" line under the metrics */}
-              {today && (
-                <div style={{ width: "min(560px, 88%)", borderTop: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.08)", paddingTop: 13 }}>
-                  <input
-                    value={noteDraft}
-                    onChange={(e) => setNoteDraft(e.target.value)}
-                    onBlur={commitTodayNote}
-                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitTodayNote(); (e.currentTarget as HTMLInputElement).blur(); } }}
-                    placeholder="what happened today?"
-                    spellCheck={false}
-                    style={{
-                      width: "100%", background: "transparent", border: "none", outline: "none",
-                      color: "rgb(var(--gooni-ink, 244 245 244))", fontFamily: FONT, fontSize: 13.5, textAlign: "center", caretColor: GREEN,
-                    }}
-                  />
-                </div>
-              )}
-              </>
-            )}
+            {fillBody}
           </div>
 
           {/* table layer — mounted only when expanded */}
