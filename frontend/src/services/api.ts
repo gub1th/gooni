@@ -445,6 +445,37 @@ export async function fetchLeetcodeToday(refresh = false): Promise<LeetcodeToday
   return res.json();
 }
 
+export interface UltrahumanToday {
+  date: string | null;
+  sleep_score: number | null;
+  sleep_minutes: number | null;
+  recovery_score: number | null;
+  hrv_ms: number | null;
+  resting_hr: number | null;
+  steps: number | null;
+  active_calories: number | null;
+  updated_at: string | null;
+}
+export async function fetchUltrahumanToday(refresh = false): Promise<UltrahumanToday> {
+  const url = `${BASE}/ultrahuman/today${refresh ? "?refresh=1" : ""}`;
+  const res = await apiFetch(url);
+  if (!res.ok) {
+    const msg = await res.text().catch(() => "");
+    throw new Error(`Ultrahuman today fetch failed: ${msg || res.status}`);
+  }
+  return res.json();
+}
+export interface UltrahumanStatus {
+  configured: boolean;
+  connected: boolean;
+  account_email: string | null;
+}
+export async function fetchUltrahumanStatus(): Promise<UltrahumanStatus> {
+  const res = await apiFetch(`${BASE}/ultrahuman/status`);
+  if (!res.ok) throw new Error("Failed to fetch Ultrahuman status");
+  return res.json();
+}
+
 export async function cleanupEmptyNotes(): Promise<{ deleted: number; ids: number[] }> {
   const res = await apiFetch(`${BASE}/notes/cleanup`, { method: "POST" });
   if (!res.ok) throw new Error("Failed to clean up notes");

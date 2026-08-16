@@ -192,6 +192,19 @@ def _refresh_whoop() -> None:
         db.close()
 
 
+def _refresh_ultrahuman() -> None:
+    from .services import ultrahuman
+    db = SessionLocal()
+    try:
+        if not ultrahuman.is_configured():
+            return  # stub/unconfigured — no-op until captain sets the env vars
+        payload = ultrahuman.fetch_today_snapshot(db)
+        if payload:
+            ultrahuman.upsert_today_snapshot(db, payload)
+    finally:
+        db.close()
+
+
 def _refresh_24hr() -> None:
     from .services import fitness_24hr
     db = SessionLocal()
@@ -206,7 +219,12 @@ def _refresh_24hr() -> None:
 def _run_integration_refreshes() -> None:
     """Blocking body (network + sync DB) -- run off the event loop via
     asyncio.to_thread so external API latency can't stall request handling."""
-    for name, fn in (("leetcode", _refresh_leetcode), ("whoop", _refresh_whoop), ("24hr", _refresh_24hr)):
+    for name, fn in (
+        ("leetcode", _refresh_leetcode),
+        ("whoop", _refresh_whoop),
+        ("24hr", _refresh_24hr),
+        ("ultrahuman", _refresh_ultrahuman),
+    ):
         try:
             fn()
         except Exception as e:

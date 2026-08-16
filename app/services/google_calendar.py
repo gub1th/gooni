@@ -18,6 +18,14 @@ Scopes requested:
   - calendar.events           (create / read events on primary calendar)
   - calendar.freebusy         (read free/busy — for later 'suggest a slot')
   - userinfo.email            (show which account is connected)
+  - gmail.readonly            (read-only Gmail access — see gmail_service.py;
+                                added here so Calendar's existing OAuth token
+                                covers Gmail too, no second client needed.
+                                CAPTAIN TODO: add this scope on the OAuth
+                                consent screen in Google Cloud Console, then
+                                reconnect via /auth/google/start once so the
+                                token actually carries it — see the setup
+                                note atop gmail_service.py)
 """
 
 from __future__ import annotations
@@ -44,6 +52,7 @@ SCOPES = " ".join([
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/calendar.freebusy",
     "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/gmail.readonly",
     "openid",
 ])
 
