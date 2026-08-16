@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Pause, Play } from "lucide-react";
 import { FONT } from "../../ui";
 import { FOCUS_PALETTES } from "./focusPalette";
@@ -15,20 +15,18 @@ import {
   type FocusStyle,
 } from "../../stores/useFocusSessionStore";
 import { useFocusRecapStore } from "../../stores/useFocusRecapStore";
+import { useSessionActivity } from "./useSessionActivity";
 import {
   endFocusSession,
+  fmtDuration,
   fmtMinutes,
-  fetchRecentBrowserIntervals,
   splitSegmentsByDay,
 } from "../../services/focusTime";
-import { parseServerDate } from "../../utils/date";
 import {
-  FEED_REFRESH_MS,
   fetchFocusCam,
-  fetchFocusCamEvidence,
-  fetchFocusCamToday,
-  fetchFocusDashboard,
+  fetchSessionActivity,
   updateFocusReminder,
+  type SessionActivity,
 } from "../../services/api";
 
 // The expanded focus surface — the ring, FOCUS/BREAK, the sensor line, mark
@@ -57,7 +55,7 @@ function mmss(ms: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-interface Sensors {
+export interface Sensors {
   browser: string | null;
   camera: string | null;
   cameraOn: boolean;
@@ -65,65 +63,39 @@ interface Sensors {
 }
 
 /**
- * The quiet line. Deliberately AFTER-THE-FACT: the most recent known values on
- * the existing feed cadence, not a realtime "what am I looking at right now"
- * endpoint. The timer already bounds the window, so a periodic read of what the
- * sensors last said is the entire answer, and it costs no new backend surface.
+ * The quiet line, now SESSION-SCOPED.
  *
- * All three legs describe the SAME period. Camera (`/focus/cam/today`) and phone
- * (the dashboard rollups) are local-day scoped by the backend; the browser read
- * is newest-first and otherwise unbounded, so it is bounded here against the
- * session's own start. Without that bound an extension that is uninstalled,
- * disabled, or has stopped flushing renders a days-old host identically to a
- * live one — the one leg that could imply currency it doesn't have.
+ * It used to read three endpoints at three scopes — `/focus/cam/today` and the
+ * dashboard `rollups` both answer for the local DAY, and the browser leg was a
+ * newest-first list bounded client-side against the session's start. So a
+ * twenty-minute session reported "17 signals today" and "whatsapp open · 16",
+ * numbers about the day sitting under a clock about the session. All three legs
+ * now fold from the ONE window `useSessionActivity` polls, so they describe the
+ * same period by construction rather than by three separate bounds agreeing.
+ *
+ * Still deliberately AFTER-THE-FACT (the same `FEED_REFRESH_MS` cadence): the
+ * timer bounds the window, so a periodic read of what the sensors last said is
+ * the entire answer.
+ *
+ * A FAILED read is `null` (rendered "—"), never "quiet": an unreachable server
+ * is not evidence of a calm session, the same rule the extension popup follows
+ * when it refuses to fall back to `0s`.
  */
-function useSensors(active: boolean, sinceMs: number | null): Sensors {
-  const [s, setS] = useState<Sensors>({ browser: null, camera: null, cameraOn: false, phone: null });
+export function sensorsFrom(activity: SessionActivity | null): Sensors {
+  if (!activity) return { browser: null, camera: null, cameraOn: false, phone: null };
 
-  const load = useCallback(async () => {
-    const [browser, cam, dash] = await Promise.allSettled([
-      fetchRecentBrowserIntervals(1),
-      fetchFocusCamToday(),
-      fetchFocusDashboard(),
-    ]);
+  const host = activity.browser.top[0];
+  const browser = host ? `${host.label} ${fmtDuration(host.seconds)}` : "quiet";
 
-    // Newest-first, so one row settles it: if the latest interval ended before
-    // the session began, nothing has been recorded inside the window.
-    let host: string | null = null;
-    if (browser.status === "fulfilled" && browser.value.length > 0) {
-      const latest = browser.value[0];
-      const endedAt = parseServerDate(latest.ended_at)?.getTime() ?? null;
-      if (sinceMs != null && endedAt != null && endedAt >= sinceMs) host = latest.host;
-    }
+  const signals = activity.camera_events.reduce((n, e) => n + e.count, 0);
+  const camera = signals > 0 ? `${signals} this session` : "quiet";
 
-    let camera: string | null = null;
-    let cameraOn = false;
-    if (cam.status === "fulfilled") {
-      const counts = Object.entries(cam.value.events ?? {});
-      const total = counts.reduce((n, [, v]) => n + (Number(v) || 0), 0);
-      cameraOn = (cam.value.sessions ?? []).length > 0 || total > 0;
-      camera = cameraOn ? `${total} signals today` : "quiet";
-    }
+  // Device telemetry arrives PRE-AGGREGATED — the count IS the analysis,
+  // computed deterministically and never summarised.
+  const top = activity.device.top[0];
+  const phone = top ? `${top.label} · ${top.count}` : "quiet";
 
-    // Device telemetry arrives PRE-AGGREGATED (`instagram open · 12`) — the
-    // count is the analysis, computed deterministically, never summarised.
-    let phone: string | null = null;
-    if (dash.status === "fulfilled") {
-      const top = (dash.value.rollups ?? [])[0];
-      phone = top ? `${top.label} · ${top.count}` : "quiet";
-    }
-
-    setS({ browser: host, camera, cameraOn, phone });
-  }, [sinceMs]);
-
-  useEffect(() => {
-    if (!active) return;
-    void load();
-    const iv = window.setInterval(() => void load(), FEED_REFRESH_MS);
-    return () => window.clearInterval(iv);
-  }, [active, load]);
-
-  return s;
+  return { browser, camera, cameraOn: signals > 0, phone };
 }
 
 export function FocusExpanded() {
@@ -139,7 +111,10 @@ export function FocusExpanded() {
   const kept = session?.kept ?? false;
   const running = !!session?.running;
   const startedAt = sessionStartedAt(session);
-  const sensors = useSensors(!!session, startedAt);
+  // ONE poll for the whole surface — the footer, the camera indicator and the
+  // evidence strip all read this, so they cannot disagree about the window.
+  const activity = useSessionActivity(!!session, startedAt);
+  const sensors = useMemo(() => sensorsFrom(activity.data), [activity.data]);
 
   // The ring's clock ticks in BOTH modes — it is the mode's own stopwatch, so a
   // break counting up is what it should show.
@@ -170,7 +145,19 @@ export function FocusExpanded() {
     return splitSegmentsByDay(sealedSegments(session, now)).reduce((n, d) => n + d.minutes, 0);
   }, [session, now]);
 
-  /** Build the recap from data the session itself produced — no invented score. */
+  /** Build the recap from data the session itself produced — no invented score.
+   *
+   * The activity half is a FRESH read of the session's exact `[start, stop)`
+   * window, not the polled one: the poll's `until` is "now at poll time", so
+   * reusing it would drop whatever happened between the last tick and the stop.
+   * It also used to fold `/focus/cam/evidence` — a table the sidecar does not
+   * write to yet — which is the whole of why the recap always said "nothing
+   * flagged" even when the camera had fired all session. It reads the EVENTS
+   * now (which the sidecar does write) and the evidence frames beside them.
+   *
+   * A failed read leaves the activity fields empty rather than failing the
+   * stop: the session's own numbers (minutes, timeline, per-day) are already in
+   * hand, and losing the recap must never cost the write. */
   async function buildRecap(s: FocusSession, stopMs: number): Promise<SessionRecapData> {
     const spanStart = sessionStartedAt(s) ?? stopMs;
     const sealed = sealedSegments(s, stopMs);
@@ -180,14 +167,11 @@ export function FocusExpanded() {
       .filter((seg) => seg.mode === "focus")
       .map((seg) => ({ start: seg.start, end: seg.end, truncated: seg.truncated === true }));
 
-    const evidence = await fetchFocusCamEvidence(60).catch(() => []);
+    const act = await fetchSessionActivity(new Date(spanStart), new Date(stopMs)).catch(
+      () => null,
+    );
     const eventsByKind: Record<string, number> = {};
-    for (const it of evidence) {
-      if (!it.kind) continue;
-      const at = it.at ? parseServerDate(it.at)?.getTime() : null;
-      if (at == null || at < spanStart) continue;
-      eventsByKind[it.kind] = (eventsByKind[it.kind] ?? 0) + 1;
-    }
+    for (const e of act?.camera_events ?? []) eventsByKind[e.kind] = e.count;
 
     return {
       title: s.title,
@@ -198,6 +182,16 @@ export function FocusExpanded() {
       perDay,
       timeline,
       eventsByKind,
+      evidence: act?.camera_evidence ?? [],
+      browser: act?.browser.top ?? [],
+      apps: act?.app.top ?? [],
+      device: act?.device.top ?? [],
+      browserOtherSec: act?.browser.other_sec ?? 0,
+      appOtherSec: act?.app.other_sec ?? 0,
+      // `null` means the read FAILED — distinct from `0`, which means the
+      // sensors genuinely observed nothing. The recap renders them differently.
+      observedSeconds: act ? act.observed_seconds : null,
+      warnings: act?.warnings ?? [],
       completionFrame: null, // filled by the caller once the selfie is grabbed
     };
   }
@@ -246,13 +240,13 @@ export function FocusExpanded() {
         display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
       }}
     >
-      <FocusCameraStatus sinceMs={startedAt} />
+      <FocusCameraStatus activity={activity.data} />
 
       <div style={{ position: "absolute", top: 22, right: 26, display: "flex", alignItems: "center", gap: 16, fontSize: 12, color: pal.ink3 }}>
         <span style={{ fontVariantNumeric: "tabular-nums" }}>{fmtMinutes(storedMinutes)}</span>
       </div>
 
-      <FocusEvidenceGallery sinceMs={startedAt} />
+      <FocusEvidenceGallery items={activity.data?.camera_evidence ?? []} />
 
       <div role="tablist" style={{ display: "flex", gap: 26, marginBottom: 8 }}>
         {(["stopwatch", "timer"] as FocusStyle[]).map((m) => (

@@ -1,16 +1,21 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { FONT } from "../../ui";
 import { FOCUS_PALETTES } from "./focusPalette";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
-import { FEED_REFRESH_MS, fetchFocusCamEvidence, type FocusCamEvidence } from "../../services/api";
+import { type SessionEvidence } from "../../services/api";
 import { parseServerDate } from "../../utils/date";
 
 // The right-rail evidence strip. Deliberately NOT a filmstrip of every frame
-// the sidecar ever saw — /focus/cam/evidence only holds frames the sidecar
-// chose to KEEP because a detection fired (phone, vape, distracted…), so
-// every thumbnail here already means something. A quiet session shows nothing,
-// which is itself the honest answer (the treatment rule the ambient home
-// follows for the same reason: an always-something slot stops being read).
+// the sidecar ever saw — evidence frames are only the ones the sidecar chose to
+// KEEP because a detection fired (phone, vape, distracted…), so every thumbnail
+// here already means something. A quiet session shows nothing, which is itself
+// the honest answer (the treatment rule the ambient home follows for the same
+// reason: an always-something slot stops being read).
+//
+// It no longer fetches. Frames arrive already scoped to THIS session, from the
+// one `/focus/session-activity` poll `FocusExpanded` runs — before that it read
+// `/focus/cam/evidence` (the last few DAYS) and filtered client-side, which is
+// the same three-scopes problem the footer had.
 
 const KIND_LABEL: Record<string, string> = {
   phone: "phone",
@@ -27,42 +32,17 @@ function timeLabel(iso: string | null): string {
 }
 
 interface Props {
-  /** Only frames at/after this epoch ms count as THIS session's evidence. */
-  sinceMs: number | null;
+  /** THIS session's evidence frames, newest first — already window-scoped by
+   *  the backend, so there is nothing left to filter here. */
+  items: SessionEvidence[];
 }
 
-export function FocusEvidenceGallery({ sinceMs }: Props) {
+export function FocusEvidenceGallery({ items }: Props) {
   const theme = useGooniThemeStore((s) => s.theme);
   const pal = FOCUS_PALETTES[theme];
-  const [items, setItems] = useState<FocusCamEvidence[]>([]);
-  const [enlarged, setEnlarged] = useState<FocusCamEvidence | null>(null);
+  const [enlarged, setEnlarged] = useState<SessionEvidence | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const rows = await fetchFocusCamEvidence(20);
-        if (!cancelled) setItems(rows);
-      } catch {
-        // best-effort — a quiet gallery reads the same as a failed fetch,
-        // which is fine here (there's nothing actionable to say about it)
-      }
-    };
-    void load();
-    const iv = window.setInterval(() => void load(), FEED_REFRESH_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(iv);
-    };
-  }, []);
-
-  const inSession = items.filter((it) => {
-    if (sinceMs == null) return true;
-    const at = it.at ? parseServerDate(it.at)?.getTime() : null;
-    return at != null && at >= sinceMs;
-  });
-
-  if (inSession.length === 0) return null;
+  if (items.length === 0) return null;
 
   return (
     <div
@@ -75,7 +55,7 @@ export function FocusEvidenceGallery({ sinceMs }: Props) {
       <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", color: pal.ink3 }}>
         EVIDENCE
       </div>
-      {inSession.map((it) => (
+      {items.map((it) => (
         <button
           key={it.id}
           onClick={() => setEnlarged(it)}

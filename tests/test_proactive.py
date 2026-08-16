@@ -45,6 +45,7 @@ Usage:
   python tests/test_proactive.py
 """
 
+import json
 import os
 import sys
 import tempfile
@@ -68,6 +69,7 @@ from app.db.database import SessionLocal, engine  # noqa: E402
 from app.db.models import (  # noqa: E402
     AppInterval,
     Base,
+    BrowserInterval,
     Conversation,
     Message,
     ProactiveObservation,
@@ -102,6 +104,7 @@ def reset(db):
     for model in (
         ProactiveObservation,
         AppInterval,
+        BrowserInterval,
         Message,
         Conversation,
         Promise,
@@ -113,6 +116,9 @@ def reset(db):
         s = Settings(id=1, nudge_tz="America/Los_Angeles")
         db.add(s)
     s.proactive_enabled = True
+    # A live-session blob is a claim with a six-hour life, so leaving one behind
+    # would silently hand the NEXT test a running focus session.
+    s.focus_cam = None
     db.commit()
 
 
@@ -562,6 +568,94 @@ def test_staleness_reaches_the_prompt(db):
     )
 
 
+# ── 8c · the session's task reaches the prompt, so on-task ≠ distraction ─────
+
+
+def add_browsing(db, *, host, ends_ago_min=1, minutes=13, at=NOW):
+    end = at - timedelta(minutes=ends_ago_min)
+    start = end - timedelta(minutes=minutes)
+    db.add(
+        BrowserInterval(
+            client_id=f"w{db.query(BrowserInterval).count()}-{host}",
+            host=host,
+            path="/",
+            url=f"https://{host}/",
+            started_at=start,
+            ended_at=end,
+            duration_sec=minutes * 60.0,
+            end_reason="tab_change",
+            truncated=False,
+            created_at=end,
+        )
+    )
+    db.commit()
+
+
+def start_focus_session(db, promise, *, started_ago_min=20, at=NOW):
+    """The one server-visible signal a session is live: the focus_cam control
+    blob, exactly as `focus_cam_service.set_control` writes it."""
+    s = db.query(Settings).first()
+    s.focus_cam = json.dumps(
+        {
+            "control": "running",
+            "target_reminder_id": promise.id,
+            "control_at": (at - timedelta(minutes=started_ago_min)).isoformat(),
+        }
+    )
+    db.commit()
+
+
+def test_on_task_browsing_is_not_a_distraction(db):
+    print("\n[a session's task reaches the prompt, so on-task browsing isn't a lapse]")
+    # The live failure: a session named "read some common system design
+    # patterns", spent on hellointerview.com — the study site — was reported as
+    # "you've been browsing hellointerview for 13m and have a commitment overdue
+    # by 14h". The site IS the work. Two halves to the fix, and this asserts
+    # both: the context has to NAME what the session is for (otherwise there is
+    # nothing to judge relevance against), and the prompt has to tell the model
+    # to read it (otherwise anything-that-isn't-literally-the-commitment reads
+    # as off-task, which is what tension A used to say).
+    reset(db)
+    task = add_promise(db, summary="read some common system design patterns", due_in_h=6)
+    start_focus_session(db, task)
+    add_browsing(db, host="hellointerview.com", minutes=13)
+
+    ctx = ps.build_context(db, now=NOW)
+    text = ctx["text"].lower()
+    check(
+        "focus session on" in text and "system design patterns" in text,
+        f"the context names the running session's TASK, in his own words: {ctx['text']!r}",
+    )
+    check(
+        "hellointerview" in text,
+        "…and names the site beside it, so relevance is a judgement the model "
+        "can actually make",
+    )
+
+    flat = " ".join(ps.PROACTIVE_PROMPT.lower().split())
+    check(
+        ps.ON_TASK_RULE_IN_PROMPT.lower() in flat,
+        "…and the prompt tells the model to read the task before calling "
+        "anything off-task",
+    )
+    check(
+        "no list" in flat or "there is no list" in flat,
+        "…by INFERENCE from the task's wording, explicitly not a whitelist",
+    )
+    check(
+        "when it is arguable, it is not off-task" in flat,
+        "…and an arguable case resolves to silence, this surface's default",
+    )
+    check(
+        "hellointerview" in flat,
+        "the verbatim live failure is in the BAD examples — the quality bar "
+        "only an example can carry",
+    )
+
+    # The blob must not outlive this test: it is a six-hour claim.
+    reset(db)
+
+
 # ── 9 · the silence reach-out ────────────────────────────────────────────────
 
 
@@ -803,6 +897,7 @@ def main():
     test_the_treadmill_is_broken(db)
     test_context_budget(db)
     test_staleness_reaches_the_prompt(db)
+    test_on_task_browsing_is_not_a_distraction(db)
     test_reach_out(db)
     test_reach_out_is_once_a_day(db)
     test_reach_out_gates(db)

@@ -67,6 +67,18 @@ the model only ever gets to fill in the sentence.
      marker is the row itself, written after Meta accepts — a stamp written
      first burns the day on a message that never arrived (the 2026-06-10 nudge
      audit's exact failure).
+  6. **On-task is INFERRED from the session's own words, never from a list.**
+     The GATE's tension A used to fire on any attention that wasn't literally
+     the commitment, so a session named "read some common system design
+     patterns" spent on hellointerview.com — the study site — was reported as a
+     distraction with an overdue deadline beside it. The context already names
+     what the session is FOR (`activity_context` renders `focus session on
+     "..."`), so the fix is a prompt rule telling the model to read it and treat
+     plainly-serving attention as the session WORKING. Deliberately not a
+     whitelist: a hardcoded set of "study sites" would be wrong for the next
+     task the day it is written, and relevance is exactly the judgement a model
+     is better at than a matcher. When it's arguable, the rule says NONE —
+     silence is this surface's default, so erring that way costs nothing.
 
 Read-only against everything else: no Trackable, no Promise, no Message except
 the assistant turn a delivered reach-out records on its own WhatsApp thread.
@@ -169,6 +181,12 @@ CHANNEL_WHATSAPP = "whatsapp"
 # substring, so rewording it has to be a deliberate edit in both places.
 STALE_LABELS_IN_PROMPT = "READ THE AGE LABELS."
 
+# Same trick for the on-task rule (honesty rule 6). It is the only thing
+# standing between a study site and a "you're distracted" nudge fired at the
+# exact work the session exists to protect, and it lives in a prose prompt where
+# a tidy-up could quietly delete it — so the net asserts it by identity.
+ON_TASK_RULE_IN_PROMPT = "READ THE SESSION'S TASK BEFORE CALLING ANYTHING OFF-TASK."
+
 
 def _int_env(name: str, default: int, lo: int, hi: int) -> int:
     raw = os.getenv(name)
@@ -270,6 +288,14 @@ in order, name the one you found to yourself, and if none holds, answer NONE.
      within 3 HOURS. Say both halves: what he's on, and what's due. Pending or
      open commitments with no session running are NOT off-task — there is
      nothing to be off of.
+     READ THE SESSION'S TASK BEFORE CALLING ANYTHING OFF-TASK. The session line
+     names what the time is FOR, in his own words. A site or app that plausibly
+     SERVES that task is FOCUSED WORK, not distraction — a practice site during
+     an interview-prep session, a docs site during a build, a repo during a
+     refactor. You are expected to infer that from the task's wording and the
+     name of the site; there is no list to check against. Tension A applies only
+     when the attention has no plausible bearing on the named task at all. When
+     it is arguable, it is not off-task — answer NONE.
   B. His attention has been on ONE thing for 45 MINUTES OR MORE, and there is a
      commitment it lines up with or cuts against.
   C. The context itself reports that nothing was observed, and a commitment is
@@ -285,6 +311,9 @@ Nothing else qualifies. Three things that look like tensions and are not:
   · open commitments sitting on the dashboard while NO focus session is
     running. Having tasks is not being off-task — he has to actually be
     mid-session on something for tension A to apply.
+  · time on a site that SERVES the running session's task. That is the session
+    working, and remarking on it is the most annoying thing you can do: you
+    would be interrupting the exact work you were asked to protect.
 
 NONE is the correct answer most of the time. A line that fires every 15 minutes
 stops being read, and then the useful one gets ignored too.
@@ -311,6 +340,11 @@ worse than silence:
   you have 3 open commitments right now  <- tasks existing isn't off-task; no
     and no focus session running.           session running means tension A
                                              doesn't apply — answer NONE
+  13m on hellointerview, sir. "x" is    <- the session was ON "read some common
+    overdue by 14h.                         system design patterns". That site
+                                            SERVES that task, so it is the
+                                            session working, not a lapse —
+                                            answer NONE
 
 RULES
   - ONE sentence. Under 140 characters. No preamble, no sign-off, no emoji.
