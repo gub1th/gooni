@@ -22,12 +22,15 @@ import {
 // colour. It appears the way a thought appears.
 //
 // SILENCE IS THE DEFAULT AND IT LOOKS LIKE SILENCE. `null` renders an empty
-// slot of fixed height rather than a placeholder: the whole design rests on
-// nothing being said most of the time, and a line that always says SOMETHING is
-// a line you stop reading (the grindstone lesson, and the log dot's). The fixed
-// height is so the layout doesn't twitch when one arrives — the groups above
-// and below are pinned to viewport fractions, but a growing element between
-// them still shifts what's inside its own slot.
+// slot of fixed minimum height rather than a placeholder: the whole design
+// rests on nothing being said most of the time, and a line that always says
+// SOMETHING is a line you stop reading (the grindstone lesson, and the log
+// dot's). The min height is so the layout doesn't twitch when a one-liner
+// arrives. A LONG observation WRAPS rather than truncating — this line exists
+// to be read, and an ellipsis hides exactly the half that made it worth
+// saying. Wrapping is safe here: the slot is absolutely positioned with
+// `translate(-50%, -50%)`, so extra lines grow symmetrically from the anchor
+// fraction instead of pushing the groups below.
 //
 // The dismiss × is hover-only and OPTIMISTIC: the observation is gone from the
 // screen the instant it's clicked, and the POST that makes the dismissal
@@ -76,7 +79,7 @@ export function ProactiveLine() {
   return (
     <div
       style={{
-        height: SLOT_H,
+        minHeight: SLOT_H,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -98,11 +101,12 @@ export function ProactiveLine() {
             style={{
               color: ink(hover ? 0.72 : 0.5),
               transition: "color 200ms ease",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
+              // Wrap, never truncate — see the header note. min-width: 0 lets
+              // the flex item shrink below its content width so long words
+              // break instead of pushing the dismiss × off the slot.
+              minWidth: 0,
+              overflowWrap: "anywhere",
             }}
-            title={obs.content}
           >
             {obs.content}
           </span>
