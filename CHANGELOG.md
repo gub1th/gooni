@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.244.0 — 2026-08-16 (minor)
+
+- feat: scaffold Gmail + Ultrahuman connectors (#499)
+
 ## 0.243.1 — 2026-08-16 (patch)
 
 - fix(frontend): log-today toggle not overlay; settings in icon rail (#498)
