@@ -45,7 +45,7 @@ datasette db/gooni.db -p 8002   # pip install datasette first (not in requiremen
 
 ### Focus MCP server (the claude.ai custom connector)
 ```bash
-# Serves the 6-tool "focus system" over remote streamable-HTTP at http://127.0.0.1:8001/mcp
+# Serves the 20-tool converged MCP surface over remote streamable-HTTP at http://127.0.0.1:8001/mcp
 GOONI_URL=http://localhost:8000 GOONI_AUTH_PASSWORD="$AUTH_PASSWORD" \
   FOCUS_MCP_PORT=8001 FOCUS_MCP_ALLOWED_HOSTS="*" \
   python mcp_servers/focus_server.py
@@ -95,7 +95,7 @@ rm db/gooni.db
 ```
 app/
   main.py                    # SLIM wiring: middleware (auth/CORS/trace/visit), lifespan, router registry
-  background.py              # background loops (note-excerpt backfill, memory watchdog)
+  background.py              # background loops (note-excerpt backfill, memory watchdog, hourly integration refresh, proactive tick, initiative synth)
   common.py                  # local_today()/local_now() canonical tz, parse_due_hint (ONE deadline parser)
   db/
     models.py                # Note, Promise, Trackable(+Entry), Message, Edge, Memory,
@@ -104,7 +104,7 @@ app/
   routers/                   # one module per API domain — the grep-able route surface
   services/
     orchestrator/            # unified chat handler (web, telegram, whatsapp, imessage)
-    memory_extraction/       # extract_signals — ONE LLM call emits promises/fitness/tone/memory
+    memory_extraction/       # extract_signals — ONE LLM call emits promises/features/tone/memory
     intent_router.py + intent_handlers/   # dispatch extracted signals to writers
     promise_service.py       # THE actionable primitive (absorbed todos/habits/focuses/reminders)
     focus_service.py         # adapter: focus vocabulary (topics/thoughts/reminders) over Notes + Promises
@@ -115,18 +115,18 @@ app/
     messaging/               # MessagingChannel ABC + telegram/whatsapp/imessage impls
   llm/
     client.py                # OpenAI wrapper (gpt-5.4 chat, gpt-5.4-mini extract, gpt-4o-mini cheap paths)
-  tools/                     # 16-tool chat registry (memory, web, notes, promises read, calendar)
+  tools/                     # 17-tool chat registry (memory, web, notes, promises read, trackables, calendar)
 
 frontend/
   src/
-    routes/index.tsx         # app shell: home (THE ambient home) | notes | log | eval
+    routes/index.tsx         # app shell: home (THE ambient home) | notes | log | eval | memories | calendar | settings
     routes/focus.tsx         # chromeless focus SESSION page (/focus) — reached only from a task row
     routes/public.*.tsx      # public portfolio pages (no auth)
     components/ambient/      # THE home: MorphLine wave · the line · TODAY list · streaks · corner log sheet
     components/ChatLogView.tsx  # append-only thought log w/ glow → promote/dismiss
     components/notes/        # Sidebar, NotesList, NoteEditor (TipTap, auto-save)
     components/eval/         # EvalView (?audit=1)
-    components/focus/        # FocusSession (the /focus timer) + GooniAsleep (its idle state)
+    components/focus/        # FocusKiosk (the /focus hub) + FocusExpanded (running session) + GooniAsleep (idle)
     stores/                  # Zustand stores (persist with versioned keys)
     services/api.ts          # every fetch call, typed
     ui/                      # design tokens — single styling source of truth
@@ -135,8 +135,8 @@ evals/                       # offline regression harness (replays prod snapshot
 scripts/
   telegram_bot.py            # Telegram bot (long-polling) → messaging/dispatch_inbound
 mcp_servers/
-  server.py                  # legacy 30-tool MCP server → Claude Code via stdio
-  focus_server.py            # 6-tool "focus system" MCP → claude.ai connector (remote streamable-HTTP)
+  server.py                  # stdio MCP server → Claude Code (registers the shared 20-tool surface)
+  focus_server.py            # local-dev streamable-HTTP MCP server (same 20-tool surface; prod uses the in-process /mcp mount)
 extension/                   # Chrome browser-attention sensor (MV3, unpacked; no build step)
                              # → POST /browser/intervals. Install + privacy model: extension/README.md
 tests/                       # plain-script tests: signal routing, overlay ranker, import smoke, focus decay + convergence, browser ingest
@@ -164,6 +164,8 @@ tests/                       # plain-script tests: signal routing, overlay ranke
 | `WHATSAPP_ALLOWED_HANDLES` | WA only | Comma-separated phone numbers (any format; normalized to digits) |
 | `IMESSAGE_BRIDGE_URL`, `IMESSAGE_BRIDGE_PASSWORD`, `IMESSAGE_WEBHOOK_SECRET`, `IMESSAGE_ALLOWED_HANDLES` | iMessage only | BlueBubbles bridge config |
 | `WHOOP_CLIENT_ID`, `WHOOP_CLIENT_SECRET`, `WHOOP_REDIRECT_URI` | Whoop feed | OAuth app; recovery/HRV/sleep land as Trackable entries |
+| `TFHF_USERNAME`, `TFHF_PASSWORD` | 24hr Fitness sync | Fly secrets; hourly server-side check-in pull fills the `exercise` cell |
+| `ULTRAHUMAN_API_KEY`, `ULTRAHUMAN_EMAIL` | Ultrahuman feed (scaffold) | Partner API key auth; no-ops silently while unset |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_REDIRECT_URI` | GitHub integration | OAuth app at github.com/settings/developers (Settings → Integrations) |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY`, `R2_SECRET`, `R2_BUCKET`, `R2_PUBLIC_HOST` | Image uploads | Cloudflare R2 (S3-compatible). When unset, `POST /uploads/image` returns 503 and the editor falls back to inline base64 data URLs |
 | `GOONI_FRONTEND_URL` | MCP only | Public host of the SPA, used by the MCP `log_note` tool to surface deep-link URLs (default `http://localhost:5173`) |
