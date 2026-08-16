@@ -28,6 +28,7 @@ import { SurfacePanel } from "../components/shell/SurfacePanel";
 import { AppHeader, HEADER_H } from "../components/shell/AppHeader";
 import { SettingsModal } from "../components/settings/SettingsModal";
 import { useHomeChromeStore } from "../stores/useHomeChromeStore";
+import { FocusKiosk } from "../components/focus/FocusKiosk";
 
 // Pushes the current theme's tokens to CSS custom properties on <html>. Components
 // read them via `var(--gooni-text, ...)` etc., with sensible light fallbacks so
@@ -106,8 +107,12 @@ function isChromelessPath(pathname: string): boolean {
     // link on the public page dead-ended at a password prompt for
     // every visitor. It reads only public notes + static content.
     pathname === "/creative" ||
-    pathname === "/walk" ||
-    pathname === "/focus"
+    pathname === "/walk"
+    // /focus used to be chromeless too, which is exactly why it never
+    // slid in: the early-return below skips AppShell (and every
+    // SurfacePanel it hosts) entirely for a chromeless path. It's gated
+    // by the same shared PasswordGate now, so it stays OUT of this list;
+    // see `isFocusRoute` for how it's kept visually distinct instead.
   );
 }
 
@@ -176,6 +181,11 @@ function AppShell() {
   // URL. It paints its own void and owns its own corners, so the docked sidebar
   // and the shared top-right cluster stand down here.
   const isHome = onIndex && !isNotes && !isEval && !isLog && !isMemories && !isCalendar && !isTrackables;
+  // /focus is a real route, not a search param on "/" — it needs its own
+  // persistent SurfacePanel (below) rather than the shared one SurfaceHost
+  // drives, since that one is offset for the shared rail/header and /focus
+  // renders neither (it's still a full-bleed, self-chromed hub).
+  const isFocusRoute = location.pathname === "/focus";
 
   // The header's height, for the same reason the band publishes its own: the
   // things that must clear it are `position: fixed` with their own offsets and
@@ -236,8 +246,9 @@ function AppShell() {
   const isImmersive = isImmersivePath(location.pathname);
   // Every non-home authed surface renders as a summoned layer over the void.
   // `/` (the ambient home) paints its own void ground full-bleed, so it is the
-  // one authed surface that is NOT a sheet.
-  const isSheet = !isHome && !isImmersive && !isChromelessPath(location.pathname);
+  // one authed surface that is NOT a sheet. /focus gets its OWN dedicated
+  // panel below (full-bleed, own IconRail) rather than this shared one.
+  const isSheet = !isHome && !isImmersive && !isChromelessPath(location.pathname) && !isFocusRoute;
   // Which non-home surface is showing — priority mirrors routes/index.tsx's
   // own `view` derivation so the two never disagree about what's on screen.
   const surfaceKey = isEval
@@ -360,9 +371,10 @@ function AppShell() {
           position: "relative",
           // Reserve a permanent left lane for the persistent IconRail so nothing
           // underlaps it. STATIC (not hover-driven) → no reflow jank. Immersive
-          // surfaces hide the rail, so no lane.
-          paddingLeft: isImmersive ? 0 : RAIL_LANE,
-          paddingTop: isImmersive ? 0 : HEADER_H,
+          // surfaces (and /focus, which owns its own full-bleed chrome) get no
+          // lane.
+          paddingLeft: isImmersive || isFocusRoute ? 0 : RAIL_LANE,
+          paddingTop: isImmersive || isFocusRoute ? 0 : HEADER_H,
         }}
       >
         {/* Non-home surfaces SLIDE IN as one panel over a home that stays
@@ -391,24 +403,35 @@ function AppShell() {
           <Outlet />
         </div>
         </SurfaceHost>
+        {/* /focus's own persistent, full-bleed panel — see SurfaceHost above
+            for why it can't share that one. Mounted here (not by the route
+            switch) for the same reason SurfaceHost is: a node that first
+            paints already open has no parked frame to animate FROM, so it
+            has to live for the whole session and just sit off-screen until
+            `isFocusRoute` flips it open. FocusKiosk renders its OWN IconRail
+            inside, so the shared one below stands down whenever this is up. */}
+        <SurfacePanel open={isFocusRoute} viewKey="focus" onDismiss={gotoBlank} fullBleed>
+          <FocusKiosk />
+        </SurfacePanel>
         {/* IconRail is THE app-level nav, always present — including on
             notes, where the Sidebar next to it is note-browser-only and
-            carries no app nav of its own. */}
-        {!isImmersive && (
+            carries no app nav of its own. /focus renders its own, so this
+            one stands down there. */}
+        {!isImmersive && !isFocusRoute && (
           <IconRail onOpenSettings={() => setSettingsOpen((o) => !o)} settingsActive={settingsOpen} />
         )}
-        {!isImmersive && <FooterIsland />}
+        {!isImmersive && !isFocusRoute && <FooterIsland />}
         <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
         {/* ONE sticky header, on every non-immersive surface — date, quickfind,
             mic, log, theme. It replaces four separately-positioned fixed
             elements plus the two rival corner clusters. Settings joins it when
-            it becomes a surface; the rail still owns it. */}
-        {!isImmersive && (
+            it becomes a surface; the rail still owns it. /focus stays
+            chrome-less here — it's still a bare full-bleed hub, just one that
+            now slides in rather than snapping open. */}
+        {!isImmersive && !isFocusRoute && (
           <AppHeader
             onOpenNote={(n) => useHomeChromeStore.getState().openNote?.(n)}
             onOpenTrackables={() => navigate({ to: "/", search: { trackables: true } })}
-            onOpenSettings={() => setSettingsOpen((o) => !o)}
-            settingsActive={settingsOpen}
           />
         )}
       </div>

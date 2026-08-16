@@ -39,6 +39,7 @@ export function SurfacePanel({
   viewKey,
   onDismiss,
   children,
+  fullBleed = false,
 }: {
   open: boolean;
   // Identifies WHICH non-home surface is showing (e.g. "notes"/"memories").
@@ -49,6 +50,10 @@ export function SurfacePanel({
   viewKey: string;
   onDismiss: () => void;
   children: React.ReactNode;
+  /** `/focus` renders its own IconRail and owns the whole viewport — the
+   * ordinary clip box reserves the rail lane + header for the SHARED chrome,
+   * which this surface doesn't render. */
+  fullBleed?: boolean;
 }) {
   // Trails `open` by the length of the slide so the exit gets to play. It
   // drives VISIBILITY only — a parked panel must be out of the a11y tree and
@@ -100,8 +105,8 @@ export function SurfacePanel({
       data-surface-clip
       style={{
         position: "fixed",
-        left: RAIL_LANE,
-        top: "calc(var(--gooni-bar-h, 0px) + var(--gooni-header-h, 0px))",
+        left: fullBleed ? 0 : RAIL_LANE,
+        top: fullBleed ? 0 : "calc(var(--gooni-bar-h, 0px) + var(--gooni-header-h, 0px))",
         right: 0,
         bottom: 0,
         zIndex: z.overlay - 20,

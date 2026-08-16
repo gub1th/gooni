@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Mic, StickyNote } from "lucide-react";
+import { Mic, MicOff, StickyNote } from "lucide-react";
 import type { Editor } from "@tiptap/react";
 import { FONT, frostInk } from "../../ui";
 import { speakText, isVoiceMode, setVoiceMode, stopSpeaking, primeAudio } from "../../services/speech";
@@ -14,6 +14,7 @@ import { TodayList, type SessionRow, type TodayRow } from "./TodayList";
 import { useHomeChromeStore } from "../../stores/useHomeChromeStore";
 import { LogSheet } from "./LogSheet";
 import { CurrentActivityLine } from "./CurrentActivityLine";
+import { CornerButton } from "../shell/CornerChrome";
 import { ProactiveLine } from "./ProactiveLine";
 import { CaptureEditor } from "./CaptureEditor";
 import { captureState, homeInteractive, homeOpacity } from "./captureStates";
@@ -1147,10 +1148,23 @@ export function AmbientHome({
             // the line wears a pill now, so it is an INLINE element that has to
             // be centred by its slot — it can no longer centre itself by being
             // a full-width block with centred text
-            display: "flex", justifyContent: "center",
+            display: "flex", justifyContent: "center", alignItems: "center", gap: 8,
+            pointerEvents: stageLive ? "auto" : "none",
           }}
         >
           <CurrentActivityLine />
+          {/* The mic moved off the header (2026-08-15) — it's a HOME control
+              (voice capture is a home function, bridged into the header via
+              useHomeChromeStore only so the header could render it), so it
+              lives beside the one line on this screen that already reports
+              what's being listened to / looked at. */}
+          <CornerButton
+            label={voiceMode ? (listening ? "listening — click to go silent" : "voice on — click to go silent") : "voice off — click to talk"}
+            active={listening}
+            onClick={toggleVoiceMode}
+          >
+            {voiceMode ? <Mic size={15} strokeWidth={1.7} /> : <MicOff size={15} strokeWidth={1.7} />}
+          </CornerButton>
         </div>
 
         <div
