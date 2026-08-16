@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
-import { FONT } from "../../ui";
-import { fetchFocusAttribution, type AttributedPromise } from "../../services/api";
+import { FONT, Modal, frostInk } from "../../ui";
+import {
+  fetchFocusAttribution,
+  type AttributedLayer,
+  type AttributedPhoneLayer,
+  type AttributedPromise,
+} from "../../services/api";
 import { fmtMinutes } from "../../services/focusTime";
 import type { FocusPalette } from "./focusPalette";
 
@@ -64,11 +69,14 @@ export function FocusHistory({ pal }: { pal: FocusPalette }) {
 }
 
 /**
- * Rows are now CLICKABLE (2026-08-15): a session's minutes on their own don't
- * answer "what was I actually doing" — that's exactly what the attribution
- * layer is for, and `p.browser`/`p.app` (the promise-level top names over the
- * whole window) were already sitting unused in the fetched response. Expanding
- * costs no second fetch.
+ * Rows are CLICKABLE (2026-08-15, modal since): a session's minutes on their
+ * own don't answer "what was I actually doing" — that's exactly what the
+ * attribution layer is for, and `p.browser`/`p.app`/`p.phone` (the
+ * promise-level top names over the whole window) were already sitting
+ * unused in the fetched response. Opening the modal costs no second fetch.
+ * A modal rather than the old inline expand: the richer breakdown (three
+ * sensor sections + per-day bars) doesn't fit readably inline in a 460px
+ * column, and a modal gives it real width without disturbing the list.
  */
 function FocusHistoryRow({ p, pal }: { p: AttributedPromise; pal: FocusPalette }) {
   const [open, setOpen] = useState(false);
@@ -76,8 +84,8 @@ function FocusHistoryRow({ p, pal }: { p: AttributedPromise; pal: FocusPalette }
   return (
     <div>
       <button
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
+        onClick={() => setOpen(true)}
+        aria-haspopup="dialog"
         style={{
           display: "flex", alignItems: "center", gap: 10, width: "100%",
           border: "none", background: "transparent", padding: 0, cursor: "pointer", textAlign: "left",
@@ -112,54 +120,129 @@ function FocusHistoryRow({ p, pal }: { p: AttributedPromise; pal: FocusPalette }
           {fmtMinutes(p.focused_minutes)}
         </div>
       </button>
-      {open && <FocusHistoryBreakdown p={p} pal={pal} />}
+      <Modal open={open} onClose={() => setOpen(false)} title="focus session" width={480}>
+        <FocusHistoryDetail p={p} />
+      </Modal>
     </div>
   );
 }
 
-/** Top hosts/apps the sensors saw during this promise's sessions, over the window. */
-function FocusHistoryBreakdown({ p, pal }: { p: AttributedPromise; pal: FocusPalette }) {
-  const noData = p.browser.top.length === 0 && p.app.top.length === 0;
+/**
+ * The modal body — task/duration header, per-day bars, then one section per
+ * sensor: browser (self-hosts already excluded server-side, see
+ * `focus_attribution.SELF_HOSTS`), apps, phone (Shortcuts pings that fired
+ * inside the session windows). frostInk throughout — this is chrome floating
+ * over the void via `Modal`, not a card surface.
+ */
+function FocusHistoryDetail({ p }: { p: AttributedPromise }) {
+  const maxMin = Math.max(1, ...p.days.map((d) => d.focused_minutes));
+  const noData =
+    p.browser.top.length === 0 && p.app.top.length === 0 && p.phone.top.length === 0;
+  const dateRange =
+    p.days.length > 0
+      ? p.days.length === 1
+        ? p.days[0].date
+        : `${p.days[p.days.length - 1].date} – ${p.days[0].date}`
+      : null;
+
   return (
-    <div style={{ padding: "8px 0 10px 4px", display: "flex", flexDirection: "column", gap: 8 }}>
-      {noData ? (
-        <div style={{ fontSize: 11.5, color: pal.ink3 }}>no device activity observed</div>
-      ) : (
-        <>
-          <AttributionColumn label="browser" layer={p.browser} pal={pal} />
-          <AttributionColumn label="apps" layer={p.app} pal={pal} />
-        </>
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      <div>
+        <div
+          style={{
+            fontSize: 15,
+            color: frostInk.text,
+            textDecoration: p.state === "kept" ? "line-through" : "none",
+            marginBottom: 4,
+          }}
+        >
+          {p.title}
+          {!p.promise_exists && (
+            <span style={{ fontSize: 11, color: frostInk.muted, marginLeft: 8 }}>(deleted)</span>
+          )}
+        </div>
+        <div style={{ fontSize: 12, color: frostInk.muted, display: "flex", gap: 10 }}>
+          <span>{fmtMinutes(p.focused_minutes)}{p.precise ? "" : " (upper bound)"}{p.truncated ? " · capped" : ""}</span>
+          {dateRange && <span>{dateRange}</span>}
+        </div>
+      </div>
+
+      {p.days.length > 1 && (
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 28 }}>
+          {p.days.slice().reverse().map((d) => (
+            <span
+              key={d.date}
+              title={`${d.date}: ${fmtMinutes(d.focused_minutes)}${d.precise ? "" : " (upper bound)"}`}
+              style={{
+                width: 6,
+                height: Math.max(3, (d.focused_minutes / maxMin) * 28),
+                borderRadius: 1.5,
+                background: d.focused_minutes > 0 ? frostInk.accent : frostInk.hairline,
+                opacity: d.precise ? 1 : 0.55,
+              }}
+            />
+          ))}
+        </div>
       )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        {noData ? (
+          <div style={{ fontSize: 12, color: frostInk.muted }}>no device activity observed</div>
+        ) : (
+          <>
+            <AttributionColumn label="browser" layer={p.browser} />
+            <AttributionColumn label="apps" layer={p.app} />
+            <PhoneColumn label="phone" layer={p.phone} />
+          </>
+        )}
+      </div>
     </div>
   );
 }
 
-function AttributionColumn({
-  label,
-  layer,
-  pal,
-}: {
-  label: string;
-  layer: AttributedPromise["browser"];
-  pal: FocusPalette;
-}) {
+function AttributionColumn({ label, layer }: { label: string; layer: AttributedLayer }) {
   if (layer.top.length === 0) return null;
   return (
     <div>
-      <div style={{ fontSize: 10, letterSpacing: 0.8, textTransform: "uppercase", color: pal.ink3, marginBottom: 4 }}>
+      <div style={{ fontSize: 10, letterSpacing: 0.8, textTransform: "uppercase", color: frostInk.muted, marginBottom: 6 }}>
         {label}
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
         {layer.top.map((n) => (
-          <div key={n.name} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12.5, color: pal.ink2 }}>
+          <div key={n.name} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 13, color: frostInk.text }}>
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.label}</span>
-            <span style={{ flex: "none", fontVariantNumeric: "tabular-nums", color: pal.ink3 }}>
+            <span style={{ flex: "none", fontVariantNumeric: "tabular-nums", color: frostInk.muted }}>
               {fmtMinutes(Math.round(n.seconds / 60))}
             </span>
           </div>
         ))}
         {layer.other_sec > 0 && (
-          <div style={{ fontSize: 11.5, color: pal.ink3 }}>+ {fmtMinutes(Math.round(layer.other_sec / 60))} more</div>
+          <div style={{ fontSize: 11.5, color: frostInk.muted }}>+ {fmtMinutes(Math.round(layer.other_sec / 60))} more</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Same shape as `AttributionColumn`, but phone events are counted pings, not seconds. */
+function PhoneColumn({ label, layer }: { label: string; layer: AttributedPhoneLayer }) {
+  if (layer.top.length === 0) return null;
+  return (
+    <div>
+      <div style={{ fontSize: 10, letterSpacing: 0.8, textTransform: "uppercase", color: frostInk.muted, marginBottom: 6 }}>
+        {label}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+        {layer.top.map((n) => (
+          <div key={n.name} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 13, color: frostInk.text }}>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.label}</span>
+            <span style={{ flex: "none", fontVariantNumeric: "tabular-nums", color: frostInk.muted }}>
+              {n.count}×
+            </span>
+          </div>
+        ))}
+        {layer.other_count > 0 && (
+          <div style={{ fontSize: 11.5, color: frostInk.muted }}>+ {layer.other_count} more</div>
         )}
       </div>
     </div>

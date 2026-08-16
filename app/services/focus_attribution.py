@@ -63,8 +63,10 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
-from .device_activity import MAX_DERIVED_DAYS, MAX_SCAN_INTERVALS, host_label
+from .device_activity import MAX_DERIVED_DAYS, MAX_SCAN_INTERVALS, event_phrase, host_label
+from .event_service import SOURCE as _SHORTCUTS_SOURCE
 from .interval_ingest import MAX_INTERVAL_SEC, parse_dt
+from .self_hosts import is_self_host
 
 # The one focus rollup's name. Must match `focusTime.ts::FOCUS_TRACKABLE` —
 # there is exactly one `focus` trackable and the client get-or-creates it by
@@ -291,6 +293,52 @@ def attribute_intervals(entries, intervals) -> dict:
     return out
 
 
+def attribute_events(entries, events) -> dict:
+    """Overlap point-in-time phone (Shortcuts) events onto focus windows.
+
+    `events` is `(id, name, at)` with naive-UTC datetimes — one instant each,
+    unlike `browser_intervals`/`app_intervals`'s spans. Containment (`w0 <= at
+    < w1`) replaces the overlap-seconds math `attribute_intervals` uses;
+    there's no duration to sum, only a count of pings that landed inside the
+    session. Same one-per-(promise,day,name) counting rule as the interval
+    layers — a phone opened twice inside one session is one "opened X during
+    this session", not two.
+    """
+    out: dict = {}
+    seen: dict = {}
+    for ent in entries:
+        key = (ent.promise_id, ent.day)
+        bucket = out.setdefault(key, {})
+        seen_here = seen.setdefault(key, set())
+        if not ent.windows:
+            continue
+        ent_start = ent.windows[0][0]
+        ent_end = max(w[1] for w in ent.windows)
+        for eid, name, at in events:
+            if not name or at < ent_start or at >= ent_end:
+                continue
+            if not any(w0 <= at < w1 for w0, w1 in ent.windows):
+                continue
+            if (name, eid) in seen_here:
+                continue
+            seen_here.add((name, eid))
+            bucket[name] = bucket.get(name, 0) + 1
+    return out
+
+
+def rank_counts(counts: dict, *, label_fn=None, top_n: int = TOP_N) -> tuple[list[dict], int]:
+    """`{name: count}` → the ranked head, plus the tail's count. Same
+    no-silent-cap shape as `rank()`, over pings rather than seconds."""
+    ordered = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    head = ordered[:top_n]
+    other = sum(c for _, c in ordered[top_n:])
+    rows = [
+        {"name": name, "label": label_fn(name) if label_fn else name, "count": c}
+        for name, c in head
+    ]
+    return rows, other
+
+
 def rank(names: dict, *, label_fn=None, top_n: int = TOP_N) -> tuple[list[dict], float]:
     """`{name: [sec, count]}` → the ranked head, plus the tail's seconds.
 
@@ -377,6 +425,49 @@ def _intervals(db: Session, model, name_col, span_start, span_end, *, layer: str
     return rows, capped
 
 
+def _shortcuts_events(db: Session, span_start_day: _date, span_end_day: _date):
+    """Shortcuts pings (`source="shortcuts"`) whose `value_json.at` clock time
+    falls in `[span_start_day, span_end_day]`. Coarse day-bounded prefilter on
+    the entry's own `date` column (indexed), same shape as `_intervals`'s
+    started_at prefilter — the exact containment test runs after parsing, in
+    `attribute_events`. Returns `(id, trackable_name, at_naive_utc)` tuples,
+    skipping anything unparseable (a malformed ping costs that ping, not the
+    read — same contract as `parse_focus_entry`).
+    """
+    from ..db.models import Trackable, TrackableEntry
+
+    try:
+        rows = (
+            db.query(TrackableEntry.id, Trackable.name, TrackableEntry.value_json)
+            .join(Trackable, TrackableEntry.trackable_id == Trackable.id)
+            .filter(
+                Trackable.source == _SHORTCUTS_SOURCE,
+                TrackableEntry.date >= span_start_day,
+                TrackableEntry.date <= span_end_day,
+            )
+            .all()
+        )
+    except Exception as e:  # pragma: no cover — defensive, one sensor must not
+        print(f"[focus_attribution] phone event query failed: {e}")
+        return []
+
+    out = []
+    for eid, name, raw_json in rows:
+        if not raw_json:
+            continue
+        try:
+            doc = json.loads(raw_json) if isinstance(raw_json, str) else raw_json
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(doc, dict):
+            continue
+        at = parse_dt(doc.get("at"))
+        if at is None:
+            continue
+        out.append((eid, name, at))
+    return out
+
+
 def attribute(
     db: Session,
     *,
@@ -449,6 +540,11 @@ def attribute(
         ("app", AppInterval, AppInterval.app, None),
     ):
         rows, capped = _intervals(db, model, col, span_start, span_end, layer=key)
+        if key == "browser":
+            # Gooni's own hosts are the tool, not activity — same exclusion
+            # `activity_context`/`proactive_service` apply, single-owned in
+            # `self_hosts` so the three surfaces can't drift apart.
+            rows = [r for r in rows if not is_self_host(r[1])]
         if capped:
             warnings.append(
                 f"{key} scan hit its {MAX_SCAN_INTERVALS}-row cap; its attributed "
@@ -458,6 +554,12 @@ def attribute(
             "buckets": attribute_intervals(entries, rows),
             "label_fn": label_fn,
         }
+
+    # Phone layer — Shortcuts pings whose clock time fell inside a session's
+    # windows. Point events, not spans, so it rides `attribute_events`/
+    # `rank_counts` rather than the seconds-based interval machinery above.
+    events = _shortcuts_events(db, span_start.date(), span_end.date())
+    phone_buckets = attribute_events(entries, events)
 
     # Live promise text beats the entry's snapshot title: the entry records the
     # title as it read when the session ended, and a commitment renamed since
@@ -491,6 +593,7 @@ def attribute(
                 "truncated": False,
                 "days": [],
                 "_names": {"browser": {}, "app": {}},
+                "_phone": {},
             },
         )
         rec["focused_minutes"] += ent.minutes
@@ -523,6 +626,14 @@ def attribute(
                 slot = agg.setdefault(name, [0.0, 0])
                 slot[0] += sec
                 slot[1] += count
+
+        phone_counts = phone_buckets.get((ent.promise_id, ent.day), {})
+        phone_rows, phone_other = rank_counts(phone_counts, label_fn=event_phrase)
+        day_row["phone"] = {"top": phone_rows, "other_count": phone_other}
+        phone_agg = rec["_phone"]
+        for name, count in phone_counts.items():
+            phone_agg[name] = phone_agg.get(name, 0) + count
+
         rec["days"].append(day_row)
 
     out = []
@@ -532,6 +643,9 @@ def attribute(
             observed = sum(sec for sec, _ in rec["_names"][key].values())
             rec[key] = {"observed_sec": round(observed, 1), "top": rows, "other_sec": other}
         rec.pop("_names")
+        phone_rows, phone_other = rank_counts(rec["_phone"], label_fn=event_phrase)
+        rec["phone"] = {"top": phone_rows, "other_count": phone_other}
+        rec.pop("_phone")
         rec["focused_minutes"] = round(rec["focused_minutes"], 2)
         rec["days"].sort(key=lambda d: d["date"], reverse=True)
         out.append(rec)

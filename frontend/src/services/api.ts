@@ -1843,6 +1843,21 @@ export interface AttributedLayer {
   other_sec: number;
 }
 
+/** One phone (iOS Shortcuts) event name whose ping landed inside a session window. */
+export interface AttributedPhoneName {
+  /** raw trackable key, e.g. "instagram open" */
+  name: string;
+  /** rendered verb form, e.g. "opened instagram" */
+  label: string;
+  count: number;
+}
+
+export interface AttributedPhoneLayer {
+  top: AttributedPhoneName[];
+  /** pings in the tail below `top` — shown so a head never reads as the whole */
+  other_count: number;
+}
+
 export interface AttributedDay {
   date: string;
   /** the TIMER's number — never recomputed from what the sensors saw */
@@ -1860,6 +1875,7 @@ export interface AttributedDay {
     coverage: number | null;
   };
   app: AttributedLayer & { coverage: number | null };
+  phone: AttributedPhoneLayer;
 }
 
 export interface AttributedPromise {
@@ -1874,6 +1890,7 @@ export interface AttributedPromise {
   days: AttributedDay[];
   browser: AttributedLayer;
   app: AttributedLayer;
+  phone: AttributedPhoneLayer;
 }
 
 export interface FocusAttribution {
