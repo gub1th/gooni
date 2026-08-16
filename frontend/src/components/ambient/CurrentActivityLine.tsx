@@ -133,6 +133,7 @@ export function CurrentActivityLine() {
 
   return (
     <div
+      className="gooni-activity-breathe"
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -154,6 +155,23 @@ export function CurrentActivityLine() {
         maxWidth: "100%",
       }}
     >
+      {/* Ambient breathe: the wave drifts continuously, so a perfectly static
+          pill reads as a frozen object on a living surface. Slow opacity +
+          sub-threshold translateY on one long cycle — felt, not seen, and
+          deliberately NOT synced to the wave. Transform/opacity only (no
+          layout shift), disabled under prefers-reduced-motion. */}
+      <style>{`
+        @keyframes gooni-activity-breathe {
+          from { opacity: 0.4; transform: translateY(-2px); }
+          to   { opacity: 0.6; transform: translateY(2px); }
+        }
+        .gooni-activity-breathe {
+          animation: gooni-activity-breathe 7s ease-in-out infinite alternate;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .gooni-activity-breathe { animation: none; }
+        }
+      `}</style>
       <ActivityIcon name={shown.name} src={shown.icon} />
       <span
         style={{
