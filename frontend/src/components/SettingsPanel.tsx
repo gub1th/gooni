@@ -41,18 +41,6 @@ export function SettingsPanel() {
   const [saving, setSaving] = useState(false);
   const displayLocation = useDisplayLocationStore((s) => s.displayLocation);
   const setDisplayLocation = useDisplayLocationStore((s) => s.setDisplayLocation);
-  // Placeholder shows what the header WILL fall back to, so an empty field
-  // reads as a choice rather than as something unset.
-  const tzAbbrevNow = (() => {
-    try {
-      return new Intl.DateTimeFormat("en-US", { timeZoneName: "short" })
-        .formatToParts(new Date())
-        .find((p) => p.type === "timeZoneName")?.value ?? "";
-    } catch {
-      return "";
-    }
-  })();
-
   async function patch(p: Partial<AppSettings>) {
     if (!settings) return;
     setSaving(true);
@@ -149,7 +137,7 @@ export function SettingsPanel() {
           <input
             type="text"
             value={displayLocation}
-            placeholder={tzAbbrevNow || "e.g. San Francisco"}
+            placeholder="e.g. San Francisco"
             onChange={(e) => setDisplayLocation(e.target.value)}
             style={{
               padding: "5px 8px",
@@ -168,9 +156,8 @@ export function SettingsPanel() {
             margin: "6px 0 0", fontSize: 11,
             color: "var(--gooni-muted, #A0A0A5)", lineHeight: 1.5,
           }}>
-            The label under the header clock. Leave it empty to show the
-            timezone{tzAbbrevNow ? ` (${tzAbbrevNow})` : ""} instead — a zone id
-            names a representative city, not the one you're in, so Gooni won't
+            The label under the header clock. Leave it empty and nothing shows
+            there — a timezone can't name the city you're in, so Gooni won't
             guess. Stored in this browser only.
           </p>
         </div>

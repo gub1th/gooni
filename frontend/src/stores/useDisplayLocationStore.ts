@@ -21,10 +21,10 @@ import { LocalStorageService } from "../services/localStorageService";
  * someone else. Continuous home-location coordinates are a stronger secret than
  * that, for a two-word caption.
  *
- * So: the DEFAULT is the timezone ABBREVIATION (PDT/PST), which is honest —
- * it's the one thing the zone genuinely tells you and it's what the clock beside
- * it is actually showing. A city name is a preference, typed once, and it lives
- * here.
+ * WHY NOT THE TZ ABBREVIATION EITHER. The interim fallback was PDT/PST —
+ * honest, but the captain's verdict was it looks bad and says nothing the
+ * clock beside it doesn't already. So the DEFAULT is NOTHING: the slot is
+ * empty until a city name is typed here.
  *
  * Client-side (like `gooni_theme`) rather than a `Settings` column: it changes
  * nothing server-side, no route or job reads it, and adding it to the DB would
@@ -34,7 +34,7 @@ import { LocalStorageService } from "../services/localStorageService";
 const KEY = "gooni_display_location";
 
 interface DisplayLocationStore {
-  /** Empty string = no override; the header falls back to the tz abbreviation. */
+  /** Empty string = no label; the header shows nothing in that slot. */
   displayLocation: string;
   setDisplayLocation: (value: string) => void;
 }
