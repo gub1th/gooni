@@ -216,6 +216,13 @@ export interface FocusWriteOptions {
   writtenDates?: readonly string[];
   /** Called as each day lands, so the caller can persist the record. */
   onWritten?: (date: string) => void;
+  /**
+   * The "victory selfie" — a camera frame grabbed at the moment the session
+   * ended. Rides on the LAST day's entry only (the day the stop actually
+   * happened on), never duplicated across days, so it can't be mistaken for a
+   * frame from an earlier day of a multi-day session.
+   */
+  completionFrame?: string | null;
 }
 
 /**
@@ -229,12 +236,15 @@ export async function writeFocusSession(
   segments: FocusSegment[],
   promiseId: number,
   title: string,
-  { writtenDates = [], onWritten }: FocusWriteOptions = {},
+  { writtenDates = [], onWritten, completionFrame }: FocusWriteOptions = {},
 ): Promise<FocusEntryDraft[]> {
   const already = new Set(writtenDates);
   const drafts = splitSegmentsByDay(segments).filter((d) => !already.has(d.date));
   if (drafts.length === 0) return [];
   const t = await ensureFocusTrackable();
+  // The last (max-date) draft is the day the STOP actually happened on — the
+  // only one a "moment of ending" frame can honestly belong to.
+  const lastDate = drafts[drafts.length - 1]?.date;
   for (const d of drafts) {
     await logTrackable(t.id, {
       date: d.date,
@@ -252,6 +262,7 @@ export async function writeFocusSession(
         segments: d.segments,
         // only on the rows it's true of — an absent flag is the normal case
         ...(d.truncated ? { truncated: true } : {}),
+        ...(completionFrame && d.date === lastDate ? { completion_frame: completionFrame } : {}),
       },
       source: "focus",
       // NO replace — see trap 1.
@@ -281,8 +292,12 @@ let ending: Promise<void> | null = null;
  * the session paused with its segments intact — the entry is the only durable
  * artifact a session produces, so clearing before it lands would destroy it.
  * A no-op when nothing is running.
+ *
+ * `completionFrame` is the "victory selfie" — a camera frame grabbed right
+ * before the caller invoked this. Optional and best-effort: a session ends
+ * successfully whether or not a frame was available to attach.
  */
-export async function endFocusSession(): Promise<void> {
+export async function endFocusSession(completionFrame?: string | null): Promise<void> {
   if (ending) return ending;
   const s = useFocusSessionStore.getState().session;
   if (!s) return;
@@ -291,6 +306,7 @@ export async function endFocusSession(): Promise<void> {
     await writeFocusSession(segments, s.promiseId, s.title, {
       writtenDates: useFocusSessionStore.getState().session?.writtenDates ?? [],
       onWritten: (date) => useFocusSessionStore.getState().markWritten(date),
+      completionFrame,
     });
     useFocusSessionStore.getState().stop();
     // No completion OFFER any more (pass 9). Stopping simply stops; ticking the

@@ -3,13 +3,18 @@ import { Pause, Play } from "lucide-react";
 import { FONT } from "../../ui";
 import { FOCUS_PALETTES } from "./focusPalette";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
+import { FocusEvidenceGallery } from "./FocusEvidenceGallery";
+import { FocusCameraStatus } from "./FocusCameraStatus";
+import { type SessionRecapData } from "./FocusSessionRecap";
 import {
   elapsedMs,
   sealedSegments,
   sessionStartedAt,
   useFocusSessionStore,
+  type FocusSession,
   type FocusStyle,
 } from "../../stores/useFocusSessionStore";
+import { useFocusRecapStore } from "../../stores/useFocusRecapStore";
 import {
   endFocusSession,
   fmtMinutes,
@@ -19,6 +24,8 @@ import {
 import { parseServerDate } from "../../utils/date";
 import {
   FEED_REFRESH_MS,
+  fetchFocusCam,
+  fetchFocusCamEvidence,
   fetchFocusCamToday,
   fetchFocusDashboard,
   updateFocusReminder,
@@ -126,6 +133,7 @@ export function FocusExpanded() {
   const session = useFocusSessionStore((s) => s.session);
   const [now, setNow] = useState(() => Date.now());
   const [saveError, setSaveError] = useState(false);
+  const setRecap = useFocusRecapStore((s) => s.setRecap);
   const stopping = useRef(false);
 
   const kept = session?.kept ?? false;
@@ -162,38 +170,69 @@ export function FocusExpanded() {
     return splitSegmentsByDay(sealedSegments(session, now)).reduce((n, d) => n + d.minutes, 0);
   }, [session, now]);
 
+  /** Build the recap from data the session itself produced — no invented score. */
+  async function buildRecap(s: FocusSession, stopMs: number): Promise<SessionRecapData> {
+    const spanStart = sessionStartedAt(s) ?? stopMs;
+    const sealed = sealedSegments(s, stopMs);
+    const perDay = splitSegmentsByDay(sealed);
+    const totalMinutes = perDay.reduce((n, d) => n + d.minutes, 0);
+    const timeline = sealed
+      .filter((seg) => seg.mode === "focus")
+      .map((seg) => ({ start: seg.start, end: seg.end, truncated: seg.truncated === true }));
+
+    const evidence = await fetchFocusCamEvidence(60).catch(() => []);
+    const eventsByKind: Record<string, number> = {};
+    for (const it of evidence) {
+      if (!it.kind) continue;
+      const at = it.at ? parseServerDate(it.at)?.getTime() : null;
+      if (at == null || at < spanStart) continue;
+      eventsByKind[it.kind] = (eventsByKind[it.kind] ?? 0) + 1;
+    }
+
+    return {
+      title: s.title,
+      totalMinutes,
+      spanMs: Math.max(0, stopMs - spanStart),
+      spanStart,
+      spanEnd: stopMs,
+      perDay,
+      timeline,
+      eventsByKind,
+      completionFrame: null, // filled by the caller once the selfie is grabbed
+    };
+  }
+
   async function stop() {
-    if (stopping.current) return;
+    if (stopping.current || !session) return;
     stopping.current = true;
     setSaveError(false);
-    // Stopping — as opposed to pausing — means the task is DONE: the same
-    // completion `markKept` performs, folded into the one button rather than
-    // left as a second click nobody was reliably making. Read before the
+    const stopMs = Date.now();
+    // Stopping — as opposed to pausing — means the task is DONE: this is the
+    // one completion gesture (no separate "mark kept" click). Read before the
     // await: the store's own `stop()` (inside `endFocusSession`) clears the
     // session, so `session` here is the closure's snapshot, not a live ref.
-    const promiseId = session?.promiseId;
+    const s = session;
     const alreadyKept = kept;
     try {
-      await endFocusSession();
-      if (promiseId != null && !alreadyKept) {
+      const [recapDraft, camSnap] = await Promise.all([
+        buildRecap(s, stopMs),
+        // The "victory selfie" — whatever the sidecar's live preview last
+        // showed, grabbed at the moment of stopping. Best-effort: a session
+        // ends successfully whether or not this lands.
+        fetchFocusCam().catch(() => null),
+      ]);
+      const completionFrame = camSnap?.frame ?? null;
+      await endFocusSession(completionFrame);
+      if (!alreadyKept) {
         // Best-effort: the timer's own write already landed, so a failure
         // here shouldn't read as the whole stop having failed.
-        await updateFocusReminder(promiseId, { state: "kept" }).catch(() => {});
+        await updateFocusReminder(s.promiseId, { state: "kept" }).catch(() => {});
       }
+      setRecap({ ...recapDraft, completionFrame });
     } catch {
       setSaveError(true);
     } finally {
       stopping.current = false;
-    }
-  }
-
-  async function markKept() {
-    if (!session || kept) return;
-    useFocusSessionStore.getState().setKept(true);
-    try {
-      await updateFocusReminder(session.promiseId, { state: "kept" });
-    } catch {
-      useFocusSessionStore.getState().setKept(false);
     }
   }
 
@@ -207,9 +246,13 @@ export function FocusExpanded() {
         display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
       }}
     >
+      <FocusCameraStatus sinceMs={startedAt} />
+
       <div style={{ position: "absolute", top: 22, right: 26, display: "flex", alignItems: "center", gap: 16, fontSize: 12, color: pal.ink3 }}>
         <span style={{ fontVariantNumeric: "tabular-nums" }}>{fmtMinutes(storedMinutes)}</span>
       </div>
+
+      <FocusEvidenceGallery sinceMs={startedAt} />
 
       <div role="tablist" style={{ display: "flex", gap: 26, marginBottom: 8 }}>
         {(["stopwatch", "timer"] as FocusStyle[]).map((m) => (
@@ -303,19 +346,6 @@ export function FocusExpanded() {
         <span>camera <b style={{ fontWeight: 450, color: sensors.cameraOn ? pal.accent : pal.ink2 }}>{sensors.camera ?? "—"}</b></span>
         <span>phone <b style={{ fontWeight: 450, color: pal.ink2 }}>{sensors.phone ?? "—"}</b></span>
       </div>
-
-      <button
-        onClick={() => void markKept()}
-        disabled={kept}
-        style={{
-          position: "absolute", bottom: 44, right: 30,
-          border: "none", background: "transparent", padding: 0,
-          cursor: kept ? "default" : "pointer",
-          fontFamily: FONT, fontSize: 12, color: kept ? pal.accent : pal.ink3,
-        }}
-      >
-        {kept ? "kept" : "mark kept"}
-      </button>
     </div>
   );
 }
