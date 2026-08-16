@@ -194,7 +194,20 @@ function LogPage() {
             // clears it. Subtle on purpose — the home is the anchor, not
             // another page, so this is a nudge (12px) rather than the full
             // viewport-width slide the panel itself does.
-            transform: view === "home" ? "translateX(0)" : "translateX(12px)",
+            //
+            // The resting-home value MUST be `undefined`, not "translateX(0)".
+            // AmbientHome's stage root is `position: fixed; inset: 0` — ANY
+            // transform on an ancestor (even an identity one) makes that
+            // ancestor the containing block for fixed descendants, per CSS.
+            // A permanent `translateX(0)` here collapsed the wrapper (its only
+            // child is now out of flow) to a ~0-size box, so the wave/TODAY
+            // list rendered pinned to that box instead of the viewport — the
+            // home-goes-blank-on-refresh bug. Transitioning between a set
+            // transform and `undefined` still animates smoothly (the browser
+            // treats a missing transform as the identity for interpolation),
+            // so the slide-in survives; only the settled state drops the
+            // property so fixed descendants measure against the viewport again.
+            transform: view === "home" ? undefined : "translateX(12px)",
             transition: "transform 260ms cubic-bezier(0.32, 0.72, 0, 1)",
           }}
         >
