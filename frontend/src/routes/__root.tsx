@@ -394,7 +394,9 @@ function AppShell() {
         {/* IconRail is THE app-level nav, always present — including on
             notes, where the Sidebar next to it is note-browser-only and
             carries no app nav of its own. */}
-        {!isImmersive && <IconRail />}
+        {!isImmersive && (
+          <IconRail onOpenSettings={() => setSettingsOpen((o) => !o)} settingsActive={settingsOpen} />
+        )}
         {!isImmersive && <FooterIsland />}
         <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
         {/* ONE sticky header, on every non-immersive surface — date, quickfind,
