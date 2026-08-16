@@ -50,28 +50,21 @@ const SIDE_RESERVE = 200;
 export const HEADER_Z = z.overlay + 5;
 
 /**
- * The timezone's ABBREVIATION for a given moment — "PDT" in summer, "PST" in
- * winter, so it is a live fact rather than a label.
+ * The label under the header clock: a place name Daniel TYPED, or nothing.
  *
- * This replaces printing the IANA zone's trailing path segment as if it were a
- * city. "America/Los_Angeles" is the name of a set of offset RULES, and its
- * city is only the representative one: San Francisco, San Diego, Portland and
- * Seattle all live in it. The captain is in SF and the header said "Los
- * Angeles" — not a formatting slip, a category error, and one no prettifying
- * can fix. A place name has to be told to us; see `useDisplayLocationStore`.
- *
- * Intl falls back to a GMT offset ("GMT+7") for zones with no common
- * abbreviation. That is still true and still not a city, so it is fine to show.
+ * The label's history is two fallbacks, both removed. First the header printed
+ * the IANA zone's trailing path segment as if it were a city —
+ * "America/Los_Angeles" → "Los Angeles" to a captain in SF, a category error:
+ * a zone id names a set of offset RULES and its city is only the
+ * representative one. Then it fell back to the zone ABBREVIATION (PDT/PST),
+ * which was at least true — but the captain's verdict was that it looks bad
+ * and tells him nothing the clock beside it doesn't. So: a typed place name
+ * (`useDisplayLocationStore`, Settings ▸ General), or the slot renders
+ * NOTHING. Never anything derived from the timezone.
  */
-export function tzAbbreviation(at: Date, tz: string | undefined): string | null {
-  try {
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone: tz, timeZoneName: "short",
-    }).formatToParts(at);
-    return parts.find((p) => p.type === "timeZoneName")?.value ?? null;
-  } catch {
-    return null;
-  }
+export function locationLabel(override: string): string | null {
+  const trimmed = override.trim();
+  return trimmed ? trimmed : null;
 }
 
 function HeaderClock() {
@@ -117,9 +110,8 @@ function HeaderClock() {
   const time = now.toLocaleTimeString(undefined, {
     hour: "2-digit", minute: "2-digit", hour12: false, timeZone: tz,
   });
-  // A typed place name wins; otherwise the zone abbreviation. Never a city
-  // guessed from the zone id.
-  const location = override || tzAbbreviation(now, tz);
+  // A typed place name, or nothing. Never anything derived from the zone.
+  const location = locationLabel(override);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2, userSelect: "none" }}>
