@@ -167,6 +167,12 @@ export function TodayList({
           // full width so the scrollbar gutter can't shift the centred rows
           alignSelf: "stretch",
           display: "flex", flexDirection: "column", alignItems: "stretch",
+          // the focus-glow ring on the running task's checkbox sits at
+          // inset:-3 past the checkbox box — without this padding (offset
+          // by the matching negative margin below, so layout is unchanged)
+          // this scroller's own overflow:hidden/auto edges clip the ring.
+          padding: 3,
+          margin: -3,
         }}
       >
         {/* the running task, above the fill row */}
