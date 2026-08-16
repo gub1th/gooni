@@ -1,0 +1,35 @@
+# Human-editable dependency input. To change deps: edit THIS file, then run
+#   pip-compile requirements.in
+# (pip-tools; use Python 3.11 to match the Docker image) to regenerate the
+# locked requirements.txt, which is what the Dockerfile installs. Never edit
+# requirements.txt by hand — it is generated.
+# Every dep carries a `>=current,<next_major` ceiling. Deploys install the
+# pip-compile lockfile (requirements.txt), so versions only move when someone
+# re-runs pip-compile — the ceilings bound what a re-compile may pick (this is
+# how `mcp` 2.0 took prod down on 2026-08-10 before it was pinned). Ceilings
+# let patch/minor updates land on re-compile while blocking silent majors.
+# Do NOT use exact `==` pins here — the lockfile owns exact pins.
+fastapi[standard]>=0.141,<1
+sqlalchemy>=2.0,<3
+alembic>=1.19,<2
+pydantic>=2.13,<3
+openai>=3.1,<4
+python-dotenv>=1.2,<2
+beautifulsoup4>=4.15,<5
+httpx>=0.28,<1
+python-telegram-bot>=22.8,<23
+# SDK 2.0 removed mcp.server.fastmcp, which app/focus_mcp.py imports. Keep <2.
+mcp[cli]>=1.0.0,<2
+boto3>=1.43,<2
+dateparser>=1.4,<2
+pytest>=8.4,<9
+# NOT added, deliberately: numpy / scikit-learn. The initiative synthesizer
+# (app/services/initiative_service.py) needs DBSCAN over cosine distance, which
+# is a sklearn one-liner — but sklearn+numpy is ~100MB of image and tens of MB
+# resident on a 512MB Fly machine that already runs a watchdog because it has
+# been OOM-killed before. The algorithm is ~40 lines and exactly specified, so
+# the service implements it directly and uses numpy for the distance matrix
+# ONLY if it happens to be importable (both paths are asserted identical by
+# tests/test_initiatives.py). Adding `numpy` here would buy the fast path for
+# ~20MB if the corpus ever outgrows the pure loop; adding sklearn buys nothing
+# the module doesn't already do.
