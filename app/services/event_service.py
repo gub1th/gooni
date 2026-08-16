@@ -17,27 +17,14 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
 from ..common import local_now
-from . import device_activity, trackable_service
+from . import device_activity, distraction_alert, trackable_service
 
 SOURCE = "shortcuts"
-
-# Focus-session distraction alert: a WhatsApp callout the moment an app-open
-# ping arrives while a focus session is running. Dedup key = (target_reminder_id,
-# app_name) so reopening the same app doesn't spam — cleared whenever the
-# session's target changes (new session = clean slate). Module-level because
-# there's no session table to hang this on (see focus_cam_service — the session
-# itself is a client store; `target_reminder_id` + `control_at` on the Settings
-# blob are the only server-visible trace one exists).
-_alerted: dict[int | None, set[str]] = {}
-
-# Mirrors focus_cam's own run cap (focusTime.ts / focus_attribution.py) — past
-# this a `control_at` stamp is stale, not a live session.
-_MAX_RUN = timedelta(hours=6)
 
 # Same-trackable pings within this window collapse into ONE stream card — the
 # "aggregate hard" rule (one card per run, not per app-switch).
@@ -121,8 +108,12 @@ def log_event(db: Session, *, subject: str, event: str, at=None) -> dict:
     entries = trackable_service.entries_for(db, t, start=local_day, end=local_day)
     count = trackable_service.day_value(entries, t) or 0
 
+    # Focus-session distraction alert (shared with the browser sensor — see
+    # distraction_alert). No host list on THIS path on purpose: the Shortcut
+    # itself is the distraction list — Daniel only configures automations for
+    # apps worth calling out, so an "open" ping arriving IS the verdict.
     if ev == "open":
-        _maybe_alert_distraction(db, subject=subj)
+        distraction_alert.maybe_alert(db, subject=subj)
 
     return {
         "subject": subj,
@@ -131,56 +122,6 @@ def log_event(db: Session, *, subject: str, event: str, at=None) -> dict:
         "count": int(count),
         "at": when.isoformat(),
     }
-
-
-def _maybe_alert_distraction(db: Session, *, subject: str) -> None:
-    """WhatsApp callout when an app-open ping lands during a LIVE focus session.
-
-    Reads the same `Settings.focus_cam` blob `activity_context.live_focus_session`
-    trusts — `control == "running"`, a `target_reminder_id`, and a `control_at`
-    stamp inside `_MAX_RUN` — so a stale/unstamped blob (an old sidecar, a crashed
-    tab) never fires a false alarm. Best-effort: a failure here must never break
-    the event ingest it rides on.
-    """
-    try:
-        from .interval_ingest import parse_dt
-        from . import focus_cam_service, promise_service
-        from .messaging.whatsapp import whatsapp_channel
-
-        blob = focus_cam_service.get_blob(db)
-        if blob.get("control") != "running":
-            return
-        target_id = blob.get("target_reminder_id")
-        if not target_id:
-            return
-        started = parse_dt(blob.get("control_at"))
-        now = datetime.utcnow()
-        if started is None or now - started > _MAX_RUN or started > now + timedelta(minutes=5):
-            return
-
-        sent = _alerted.setdefault(target_id, set())
-        if subject in sent:
-            return
-
-        promise = promise_service.get(db, target_id)
-        task_title = (promise.summary or promise.utterance) if promise else "your focus task"
-
-        target = next(iter(getattr(whatsapp_channel, "_allowed", None) or set()), None)
-        if not target:
-            return
-
-        text = f"yo you just opened {subject}. you're on \"{task_title}\"."
-        delivered = whatsapp_channel.send(target, whatsapp_channel.format_outbound(text))
-        if not delivered:
-            return
-        sent.add(subject)
-
-        from .conversation_service import conversation_service
-
-        conv = conversation_service.find_or_create_session("whatsapp", db)
-        conversation_service.add_message(conv.id, "assistant", text, db)
-    except Exception as e:  # pragma: no cover — defensive
-        print(f"[event_service] distraction alert failed: {e}")
 
 
 def _to_utc(raw) -> datetime | None:

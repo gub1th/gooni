@@ -35,6 +35,7 @@ from sqlalchemy.orm import Session
 
 from ..common import local_day_bounds, local_now
 from ..db.models import BrowserInterval
+from . import device_activity, distraction_alert
 from .interval_ingest import (  # noqa: F401 — re-exported: the limits are this module's public contract
     MAX_BATCH,
     MAX_FUTURE_SKEW,
@@ -296,7 +297,46 @@ def ingest_batch(db: Session, intervals) -> dict:
     second hand-written copy of an idempotency boundary is how the two drift
     into disagreeing about what "accepted" means.
     """
-    return _ingest_batch(db, BrowserInterval, intervals, normalize)
+    result = _ingest_batch(db, BrowserInterval, intervals, normalize)
+    _maybe_alert_distractions(db, result.get("stored_ids") or [])
+    return result
+
+
+def _maybe_alert_distractions(db: Session, stored_ids: list) -> None:
+    """Distraction callout for freshly-stored intervals (see distraction_alert).
+
+    Runs over STORED rows only — a duplicate redelivery (already alerted or
+    deliberately not) and a rejected row must not fire. The session-liveness,
+    once-per-subject dedup AND the staleness gate all live in
+    `distraction_alert.maybe_alert`: each interval's own `ended_at` goes along
+    as `observed_at`, so a buffered batch flushed hours late — the ordinary
+    case for this sensor, which retains through outages — stays silent instead
+    of nudging about a tab closed at lunch. The subject is `host_label`'s short
+    form ("instagram"), the same label the phone's Shortcuts ping uses, so the
+    two sensors share one dedup slot per session and one callout covers both.
+    Best-effort: an alert failure must never break the ingest.
+    """
+    if not stored_ids:
+        return
+    try:
+        # `stored_ids` are CLIENT ids (the extension's idempotency keys), not
+        # row PKs — that's what `interval_ingest` reports back for the buffer.
+        rows = (
+            db.query(BrowserInterval.host, BrowserInterval.ended_at)
+            .filter(BrowserInterval.client_id.in_(stored_ids))
+            .all()
+        )
+        seen: set[str] = set()
+        for host, ended_at in rows:
+            if not distraction_alert.is_distraction_host(host):
+                continue
+            subject = device_activity.host_label(host)
+            if subject in seen:
+                continue
+            seen.add(subject)
+            distraction_alert.maybe_alert(db, subject=subject, observed_at=ended_at)
+    except Exception as e:  # pragma: no cover — defensive
+        print(f"[browser_activity_service] distraction alert failed: {e}")
 
 
 def list_intervals(db: Session, *, day=None, limit: int = 100) -> list[dict]:
