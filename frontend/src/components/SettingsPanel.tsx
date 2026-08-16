@@ -6,6 +6,7 @@ import {
   type AppSettings,
 } from "../services/api";
 import { Skeleton } from "./Skeleton";
+import { useDisplayLocationStore } from "../stores/useDisplayLocationStore";
 
 // Subset of IANA zones — covers the time zones a single-tenant Gooni user is
 // realistically in. Add more if needed; the backend validates against zoneinfo.
@@ -38,6 +39,19 @@ export function SettingsPanel() {
     queryFn: fetchSettings,
   });
   const [saving, setSaving] = useState(false);
+  const displayLocation = useDisplayLocationStore((s) => s.displayLocation);
+  const setDisplayLocation = useDisplayLocationStore((s) => s.setDisplayLocation);
+  // Placeholder shows what the header WILL fall back to, so an empty field
+  // reads as a choice rather than as something unset.
+  const tzAbbrevNow = (() => {
+    try {
+      return new Intl.DateTimeFormat("en-US", { timeZoneName: "short" })
+        .formatToParts(new Date())
+        .find((p) => p.type === "timeZoneName")?.value ?? "";
+    } catch {
+      return "";
+    }
+  })();
 
   async function patch(p: Partial<AppSettings>) {
     if (!settings) return;
@@ -120,6 +134,47 @@ export function SettingsPanel() {
           </div>
         </div>
       )}
+
+      {/* Not a server setting — see useDisplayLocationStore for why a caption
+          doesn't earn a column. It sits under Timezone because that is the
+          thing it corrects: the header used to print the timezone's
+          representative city as if it were where you are. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 18, marginBottom: 18 }}>
+        <span style={{
+          fontSize: 11, color: "var(--gooni-muted, #8E8E93)", fontWeight: 600,
+          textTransform: "uppercase", letterSpacing: 0.4,
+          width: 84, flexShrink: 0,
+        }}>Location</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <input
+            type="text"
+            value={displayLocation}
+            placeholder={tzAbbrevNow || "e.g. San Francisco"}
+            onChange={(e) => setDisplayLocation(e.target.value)}
+            style={{
+              padding: "5px 8px",
+              border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.12))",
+              borderRadius: 6,
+              fontSize: 13,
+              fontFamily: "inherit",
+              color: "var(--gooni-text, #1C1C1E)",
+              background: "var(--gooni-card, #FFF)",
+              width: "100%",
+              maxWidth: 240,
+              boxSizing: "border-box",
+            }}
+          />
+          <p style={{
+            margin: "6px 0 0", fontSize: 11,
+            color: "var(--gooni-muted, #A0A0A5)", lineHeight: 1.5,
+          }}>
+            The label under the header clock. Leave it empty to show the
+            timezone{tzAbbrevNow ? ` (${tzAbbrevNow})` : ""} instead — a zone id
+            names a representative city, not the one you're in, so Gooni won't
+            guess. Stored in this browser only.
+          </p>
+        </div>
+      </div>
 
       {settings && (
         <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
