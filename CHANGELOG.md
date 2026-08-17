@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.255.0 — 2026-08-17 (minor)
+
+- feat(ultrahuman): wire OAuth 2.0 flow + daily_metrics fetch (#530)
+
 ## 0.254.2 — 2026-08-17 (patch)
 
 - fix(focus): scrollable evidence galleries + resolve generic Electron app name (#529)
