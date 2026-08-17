@@ -30,7 +30,8 @@ know a session is running at all.)
 
   - the session windows: `TrackableEntry` rows of the `focus` trackable, whose
     `value_json` carries `{promise_id, title, started_at, ended_at, segments}`
-    (written by `frontend/src/services/focusTime.ts`);
+    (written by `focus_session_service._write_entries` when a session stops —
+    it was the client's write until 2026-08-16, and the shape is unchanged);
   - the attention: `browser_intervals` + `app_intervals`.
 
 **Precision comes from `segments`, and its absence is REPORTED.** An entry's
@@ -68,9 +69,10 @@ from .event_service import SOURCE as _SHORTCUTS_SOURCE
 from .interval_ingest import MAX_INTERVAL_SEC, parse_dt
 from .self_hosts import is_self_host
 
-# The one focus rollup's name. Must match `focusTime.ts::FOCUS_TRACKABLE` —
-# there is exactly one `focus` trackable and the client get-or-creates it by
-# this name, so a rename on either side has to be a rename on both.
+# The one focus rollup's name. Must match `focus_session_service.
+# FOCUS_TRACKABLE` (the writer) and `focusTime.ts::FOCUS_TRACKABLE` (the client
+# that still READS it for per-task totals) — there is exactly one `focus`
+# trackable, get-or-created by this name, so a rename is a rename in all three.
 FOCUS_TRACKABLE = "focus"
 
 # Most names reported per layer per Promise. A day of browsing touches dozens of
@@ -207,7 +209,7 @@ def parse_focus_entry(day: _date, value_numeric, raw_json) -> FocusEntry | None:
 def merge_entries(entries: list[FocusEntry]) -> list[FocusEntry]:
     """Fold every entry for one (promise, day) into ONE record.
 
-    Not a tidiness pass — `writeFocusSession` APPENDS (it must never `replace`,
+    Not a tidiness pass — the write path APPENDS (it must never `replace`,
     which would collapse the day), so four pomodoros on one task on one day are
     four entries. Left unmerged, that day would emit four rows carrying the same
     date, and each of them would report the whole day's attributed seconds,
@@ -479,8 +481,8 @@ def attribute(
 
     Days are `datetime.date`, inclusive, and are the ENTRY's own `date` column
     rather than a bound recomputed here. That column is the local day
-    `focusTime.ts::splitSegmentsByDay` filed the minutes under, and it is the
-    day the log matrix already shows them on — recomputing the day from
+    `focus_session_service.split_runs_by_day` filed the minutes under, and it is
+    the day the log matrix already shows them on — recomputing the day from
     `Settings.nudge_tz` would make this read disagree with the column it is
     describing whenever the two clocks differ. Day-binding still holds ("what
     happened on day D" has one answer however the reader arrived at it); it is

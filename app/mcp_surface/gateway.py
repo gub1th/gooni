@@ -63,6 +63,13 @@ class Gateway:
     def list_promises(self, *, day, state, limit) -> list[dict]: self._todo("list_promises")
     def set_promise_state(self, *, promise_id, state) -> dict | None: self._todo("set_promise_state")
 
+    # ── focus sessions ───────────────────────────────────────────────────────
+    def start_focus_session(self, *, title, promise_id, style, target_ms) -> dict:
+        self._todo("start_focus_session")
+
+    def stop_focus_session(self) -> dict | None: self._todo("stop_focus_session")
+    def active_focus_session(self) -> dict | None: self._todo("active_focus_session")
+
     # ── topics ───────────────────────────────────────────────────────────────
     def create_topic(self, *, name, parent) -> dict: self._todo("create_topic")
     def list_topics(self) -> list[dict]: self._todo("list_topics")
@@ -312,6 +319,44 @@ class DirectGateway(Gateway):
 
         with self._session() as db:
             return focus_service.set_reminder_state(db, promise_id, state)
+
+    # ── focus sessions ───────────────────────────────────────────────────────
+    # Camera control is NOT reconciled here: `focus_session_service` does it on
+    # every lifecycle transition, so a session started from Claude, from the
+    # home, or from `/focus` points the sidecar at the same thing. Doing it in
+    # the gateway too would be a second owner of one rule — and the HTTP side
+    # could not honour it without a second round trip anyway.
+    def start_focus_session(self, *, title, promise_id, style, target_ms) -> dict:
+        from ..services import focus_session_service
+
+        with self._session() as db:
+            s = focus_session_service.start(
+                db, title=title, promise_id=promise_id, style=style, target_ms=target_ms
+            )
+            return focus_session_service.serialize(db, s)
+
+    def stop_focus_session(self) -> dict | None:
+        from ..services import focus_session_service
+
+        with self._session() as db:
+            s = focus_session_service.active(db)
+            if s is None:
+                return None
+            stopped = focus_session_service.stop(db, s)
+            out = focus_session_service.serialize(db, stopped)
+            out["activity"] = focus_session_service.activity(db, stopped)
+            return out
+
+    def active_focus_session(self) -> dict | None:
+        from ..services import focus_session_service
+
+        with self._session() as db:
+            s = focus_session_service.active(db)
+            if s is None:
+                return None
+            out = focus_session_service.serialize(db, s)
+            out["activity"] = focus_session_service.activity(db, s)
+            return out
 
     # ── topics ───────────────────────────────────────────────────────────────
     def create_topic(self, *, name, parent) -> dict:
@@ -628,6 +673,36 @@ class HttpGateway(Gateway):
             return None
         r.raise_for_status()
         return r.json()
+
+    # ── focus sessions ───────────────────────────────────────────────────────
+    def start_focus_session(self, *, title, promise_id, style, target_ms) -> dict:
+        return self._post(
+            "/focus/sessions",
+            {
+                "title": title,
+                "promise_id": promise_id,
+                "style": style,
+                "target_ms": target_ms,
+            },
+        )
+
+    def stop_focus_session(self) -> dict | None:
+        # Two hops, because the stop verb needs an id and only the server knows
+        # which session is live. Read-then-write rather than a `/stop-active`
+        # convenience route: the id is what makes the write idempotent, and a
+        # session that ended between the two calls comes back already-stopped
+        # rather than stopping a different one.
+        active = self._get("/focus/sessions/active").get("session")
+        if not active:
+            return None
+        return self._post(f"/focus/sessions/{active['id']}/stop", {})
+
+    def active_focus_session(self) -> dict | None:
+        active = self._get("/focus/sessions/active").get("session")
+        if not active:
+            return None
+        active["activity"] = self._get(f"/focus/sessions/{active['id']}/activity")
+        return active
 
     # ── topics ───────────────────────────────────────────────────────────────
     def create_topic(self, *, name, parent) -> dict:

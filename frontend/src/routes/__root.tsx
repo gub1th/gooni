@@ -24,6 +24,7 @@ import { Sidebar } from "../components/notes/Sidebar";
 import { IconRail, RAIL_LANE } from "../components/ambient/IconRail";
 import { FooterIsland } from "../components/shell/FooterIsland";
 import { useFocusCamControl } from "../components/focus/useFocusCamControl";
+import { useFocusSessionSync } from "../components/focus/useFocusSessionSync";
 import { SurfacePanel } from "../components/shell/SurfacePanel";
 import { AppHeader, HEADER_H } from "../components/shell/AppHeader";
 import { SettingsModal } from "../components/settings/SettingsModal";
@@ -132,6 +133,10 @@ function AppShell() {
   // ONE owner of the focus-cam reconcile target, mounted here because AppShell
   // survives every route change — see the hook for why no view may own it.
   useFocusCamControl();
+  // …and ONE owner of "what does the server say is running", for the same
+  // reason: the session outlives every view of it, and it can now be started
+  // or stopped from somewhere this tab isn't.
+  useFocusSessionSync();
   const location = useLocation();
   const navigate = useNavigate();
   const routerState = useRouterState();

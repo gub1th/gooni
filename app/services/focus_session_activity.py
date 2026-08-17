@@ -54,9 +54,45 @@ not two that were written to match.
      becomes a lie.
   4. **Gooni's own tabs are the tool, not activity** — the same `self_hosts`
      exclusion `activity_context` and `proactive_service` apply.
-  5. **No score, no percentage of the session called productive, no verdict.**
-     Same line `focus_attribution`, `device_activity` and `activity_context`
-     all refuse to cross: this states what was observed and nothing more.
+  5. **No on-task VERDICT.** Nothing here decides whether a host was worth the
+     time — that needs a classifier, and every ranking surface in this codebase
+     is deterministic by rule. The breakdown is reported; the reading is the
+     human's (or the model's, from data it can see).
+
+**THE SCORE (2026-08-16).** Rule 5 used to read "no score, no percentage" full
+stop, and that was right while the only score available was `focused_ms /
+span_ms` — timer state wearing a percentage, which reported **91% for a session
+spent at a whiteboard** because the timer was running and the timer was all it
+could see. What changed is not the appetite for a number; it is that the sensors
+can now answer for the window. So the timer BOUNDS the window and never scores
+it, and every second inside a focus run is classified from the sensors alone:
+
+    focused     camera said `focused`, and no violation event was open
+    distracted  camera said `distracted`, or a phone/vape/distracted event was
+                open at that instant
+    away        camera said `away`
+    active      NO camera coverage, but a browser or app interval covered it
+    unobserved  no camera and no device coverage — nothing saw this second
+
+    scored       = focused + distracted + away + active
+    focus_score  = 100 * (focused + active) / scored     (None if scored is 0)
+    presence_pct = 100 * (focused + distracted) / camera_sec (None if no camera)
+
+Three choices, each the inverse of a way a score lies. **`unobserved` is out of
+the denominator and `focus_score` is None when nothing was observed** — a
+session run with the sidecar off and the extension uninstalled scores NOTHING,
+not zero and not ninety-one, which is rule 2 applied to a percentage;
+`score_basis` names which sensors contributed. **`active` counts toward focus,
+and that is safe because of what a device interval IS**: both sensors close
+their interval when the human goes idle (`chrome.idle`, `powerMonitor.
+getSystemIdleTime()`), so an abandoned tab accrues nothing and device coverage
+genuinely means someone was at the machine. **`presence_pct` is a CAMERA claim
+only** — folding device activity in would make a camera-less session report full
+presence, the whiteboard bug wearing a different name.
+
+The scoring keys are ADDITIVE and appear only when `runs` are supplied (a
+session's exact focus windows). `GET /focus/session-activity?since=&until=` is
+unchanged: no runs, no score, same payload it has always returned.
 """
 
 from __future__ import annotations
@@ -96,6 +132,27 @@ MAX_WINDOW = timedelta(hours=24)
 # payload bound rather than a taste one; the route's own cap is the same number.
 # Truncation takes the NEWEST and says how many it dropped.
 MAX_EVIDENCE = 60
+
+#: How long a camera event without its own `duration_sec` is taken to last.
+#: The sidecar reports most detections as instants; a phone pickup is not an
+#: instant, and treating it as one would let a session full of them still score
+#: as pure focus. Short on purpose — a floor on the disruption, not a guess at
+#: its real length.
+DEFAULT_EVENT_SEC = 30.0
+
+#: Cap on how long one reported event may claim, so a malformed `duration_sec`
+#: cannot blanket an entire session in `distracted`.
+MAX_EVENT_SEC = 15 * 60.0
+
+#: Timeline segments shorter than this fold into their neighbour. A hundred
+#: sub-second slivers is not a timeline anybody can read, and every second still
+#: counts in the totals — only the RENDERED bar is simplified.
+MIN_SEGMENT_SEC = 5.0
+
+#: The states a scored second can be in. `paused` is a timeline-only label (the
+#: gaps BETWEEN runs) and never enters the fold: a pause is not a second the
+#: sensors failed to watch, it is a second the session was not claiming.
+SCORE_STATES = ("focused", "distracted", "away", "active", "unobserved")
 
 # Most `value_json` rows parsed for one read, per kind of read. The camera and
 # the phone both write one row per event, so a chatty sidecar bounds the cost
@@ -213,13 +270,219 @@ def _clipped_spans(rows, since: datetime, until: datetime):
     return spans
 
 
+
+# ── the score: classifying the window from the sensors ───────────────────────
+
+
+def _spans_from_states(
+    history: list[dict], end: datetime, *, last_report: datetime | None = None
+) -> list[tuple[datetime, datetime, str]]:
+    """Camera transitions → the spans they imply. A state holds until the next.
+
+    **The FINAL span is bounded by when the sidecar last spoke**, not by the end
+    of the window. A sidecar that dies at 14:00 while the state reads `focused`
+    leaves no transition behind it, so an unbounded last span would credit the
+    rest of the session as focused on the strength of a camera that had stopped
+    looking — the single most flattering way this could be wrong. The blob's
+    `at` is the liveness signal `focus_cam_service` already leans on
+    ("freshness = liveness"), so the span stops there and the remainder falls
+    through to `active`/`unobserved`.
+
+    Known limitation: the blob is a singleton and latest-wins, so the bound is
+    exact for a live or just-ended session (the recap's case) and useless for a
+    session read back days later. There is no per-session record to do better
+    with, and a fixed "a state may not last longer than N minutes" cap would be
+    a guess that cuts genuine unbroken focus.
+    """
+    spans = []
+    for i, row in enumerate(history):
+        start = row["at"]
+        if i + 1 < len(history):
+            stop = history[i + 1]["at"]
+        else:
+            stop = end if last_report is None else min(end, max(last_report, start))
+        if stop > start:
+            spans.append((start, stop, row["state"]))
+    return spans
+
+
+def _event_spans(events: list[tuple]) -> list[tuple[datetime, datetime, str]]:
+    """Camera events → the stretch each one makes `distracted`.
+
+    Only the VIOLATION kinds. `stand` and `left_desk` are not lapses (the same
+    exclusion `VIOLATION_EVENT_KINDS` draws for the live counter), and `away` is
+    a camera STATE that already covers the leaving.
+    """
+    from .focus_cam_service import VIOLATION_EVENT_KINDS
+
+    out = []
+    for kind, at, doc in events:
+        if kind not in VIOLATION_EVENT_KINDS:
+            continue
+        try:
+            dur = float(doc.get("duration_sec") or DEFAULT_EVENT_SEC)
+        except (TypeError, ValueError):
+            dur = DEFAULT_EVENT_SEC
+        dur = max(1.0, min(dur, MAX_EVENT_SEC))
+        out.append((at, at + timedelta(seconds=dur), kind))
+    return out
+
+
+def classify(
+    runs: list[tuple[datetime, datetime]],
+    *,
+    camera_spans: list[tuple[datetime, datetime, str]],
+    violation_spans: list[tuple[datetime, datetime, str]],
+    device_spans: list[tuple[datetime, datetime]],
+) -> list[dict]:
+    """Every focus run, cut into atomic spans and labelled from the sensors.
+
+    Pure, so the scoring rule is testable without a database — the same reason
+    `device_activity.opens_from_intervals` and `focus_attribution.
+    attribute_intervals` are.
+
+    A boundary sweep rather than per-second sampling: the answer only changes
+    where some source starts or stops, so the number of atoms is bounded by the
+    number of sensor events, not by the length of the session.
+    """
+    out: list[dict] = []
+    for r0, r1 in runs:
+        if r1 <= r0:
+            continue
+        cuts = {r0, r1}
+        for spans in (camera_spans, violation_spans):
+            for s0, s1, _ in spans:
+                for t in (s0, s1):
+                    if r0 < t < r1:
+                        cuts.add(t)
+        for s0, s1 in device_spans:
+            for t in (s0, s1):
+                if r0 < t < r1:
+                    cuts.add(t)
+
+        ordered = sorted(cuts)
+        for a, b in zip(ordered, ordered[1:]):
+            if b <= a:
+                continue
+            mid = a + (b - a) / 2
+            cam = next((st for s0, s1, st in camera_spans if s0 <= mid < s1), None)
+            violated = any(s0 <= mid < s1 for s0, s1, _ in violation_spans)
+            covered = any(s0 <= mid < s1 for s0, s1 in device_spans)
+
+            if cam == "away":
+                # An `away` camera outranks a violation event: you cannot be on
+                # your phone at the desk and away from it at the same instant,
+                # and the stronger claim is the one the state machine made.
+                state = "away"
+            elif violated:
+                state = "distracted"
+            elif cam in ("focused", "distracted"):
+                state = cam
+            else:
+                # No camera coverage — including the sidecar's own `paused`
+                # state, which means it stopped looking and is not evidence
+                # about the human either way.
+                state = "active" if covered else "unobserved"
+            out.append({"start": a, "end": b, "state": state})
+    out.sort(key=lambda r: r["start"])
+    return out
+
+
+def merge_atoms(atoms: list[dict]) -> list[dict]:
+    """Adjacent same-state atoms become one segment; slivers fold into their
+    neighbour. Presentation ONLY — `fold_states` sums the ATOMS, so no second of
+    any state is lost to this simplification."""
+    merged: list[dict] = []
+    for a in atoms:
+        if merged and merged[-1]["state"] == a["state"] and merged[-1]["end"] == a["start"]:
+            merged[-1]["end"] = a["end"]
+            continue
+        merged.append(dict(a))
+
+    if len(merged) <= 1:
+        return merged
+    out: list[dict] = []
+    for seg in merged:
+        if out and (seg["end"] - seg["start"]).total_seconds() < MIN_SEGMENT_SEC:
+            out[-1]["end"] = seg["end"]
+            continue
+        out.append(seg)
+    # A second pass, because folding can leave two same-state neighbours.
+    collapsed: list[dict] = []
+    for seg in out:
+        if collapsed and collapsed[-1]["state"] == seg["state"]:
+            collapsed[-1]["end"] = seg["end"]
+            continue
+        collapsed.append(seg)
+    return collapsed
+
+
+def fold_states(atoms: list[dict]) -> dict[str, float]:
+    """Seconds per state, from the ATOMS — never from the merged segments."""
+    totals = {s: 0.0 for s in SCORE_STATES}
+    for a in atoms:
+        totals[a["state"]] = totals.get(a["state"], 0.0) + (a["end"] - a["start"]).total_seconds()
+    return totals
+
+
+def score(totals: dict[str, float]) -> dict:
+    """Seconds per state → the score, and an honest account of its basis.
+
+    `None` rather than `0` when nothing was observed: the whole reason this
+    layer exists is that a score which always has a number is a score nobody can
+    trust. `score_coverage` is deliberately its OWN key rather than reusing
+    `coverage` — that one is the device-interval union over the whole window
+    (the shipped meaning, shared with `focus_attribution`), while this one asks
+    how much of the SCORED time any sensor watched. Two different questions
+    under one name would be a silent contradiction.
+    """
+    focused = totals.get("focused", 0.0)
+    distracted = totals.get("distracted", 0.0)
+    away = totals.get("away", 0.0)
+    activ = totals.get("active", 0.0)
+    unobserved = totals.get("unobserved", 0.0)
+
+    camera_sec = focused + distracted + away
+    scored = camera_sec + activ
+    total = scored + unobserved
+
+    basis = []
+    if camera_sec > 0:
+        basis.append("camera")
+    if activ > 0:
+        basis.append("device")
+
+    return {
+        "focus_score": round(100 * (focused + activ) / scored) if scored > 0 else None,
+        "presence_pct": round(100 * (focused + distracted) / camera_sec) if camera_sec > 0 else None,
+        "score_coverage": round(scored / total, 3) if total > 0 else None,
+        "scored_seconds": round(scored, 1),
+        "unscored_seconds": round(unobserved, 1),
+        "score_basis": basis,
+        "seconds": {k: round(v, 1) for k, v in totals.items()},
+    }
+
+
 # ── the read ─────────────────────────────────────────────────────────────────
 
 
 def session_activity(
-    db: Session, *, since: datetime, until: datetime | None = None
+    db: Session,
+    *,
+    since: datetime,
+    until: datetime | None = None,
+    runs: list[tuple[datetime, datetime]] | None = None,
+    session_id: int | None = None,
 ) -> dict:
     """Every sensor's answer for `[since, until)`, in naive UTC.
+
+    `runs` are the session's EXACT focus windows (`focus_session_service.
+    sealed_runs`). Supplying them adds the score block and the timeline; the
+    sensor rollups above are unchanged either way, because `[since, until)` is
+    still the right question for "what did the sensors see while this session
+    was open" — the runs answer the narrower "what was I doing while the clock
+    was actually running". Omitting them is the pre-existing behaviour
+    `GET /focus/session-activity` relies on, byte for byte.
 
     Shape::
 
@@ -253,6 +516,21 @@ def session_activity(
             "observed_seconds": 0.0,
             "coverage": None,
             "warnings": ["empty range"],
+            **(
+                {
+                    "session_id": session_id,
+                    "timeline_segments": [],
+                    "focus_score": None,
+                    "presence_pct": None,
+                    "score_coverage": None,
+                    "scored_seconds": 0.0,
+                    "unscored_seconds": 0.0,
+                    "score_basis": [],
+                    "seconds": {k: 0.0 for k in SCORE_STATES},
+                }
+                if runs is not None
+                else {}
+            ),
         }
 
     if until - since > MAX_WINDOW:
@@ -366,7 +644,7 @@ def session_activity(
             }
         )
 
-    return {
+    out = {
         "since": since.isoformat(),
         "until": until.isoformat(),
         "window_seconds": round(window_sec, 1),
@@ -379,3 +657,72 @@ def session_activity(
         "coverage": round(min(1.0, observed / window_sec), 3) if window_sec > 0 else None,
         "warnings": warnings,
     }
+    if runs is None:
+        return out
+
+    # ── the score, over the session's ACTUAL runs ────────────────────────────
+    # Clipped to the answered window, so the clamp above cannot be sidestepped
+    # by a run list that reaches further back than the read does.
+    clipped = [(max(r0, since), min(r1, until)) for r0, r1 in runs]
+    clipped = [(a, b) for a, b in clipped if b > a]
+
+    from . import focus_cam_service
+
+    history = focus_cam_service.state_history(db, start=since, end=until)
+    camera_spans = _spans_from_states(
+        history, until, last_report=focus_cam_service.last_report_at(db)
+    )
+    violation_spans = _event_spans(
+        [
+            (name[len("focus ") :] if name.startswith("focus ") else name, at, doc)
+            for _eid, name, at, doc in cam_rows
+            if since <= at < until
+        ]
+    )
+    # The SAME spans `coverage` is built from — already clipped, already free of
+    # Gooni's own hosts (rule 4). Reusing them rather than re-collecting is what
+    # keeps "what counts as observed device activity" a single answer: two folds
+    # differing on self-hosts would put a stretch spent in Gooni's own UI on
+    # opposite sides of `active`/`unobserved` depending on which number you read.
+    device_spans = all_spans
+
+    atoms = classify(
+        clipped,
+        camera_spans=camera_spans,
+        violation_spans=violation_spans,
+        device_spans=device_spans,
+    )
+    segments = merge_atoms(atoms)
+    timeline = [
+        {
+            "start": seg["start"].isoformat(),
+            "end": seg["end"].isoformat(),
+            "state": seg["state"],
+            "seconds": round((seg["end"] - seg["start"]).total_seconds(), 1),
+        }
+        for seg in segments
+    ]
+    # The gaps BETWEEN runs are pauses — real elapsed time the session was not
+    # claiming, so they are drawn but never folded into the score.
+    for (_a0, a1), (b0, _b1) in zip(clipped, clipped[1:]):
+        if b0 > a1:
+            timeline.append(
+                {
+                    "start": a1.isoformat(),
+                    "end": b0.isoformat(),
+                    "state": "paused",
+                    "seconds": round((b0 - a1).total_seconds(), 1),
+                }
+            )
+    timeline.sort(key=lambda seg: seg["start"])
+
+    if not camera_spans:
+        warnings.append(
+            "no camera data for this window — the score rests on device activity alone"
+        )
+
+    out["session_id"] = session_id
+    out["focused_seconds"] = round(sum((b - a).total_seconds() for a, b in clipped), 1)
+    out["timeline_segments"] = timeline
+    out.update(score(fold_states(atoms)))
+    return out

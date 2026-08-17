@@ -23,7 +23,7 @@ timestamp parser); calendar days resolve via local_now/local_today.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -44,6 +44,9 @@ VIOLATION_EVENT_KINDS = ("distracted", "phone", "vape")
 SESSION_TRACKABLE = "focus_session"
 SCORE_TRACKABLE = "focus_score"
 EVIDENCE_TRACKABLE = "focus_evidence"
+# One entry per camera state CHANGE — the history the blob deliberately doesn't
+# keep. See `log_state_change`.
+STATE_TRACKABLE = "focus_state"
 
 _DEFAULT_BLOB = {
     "control": "idle",
@@ -103,8 +106,17 @@ def merge_state(
     camera: str | None = None,
 ) -> dict:
     """Merge one live-state report into the blob (control is left untouched —
-    the sidecar reports state, the UI owns control)."""
+    the sidecar reports state, the UI owns control).
+
+    Also APPENDS to the state history when the state actually changed — see
+    `log_state_change`. The sidecar's contract is untouched: same body, same
+    response, same cadence. What changed is that the blob is no longer the only
+    thing that remembers, because a latest-wins blob cannot answer "what was the
+    camera seeing between 14:05 and 14:30", which is the whole basis of a
+    session's focus score.
+    """
     blob = get_blob(db)
+    previous = blob.get("state")
     if state is not None:
         blob["state"] = state if state in VALID_STATES else blob.get("state")
     blob["score"] = float(score) if score is not None else score
@@ -113,7 +125,69 @@ def merge_state(
         blob["camera"] = camera
     blob["session_id"] = session_id
     blob["at"] = at
-    return _write_blob(db, blob)
+    written = _write_blob(db, blob)
+
+    if blob.get("state") != previous and blob.get("state") in VALID_STATES:
+        log_state_change(
+            db,
+            session_id=session_id,
+            state=blob["state"],
+            at=at,
+            score=score,
+            app=app,
+        )
+    return written
+
+
+def log_state_change(
+    db: Session,
+    *,
+    session_id: str | None,
+    state: str,
+    at: str | None,
+    score: float | None = None,
+    app: str | None = None,
+) -> None:
+    """Append one camera state CHANGE to the history.
+
+    A json Trackable entry rather than a table, for the same reason every other
+    focus-cam artifact is one: storage maps onto existing primitives, the row is
+    walled off behind `source="focus_cam"`, and `value_json` grows without a
+    migration. One entry per CHANGE, never per keepalive — the sidecar posts a
+    ~30s heartbeat and storing those would be ~3k rows a day to answer a
+    question a dozen transitions already answer.
+
+    Best-effort by contract: the state POST must keep succeeding whether or not
+    the history write does. Losing a transition costs precision in one session's
+    score; failing the POST costs the sidecar's live state entirely.
+    """
+    try:
+        now_local = local_now(db)
+        when = _parse_at(at, now_local)
+        day = when.astimezone(now_local.tzinfo).date()
+        t = trackable_service.create(
+            db,
+            name=STATE_TRACKABLE,
+            kind="json",
+            agg="last",
+            source=SOURCE,
+            schema_hint={"description": "focus-cam state transitions (webcam sidecar)"},
+        )
+        trackable_service.log_entry(
+            db,
+            t,
+            day=day,
+            value_json={
+                "state": state,
+                "at": when.isoformat(),
+                "session_id": session_id,
+                "score": score,
+                "app": app,
+            },
+            source=SOURCE,
+        )
+    except Exception as e:  # noqa: BLE001 — see docstring
+        print(f"[focus_cam] state-history write failed: {e}")
 
 
 def set_control(db: Session, control: str, target_reminder_id: int | None = None) -> dict:
@@ -304,6 +378,154 @@ def log_session(db: Session, body: dict) -> dict:
         )
 
     return {"ok": True, "entry_id": entry.id if entry else None}
+
+
+#: How far BEFORE a window to look for the transition that set the state at its
+#: left edge. A camera state persists until the next change, so the row that
+#: describes 14:05 may have been written at 13:40 — or at 09:00 on a quiet
+#: morning. Bounded, because an unbounded look-back would scan the whole table
+#: to answer a question about half an hour; a window whose opening state cannot
+#: be found reads as UNOBSERVED, which is the honest answer rather than a
+#: guessed one.
+STATE_LOOKBACK_DAYS = 2
+
+
+def state_history(db: Session, *, start: datetime, end: datetime) -> list[dict]:
+    """Camera state transitions in `[start, end)`, plus the one in effect AT
+    `start`, as `[{at, state}]` in naive UTC, oldest first.
+
+    The prior transition is included (stamped at `start`) because a state is a
+    span, not a point: without it a session that began mid-`focused` would read
+    as unobserved until the camera happened to change its mind.
+    """
+    t = trackable_service.get_by_name(db, STATE_TRACKABLE)
+    if t is None:
+        return []
+    tz = local_now(db).tzinfo
+    start_day = (start.replace(tzinfo=timezone.utc).astimezone(tz).date()) - timedelta(
+        days=STATE_LOOKBACK_DAYS
+    )
+    end_day = end.replace(tzinfo=timezone.utc).astimezone(tz).date()
+
+    rows = trackable_service.entries_for(db, t, start=start_day, end=end_day)
+    parsed: list[tuple[datetime, str]] = []
+    for e in rows:
+        payload = trackable_service.serialize_entry(e)["value_json"]
+        if not isinstance(payload, dict):
+            continue
+        state = payload.get("state")
+        if state not in VALID_STATES:
+            continue
+        when = _to_naive_utc(payload.get("at"))
+        if when is None:
+            continue
+        parsed.append((when, state))
+    parsed.sort(key=lambda p: p[0])
+
+    out: list[dict] = []
+    opening: str | None = None
+    for when, state in parsed:
+        if when < start:
+            opening = state
+            continue
+        if when >= end:
+            break
+        out.append({"at": when, "state": state})
+    if opening is not None:
+        out.insert(0, {"at": start, "state": opening})
+    return out
+
+
+def last_report_at(db: Session) -> datetime | None:
+    """When the sidecar last said ANYTHING, as naive UTC — the blob's `at`.
+
+    The liveness signal this module already leans on ("freshness = liveness"),
+    read here so a session's score can stop crediting a camera that stopped
+    looking. None when nothing has ever reported, which callers must treat as
+    "no bound available" rather than as "reported at the epoch".
+    """
+    return _to_naive_utc(get_blob(db).get("at"))
+
+
+def _to_naive_utc(raw) -> datetime | None:
+    """One stored `value_json.at` → the naive-UTC storage convention.
+
+    Delegates to `interval_ingest.parse_dt`, THE parser for "a client wrote a
+    timestamp and we store naive UTC" — a second implementation here is exactly
+    how two readers of the same column start disagreeing about an hour.
+    """
+    from .interval_ingest import parse_dt
+
+    return parse_dt(raw)
+
+
+def events_in_range(db: Session, *, start: datetime, end: datetime) -> list[dict]:
+    """Discrete camera events (`focus {kind}`) whose clock time falls in
+    `[start, end)`, oldest first.
+
+    Day-bounded prefilter on the entry's indexed `date` column, exact
+    containment after parsing — the same two-step `focus_attribution.
+    _shortcuts_events` uses, and for the same reason (the clock time lives in
+    unindexed `value_json`).
+    """
+    tz = local_now(db).tzinfo
+    start_day = start.replace(tzinfo=timezone.utc).astimezone(tz).date() - timedelta(days=1)
+    end_day = end.replace(tzinfo=timezone.utc).astimezone(tz).date() + timedelta(days=1)
+
+    out: list[dict] = []
+    for kind in VALID_EVENT_KINDS:
+        t = trackable_service.get_by_name(db, f"focus {kind}")
+        if t is None:
+            continue
+        for e in trackable_service.entries_for(db, t, start=start_day, end=end_day):
+            payload = trackable_service.serialize_entry(e)["value_json"]
+            if not isinstance(payload, dict):
+                continue
+            when = _to_naive_utc(payload.get("at"))
+            if when is None or when < start or when >= end:
+                continue
+            out.append(
+                {
+                    "kind": kind,
+                    "at": when,
+                    "duration_sec": payload.get("duration_sec"),
+                    "activity": payload.get("activity"),
+                    "session_id": payload.get("session_id"),
+                }
+            )
+    out.sort(key=lambda r: r["at"])
+    return out
+
+
+def evidence_in_range(db: Session, *, start: datetime, end: datetime, limit: int = 60) -> list[dict]:
+    """Evidence frames whose clock time falls in `[start, end)`, newest first."""
+    t = trackable_service.get_by_name(db, EVIDENCE_TRACKABLE)
+    if t is None:
+        return []
+    tz = local_now(db).tzinfo
+    start_day = start.replace(tzinfo=timezone.utc).astimezone(tz).date() - timedelta(days=1)
+    end_day = end.replace(tzinfo=timezone.utc).astimezone(tz).date() + timedelta(days=1)
+
+    out: list[dict] = []
+    for e in trackable_service.entries_for(db, t, start=start_day, end=end_day):
+        payload = trackable_service.serialize_entry(e)["value_json"]
+        if not isinstance(payload, dict):
+            continue
+        when = _to_naive_utc(payload.get("at"))
+        if when is None or when < start or when >= end:
+            continue
+        jpeg_b64 = payload.get("jpeg_b64")
+        out.append(
+            {
+                "id": e.id,
+                "kind": payload.get("kind"),
+                "at": when.replace(tzinfo=timezone.utc).isoformat(),
+                "activity": payload.get("activity"),
+                "frame": f"data:image/jpeg;base64,{jpeg_b64}" if jpeg_b64 else None,
+            }
+        )
+    out.sort(key=lambda r: r["at"], reverse=True)
+    return out[:limit]
 
 
 def today_summary(db: Session) -> dict:
