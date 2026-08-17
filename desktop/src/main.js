@@ -214,7 +214,7 @@ function createAppSensor() {
   appSensor = new AppSensor({
     tracker: new AppFocusTracker({}),
     reporter,
-    queryFrontmost: () => queryFrontmost({ execFileImpl: execFile }),
+    queryFrontmost: () => queryFrontmost({ execFileImpl: execFile, readFileImpl: fs.readFileSync }),
     // Seconds since the last keyboard/mouse input, machine-wide. This is the
     // whole reason a frontmost-app poll doesn't credit lunch to whatever was on
     // screen — see AppSensor's header.

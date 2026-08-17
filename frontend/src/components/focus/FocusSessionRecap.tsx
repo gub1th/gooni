@@ -421,8 +421,12 @@ export function FocusSessionRecap({ recap, onClose }: Props) {
             </Panel>
           )}
 
-          {/* detection events */}
-          <Panel pal={pal} title="DETECTION EVENTS">
+          {/* detection events — the title carries the total so a scrolled or
+              bucketed list is never read as the whole story */}
+          <Panel
+            pal={pal}
+            title={totalEvents > 0 ? `DETECTION EVENTS · ${totalEvents}` : "DETECTION EVENTS"}
+          >
             {totalEvents === 0 ? (
               // "nothing flagged" is a claim about the CAMERA, and an unreachable
               // server is not evidence for it — so a failed read says so instead.
@@ -430,14 +434,23 @@ export function FocusSessionRecap({ recap, onClose }: Props) {
                 {recap.observedSeconds == null ? "couldn't read the sensors" : "nothing flagged"}
               </div>
             ) : (
-              <RecapBarChart rows={eventBars} pal={pal} color={scoreColor(tier, pal)} />
+              // ~5 rows visible; more scrolls rather than stretching the panel.
+              <div style={{ maxHeight: 150, overflowY: "auto" }}>
+                <RecapBarChart rows={eventBars} pal={pal} color={scoreColor(tier, pal)} />
+              </div>
             )}
           </Panel>
 
-          {/* evidence gallery */}
+          {/* evidence gallery — every kept frame, scrolling past ~2 thumbnail
+              rows; the count in the title says how many there are to scroll */}
           {recap.evidence.length > 0 && (
-            <Panel pal={pal} title="EVIDENCE" span={2}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))", gap: 10 }}>
+            <Panel pal={pal} title={`EVIDENCE · ${recap.evidence.length}`} span={2}>
+              <div
+                style={{
+                  display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))", gap: 10,
+                  maxHeight: 210, overflowY: "auto",
+                }}
+              >
                 {recap.evidence.map((it) =>
                   it.frame ? (
                     <button

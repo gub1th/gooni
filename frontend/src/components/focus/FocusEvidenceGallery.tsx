@@ -45,8 +45,8 @@ export function FocusEvidenceGallery({ items }: Props) {
         fontFamily: FONT,
       }}
     >
-      <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", color: pal.ink3 }}>
-        EVIDENCE
+      <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", color: pal.ink3, flexShrink: 0 }}>
+        EVIDENCE{items.length > 1 ? ` · ${items.length}` : ""}
       </div>
       {items.map((it) => (
         <button
@@ -54,6 +54,10 @@ export function FocusEvidenceGallery({ items }: Props) {
           onClick={() => setEnlarged(it)}
           style={{
             all: "unset", cursor: "pointer", position: "relative",
+            // flexShrink 0: a flex column with overflow-y auto otherwise
+            // COMPRESSES every thumbnail to fit rather than scrolling — a busy
+            // session turned the strip into unreadable slivers.
+            flexShrink: 0,
             borderRadius: 10, overflow: "hidden", border: `1px solid ${pal.rule}`,
             transition: "transform 150ms ease, box-shadow 150ms ease",
           }}

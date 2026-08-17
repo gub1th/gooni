@@ -38,8 +38,62 @@
 const FRONTMOST_SCRIPT =
   'tell application "System Events" to get name of first application process whose frontmost is true';
 
+/**
+ * Where the frontmost process's binary lives. Only asked when the NAME came
+ * back generic (see `GENERIC_APP_NAMES`) — an unpacked Electron app reports its
+ * process name as literally "Electron", which files Cursor-in-dev, our own
+ * `npm start` shell and every other dev-mode Electron app under one label.
+ * The bundle path is the thing that still tells them apart.
+ */
+const FRONTMOST_PATH_SCRIPT =
+  'tell application "System Events" to get POSIX path of application file of first application process whose frontmost is true';
+
+/**
+ * Process names that name a RUNTIME rather than an app. Lowercased for the
+ * comparison; the recorded row keeps whatever resolution finds.
+ */
+const GENERIC_APP_NAMES = new Set(["electron", "electron helper"]);
+
 /** Longest we wait on one query. See `queryFrontmost`. */
 const QUERY_TIMEOUT_MS = 3000;
+
+/**
+ * Turn a generic runtime name + the bundle's POSIX path into the app's real
+ * name. Pure — the package.json read is injected — so the mapping is testable
+ * without macOS.
+ *
+ *   - dev Electron (`…/myapp/node_modules/electron/dist/Electron.app/…`):
+ *     the project root's package.json `productName`/`name` is the app;
+ *     failing that, the project directory's own name.
+ *   - anything else: the `.app` bundle's basename, unless that too is generic
+ *     (a bare Electron.app run from nowhere), in which case the honest answer
+ *     is the generic name we already had.
+ */
+function resolveGenericApp({ name, appPath, readTextFile } = {}) {
+  const fallback = name || null;
+  const p = String(appPath || "");
+  if (!p) return fallback;
+
+  const dev = p.match(/^(.*?)\/node_modules\/electron\//);
+  if (dev) {
+    const root = dev[1];
+    if (readTextFile) {
+      try {
+        const pkg = JSON.parse(readTextFile(`${root}/package.json`));
+        const pkgName = pkg && (pkg.productName || pkg.name);
+        if (typeof pkgName === "string" && pkgName.trim()) return pkgName.trim();
+      } catch {
+        // unreadable/absent package.json — fall through to the dir name
+      }
+    }
+    const dir = root.split("/").filter(Boolean).pop();
+    return dir || fallback;
+  }
+
+  const bundle = p.match(/([^/]+)\.app(?:\/|$)/);
+  if (bundle && !GENERIC_APP_NAMES.has(bundle[1].toLowerCase())) return bundle[1];
+  return fallback;
+}
 
 /**
  * True when the error text is macOS refusing us the Accessibility grant rather
@@ -83,7 +137,7 @@ function parseFrontmost(stdout) {
  * any other) would stall every later tick and produce a dead sensor with
  * nothing erroring.
  */
-function queryFrontmost({ execFileImpl, timeoutMs = QUERY_TIMEOUT_MS } = {}) {
+function runScript(script, { execFileImpl, timeoutMs }) {
   return new Promise((resolve) => {
     let settled = false;
     const done = (value) => {
@@ -91,32 +145,61 @@ function queryFrontmost({ execFileImpl, timeoutMs = QUERY_TIMEOUT_MS } = {}) {
       settled = true;
       resolve(value);
     };
-    const timer = setTimeout(
-      () => done({ app: null, error: "timeout", permission: false }),
-      timeoutMs
-    );
+    const timer = setTimeout(() => done({ error: "timeout", permission: false }), timeoutMs);
     try {
-      execFileImpl("osascript", ["-e", FRONTMOST_SCRIPT], { timeout: timeoutMs }, (err, stdout, stderr) => {
+      execFileImpl("osascript", ["-e", script], { timeout: timeoutMs }, (err, stdout, stderr) => {
         clearTimeout(timer);
         if (err) {
           const text = String(stderr || err.message || "");
-          done({ app: null, error: text.trim() || "osascript failed", permission: isPermissionError(text) });
+          done({ error: text.trim() || "osascript failed", permission: isPermissionError(text) });
           return;
         }
-        const app = parseFrontmost(stdout);
-        done(app ? { app } : { app: null, error: "no frontmost app", permission: false });
+        done({ stdout });
       });
     } catch (e) {
       clearTimeout(timer);
-      done({ app: null, error: e.message, permission: false });
+      done({ error: e.message, permission: false });
     }
   });
 }
 
+async function queryFrontmost({ execFileImpl, readFileImpl, timeoutMs = QUERY_TIMEOUT_MS } = {}) {
+  const opts = { execFileImpl, timeoutMs };
+  const res = await runScript(FRONTMOST_SCRIPT, opts);
+  if (res.error !== undefined) {
+    return { app: null, error: res.error, permission: !!res.permission };
+  }
+  const app = parseFrontmost(res.stdout);
+  if (!app) return { app: null, error: "no frontmost app", permission: false };
+
+  // A generic runtime name is worth one more (bounded) question. Best-effort:
+  // any failure keeps the generic name — a late or wrong second answer must
+  // never turn a healthy poll into an error, and by then a different app may
+  // be frontmost anyway.
+  if (GENERIC_APP_NAMES.has(app.toLowerCase())) {
+    const pathRes = await runScript(FRONTMOST_PATH_SCRIPT, opts);
+    if (pathRes.error === undefined) {
+      const readTextFile = readFileImpl
+        ? (p) => readFileImpl(p, "utf8")
+        : undefined;
+      const resolved = resolveGenericApp({
+        name: app,
+        appPath: String(pathRes.stdout || "").trim(),
+        readTextFile,
+      });
+      if (resolved) return { app: resolved };
+    }
+  }
+  return { app };
+}
+
 module.exports = {
   FRONTMOST_SCRIPT,
+  FRONTMOST_PATH_SCRIPT,
+  GENERIC_APP_NAMES,
   QUERY_TIMEOUT_MS,
   isPermissionError,
   parseFrontmost,
+  resolveGenericApp,
   queryFrontmost,
 };
