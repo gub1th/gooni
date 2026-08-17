@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.254.2 — 2026-08-17 (patch)
+
+- fix(focus): scrollable evidence galleries + resolve generic Electron app name (#529)
+
 ## 0.254.1 — 2026-08-17 (patch)
 
 - fix(deps): add missing greenlet to lockfile — recompile on linux/amd64 (#528)
