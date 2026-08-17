@@ -645,6 +645,90 @@ def set_promise_state(promise_id: int, state: str) -> dict:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# Focus sessions
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# The session lives server-side now (`FocusSession` + `focus_session_service`),
+# which is what makes these tools possible at all — while it was a browser
+# store, "start a focus session" was a thing only one open tab could do.
+
+
+def start_focus_session(
+    title: str,
+    promise_id: int | None = None,
+    style: str = "stopwatch",
+    target_minutes: int | None = None,
+) -> dict:
+    """Start a FOCUS SESSION — a named, timed block of work. Reach here when
+    Daniel says he's starting on something ("starting on the system design
+    prep", "let's do a 25 minute pomodoro on the deck") and wants it timed and
+    watched, NOT for recording that something happened (that's `log_note`) or
+    that something still has to (that's `set_promise`).
+
+    Starting a session does three things at once: it opens the timer, it points
+    the webcam sidecar at this block (camera control → running), and it makes
+    every browser/app interval recorded inside the window attributable to this
+    task BY CONSTRUCTION — no classifier, which is exactly why the session has
+    to be NAMED. Whatever is running already is stopped first, and its minutes
+    are written before this one starts.
+
+    Args:
+        title: what the session is FOR, in Daniel's words. Required.
+        promise_id: the commitment this block is against (from
+            `list_promises`). Optional but worth passing — it is what binds the
+            observed attention to a commitment rather than to a loose label.
+        style: "stopwatch" (default, counts up) or "timer" (counts down from
+            `target_minutes`).
+        target_minutes: the countdown target when style is "timer" (e.g. 25).
+
+    Returns {id, title, state, started_at, focused_minutes, ...}. Close it with
+    `stop_focus_session` — a session left running is capped at 6h and its
+    minutes are then reported as a floor.
+    """
+    if not (title or "").strip():
+        raise ValueError("title required")
+    style = (style or "stopwatch").strip().lower()
+    if style not in ("stopwatch", "timer"):
+        raise ValueError(f"style must be stopwatch|timer, got {style!r}")
+    target_ms = int(target_minutes) * 60_000 if target_minutes else None
+    return _gw().start_focus_session(
+        title=title.strip(),
+        promise_id=int(promise_id) if promise_id else None,
+        style=style,
+        target_ms=target_ms,
+    )
+
+
+def stop_focus_session() -> dict:
+    """End the running focus session and return what it actually looked like.
+
+    Writes the session's minutes (one entry per calendar day it spanned),
+    releases the webcam sidecar (camera control → idle), and returns the
+    summary, including `activity` — the sensor breakdown for the window:
+
+      · `focus_score` — share of OBSERVED session time that was focus. **`null`
+        when nothing observed it**, which is the honest answer for a session run
+        with the camera off and no browser activity; do NOT report a null score
+        as zero or invent one. `score_basis` names which sensors it rests on.
+      · `presence_pct` — camera-only: how much of the watched time Daniel was
+        actually at the desk.
+      · `browser` / `app` / `device` — where the attention went, ranked. These
+        are REPORTED, not judged: nothing here decides whether a host was
+        on-task, and neither should a summary that says "you were distracted"
+        without Daniel having said what on-task meant.
+      · `camera_events` / `camera_evidence` — phone/vape/distracted detections
+        and the frames kept for them.
+
+    Returns the stopped session, or `{"stopped": false}` when nothing was
+    running — which is a fact to report, not an error to apologise for.
+    """
+    result = _gw().stop_focus_session()
+    if result is None:
+        return {"stopped": False, "reason": "no focus session was running"}
+    return {"stopped": True, **result}
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Topics
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -931,6 +1015,9 @@ ALL_TOOLS: dict[str, Callable[..., Any]] = {
     "set_promise": set_promise,
     "list_promises": list_promises,
     "set_promise_state": set_promise_state,
+    # focus sessions
+    "start_focus_session": start_focus_session,
+    "stop_focus_session": stop_focus_session,
     # topics
     "list_topics": list_topics,
     "create_topic": create_topic,

@@ -303,7 +303,11 @@ export function AmbientHome({
     return mergeTodayRows(
       serverRows,
       retained.current,
-      live ? { promiseId: live.promiseId, title: live.title, kept: live.kept } : null,
+      // A session with NO promise (one Claude started from a bare title) has
+      // no TODAY row to retain — there is nothing on this list it belongs to.
+      live && live.promiseId != null
+        ? { promiseId: live.promiseId, title: live.title, kept: live.kept }
+        : null,
     );
   }, []);
 
@@ -357,12 +361,14 @@ export function AmbientHome({
   // `splitSegmentsByDay` (so `focused today` never moves and no entry is ever
   // written for them) and a paused session accrues nothing at all.
   const sessionRow: SessionRow | null = useMemo(() => {
-    if (!session) return null;
+    // A promise-less session is real and running; it just has no row here to
+    // put a clock on. `/focus` is where it shows.
+    if (!session || session.promiseId == null) return null;
     // Two states now, not three — break is gone. Still ONE derivation
     // (`isAccruingFocus`) rather than a per-state test at this call site.
     const elapsed = elapsedMs(session, "focus", nowTick);
     return {
-      promiseId: session.promiseId,
+      promiseId: session.promiseId as number,
       state: isAccruingFocus(session) ? "focus" : "paused",
       // mirrors the session bar exactly: a timer counts DOWN, so the row must
       // not sit next to it counting up and disagreeing about the same session

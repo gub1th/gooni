@@ -58,6 +58,13 @@ POST /focus/cam/state
 Send on state-change **and** a ~30s keepalive (keeps Settings churn low). Merges
 into the blob; leaves `control` untouched.
 
+**Server-side, a state CHANGE is also appended to a history** (one `focus_state`
+json Trackable entry per transition — never per keepalive), which is what lets a
+focus session be scored over its own window rather than from the latest-wins
+blob. Nothing about this request changes: same body, same response, same
+cadence. Keep sending the keepalive — it is still what proves the sidecar is
+alive; it just doesn't write a row unless the state actually moved.
+
 ## Preview frame (liveness)
 
 ```

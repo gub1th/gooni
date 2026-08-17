@@ -3,7 +3,8 @@ import {
   apiFetch,
   createTrackable,
   fetchTrackableEntries,
-  logTrackable,
+  stopFocusSession as stopFocusSessionApi,
+  type ServerFocusSession,
   type Trackable,
   type TrackableEntryRow,
 } from "./api";
@@ -18,23 +19,23 @@ import { useFocusSessionStore, type FocusSegment } from "../stores/useFocusSessi
 // multiple rows per (trackable, date) are legal and the pivot folds them per
 // `agg`. `agg=sum` makes the day fold to focused-minutes for free.
 //
-// Three traps, all cheap here and expensive later:
-//   1. NEVER pass `replace` — it collapses the day to the last session, the
-//      same way it collapses a boolean label write.
-//   2. A session spanning midnight writes TWO entries, one per calendar date,
-//      or the daily fold lies about both days.
-//   3. `value_json` is unindexed Text and the only index is (trackable_id,
-//      date), so per-task totals are a read of this one trackable's entries
-//      grouped in code. That is fine at this volume — do not add an index or a
-//      column to avoid it.
+// **THE WRITE MOVED TO THE SERVER (2026-08-16).** `focus_session_service.stop`
+// produces those entries now, in exactly this shape, because there is more than
+// one thing that can end a session: a click here, a click on `/focus`, Claude
+// over MCP, and the server's own 6h cap firing on a tab that was closed hours
+// ago. Two writers of one artifact is how a UI stop and an MCP stop start
+// disagreeing, so the client's copy is gone rather than kept as a fallback —
+// along with the per-day retry ledger it needed, which the server's single
+// transaction makes unnecessary.
 //
-// The entry is also the SESSION WINDOW OF RECORD. `app/services/
-// focus_attribution.py` overlaps browser/app intervals against `value_json.
-// segments` to bind observed attention to the Promise — the timer is the whole
-// attribution mechanism, so these windows are the only thing standing between
-// "you were on it" and a guess. Two consequences: the segments must be the
-// EXACT focus runs (the envelope spans pauses — see FocusEntryDraft.segments),
-// and the write is the only place they are ever produced.
+// What stays here is the READ side and the pure day-fold, which the live UI
+// still needs to answer "how much of this session has landed on TODAY" without
+// asking the server every second. The three traps that shaped the write are
+// documented on the server now (`focus_session_service._write_entries`); the
+// one that still binds this file is trap 3: `value_json` is unindexed Text and
+// the only index is (trackable_id, date), so per-task totals are a read of this
+// one trackable's entries grouped in code. That is fine at this volume — do not
+// add an index or a column to avoid it.
 
 export const FOCUS_TRACKABLE = "focus";
 
@@ -206,116 +207,52 @@ export async function ensureFocusTrackable(): Promise<Trackable> {
   return cached;
 }
 
-export interface FocusWriteOptions {
-  /**
-   * Local day keys already written for THIS session. A partial success followed
-   * by a retry must not add the day that landed a second time — and `replace`
-   * cannot be the answer, since it would collapse the (trackable, day) and
-   * destroy every other session logged that day (trap 1).
-   */
-  writtenDates?: readonly string[];
-  /** Called as each day lands, so the caller can persist the record. */
-  onWritten?: (date: string) => void;
-  /**
-   * The "victory selfie" — a camera frame grabbed at the moment the session
-   * ended. Rides on the LAST day's entry only (the day the stop actually
-   * happened on), never duplicated across days, so it can't be mistaken for a
-   * frame from an earlier day of a multi-day session.
-   */
-  completionFrame?: string | null;
-}
-
-/**
- * Write a finished session. One entry per calendar day, each carrying the
- * promise id. Returns the drafts actually written (skipped days excluded).
- *
- * Safe to call again with the SAME segments after a failed attempt, as long as
- * the caller feeds back what landed.
- */
-export async function writeFocusSession(
-  segments: FocusSegment[],
-  promiseId: number,
-  title: string,
-  { writtenDates = [], onWritten, completionFrame }: FocusWriteOptions = {},
-): Promise<FocusEntryDraft[]> {
-  const already = new Set(writtenDates);
-  const drafts = splitSegmentsByDay(segments).filter((d) => !already.has(d.date));
-  if (drafts.length === 0) return [];
-  const t = await ensureFocusTrackable();
-  // The last (max-date) draft is the day the STOP actually happened on — the
-  // only one a "moment of ending" frame can honestly belong to.
-  const lastDate = drafts[drafts.length - 1]?.date;
-  for (const d of drafts) {
-    await logTrackable(t.id, {
-      date: d.date,
-      value_numeric: d.minutes,
-      value_json: {
-        promise_id: promiseId,
-        title,
-        started_at: d.startedAt,
-        ended_at: d.endedAt,
-        // The exact windows the backend's attribution layer overlaps device
-        // intervals against. The envelope above stays for every reader that
-        // only wants "when was this session" — dropping it would break them
-        // for no gain, and the two disagree only in the way documented on
-        // FocusEntryDraft.segments.
-        segments: d.segments,
-        // only on the rows it's true of — an absent flag is the normal case
-        ...(d.truncated ? { truncated: true } : {}),
-        ...(completionFrame && d.date === lastDate ? { completion_frame: completionFrame } : {}),
-      },
-      source: "focus",
-      // NO replace — see trap 1.
-    });
-    onWritten?.(d.date);
-  }
-  return drafts;
-}
-
 /**
  * The end that is currently in flight, if any.
  *
- * `seal()` pauses the session but does NOT clear it, so between the seal and the
- * write resolving a second call would find the same session, seal the identical
- * segments, and post the same day again — on a sum-agg trackable that
- * permanently doubles it. Nothing on screen changes until the write lands, so a
- * double-click is the ordinary way to reach that. A concurrent caller therefore
- * JOINS this promise instead of starting a second write.
+ * A second call between the stop request and its response would post `/stop`
+ * for the same session again. The server is idempotent (an already-stopped
+ * session returns untouched and writes nothing twice), so that is no longer
+ * data loss — but it would still clear the store from under a recap being
+ * built, and nothing on screen changes until the response lands, which makes a
+ * double-click the ordinary way to reach it. A concurrent caller JOINS this
+ * promise instead.
  */
-let ending: Promise<void> | null = null;
+let ending: Promise<ServerFocusSession | null> | null = null;
 
 /**
- * End the running session: seal it, write its entry, and only THEN drop it.
+ * End the running session and hand back the server's final word on it.
  *
- * The one write-then-clear path, shared by the session page's stop control and
- * by starting focus on another task. It THROWS when the write failed, leaving
- * the session paused with its segments intact — the entry is the only durable
- * artifact a session produces, so clearing before it lands would destroy it.
- * A no-op when nothing is running.
+ * ONE call now: `POST /focus/sessions/{id}/stop` seals the runs, writes one
+ * `focus` entry per local day, releases the camera, and returns the session
+ * WITH its sensor breakdown — so the recap is built from the same response that
+ * ended the session and can never describe minutes that hadn't landed.
  *
- * `completionFrame` is the "victory selfie" — a camera frame grabbed right
- * before the caller invoked this. Optional and best-effort: a session ends
- * successfully whether or not a frame was available to attach.
+ * The write-then-clear ordering that used to live here still holds; it just
+ * holds inside one server transaction. The local mirror is dropped only after
+ * the server confirms, so a failed stop leaves a session that is still there
+ * and still stoppable rather than a clock that vanished with its minutes.
+ *
+ * Returns null when nothing was running. THROWS when the stop failed.
  */
-export async function endFocusSession(completionFrame?: string | null): Promise<void> {
+export async function endFocusSession(): Promise<ServerFocusSession | null> {
   if (ending) return ending;
   const s = useFocusSessionStore.getState().session;
-  if (!s) return;
+  if (!s) return null;
+  if (!s.id) {
+    // A start whose POST never landed: there is no server row to stop, and the
+    // clock it was drawing was never real. Drop it rather than throw — the
+    // failed start already reported itself.
+    useFocusSessionStore.getState().clear();
+    return null;
+  }
   ending = (async () => {
-    const segments = useFocusSessionStore.getState().seal();
-    await writeFocusSession(segments, s.promiseId, s.title, {
-      writtenDates: useFocusSessionStore.getState().session?.writtenDates ?? [],
-      onWritten: (date) => useFocusSessionStore.getState().markWritten(date),
-      completionFrame,
-    });
-    useFocusSessionStore.getState().stop();
-    // No completion OFFER any more (pass 9). Stopping simply stops; ticking the
-    // running task's box is the deliberate way to finish, and it ends the
-    // session itself — so the post-stop "mark kept?" prompt was asking a
-    // question the gesture had already answered.
+    const stopped = await stopFocusSessionApi(s.id);
+    useFocusSessionStore.getState().clear();
+    return stopped;
   })();
   try {
-    await ending;
+    return await ending;
   } finally {
     ending = null;
   }
@@ -324,22 +261,20 @@ export async function endFocusSession(completionFrame?: string | null): Promise<
 /**
  * Start focus on a task, ending whatever was running first.
  *
- * Switching tasks mid-day is normal, and the focus control is live on every row,
- * so the switch has to be silent AND lossless. Starting is CONDITIONAL on the
- * outgoing session having been durably written: `endFocusSession` throws on a
- * failed write, which aborts the switch and leaves the old session recoverable
- * rather than swapping it away with its minutes unwritten.
+ * The SERVER does the ending — `POST /focus/sessions` stops the live session
+ * (writing its entries) before creating the new one, in one transaction. That
+ * is strictly better than the two-call client sequence it replaces, where a
+ * failure in between left a session sealed but unwritten; here a failed write
+ * means no new session exists and the old one is still live.
  */
 export async function switchFocusSession(promiseId: number, title: string): Promise<void> {
   // Switching to the task ALREADY running is not a switch. Without this it
-  // ends-and-writes the live session and starts a fresh one on the same task,
-  // which splits one sitting into two entries and resets the clock to zero —
-  // the row looks like it restarted because it did. Guarded here as well as at
-  // the call site, because this is the function that does the damage.
+  // would split one sitting into two entries and reset the clock — the row
+  // looks like it restarted because it did. Guarded here, at the call sites,
+  // and on the server.
   const live = useFocusSessionStore.getState().session;
   if (live && live.promiseId === promiseId) return;
-  await endFocusSession();
-  useFocusSessionStore.getState().start(promiseId, title);
+  await useFocusSessionStore.getState().start(promiseId, title);
 }
 
 export interface FocusTotals {

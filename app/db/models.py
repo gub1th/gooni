@@ -1133,3 +1133,100 @@ class ProactiveObservation(Base):
     # Which model produced it, so a cadence-wide quality shift is attributable
     # to a model swap rather than to the prompt.
     model = Column(String, nullable=True)
+
+
+class FocusSession(Base):
+    """One sitting of declared focus: a named task, a bounded window, a
+    lifecycle (running → paused → stopped).
+
+    **This is the session, server-side.** It used to live only in the browser
+    (`frontend/src/stores/useFocusSessionStore.ts`, localStorage), which was a
+    defensible call while a session's only durable artifact was the
+    `TrackableEntry` it wrote on stop — but it made the session unreachable from
+    anywhere that isn't that tab. Claude could not start or stop one; the sidecar
+    could not learn what it was sensing FOR beyond a reconcile blob; a machine
+    that slept mid-session came back to a clock that had kept counting; and every
+    lifecycle rule (the 6h cap, write-then-clear, the retry ledger) had to be
+    re-implemented in a client that can be closed at any moment. The row is what
+    lets all of that be answered in one place.
+
+    **`segments` is authoritative; the scalars beside it are conveniences.**
+    A session is not one span — pausing splits it — and "how much of this landed
+    on which calendar day" and "which exact windows did the sensors describe" are
+    both questions only the run list can answer. `focus_attribution` overlaps
+    device intervals against those windows, so their precision IS the difference
+    between "you were on it" and a guess. `total_paused_ms` is the display
+    scalar for the same history, maintained in the same transition that closes a
+    run, so the two cannot disagree; `paused_at`/`run_started_at` describe the
+    single OPEN edge the closed-run list deliberately cannot hold.
+
+    **A stopped session still writes the entry.** `focus_session_service.stop`
+    writes one `focus` TrackableEntry per LOCAL day, in exactly the `value_json`
+    shape `focusTime.ts` used to write and `focus_attribution.parse_focus_entry`
+    already reads — so the log matrix, `focused today`, per-task totals and the
+    attribution layer all keep working unchanged. This table is the LIFECYCLE;
+    the entry stays the durable record of the minutes.
+    """
+
+    __tablename__ = "focus_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # The commitment this session is FOR. Nullable because a session started
+    # from Claude ("start a focus session on the interview prep") legitimately
+    # has no Promise row behind it — attribution simply has nothing to bind to,
+    # which is honest rather than broken. NOT a cascade delete: a deleted
+    # promise leaves the session and its minutes standing, the same way
+    # `focus_attribution` reports `promise_exists: false` rather than dropping
+    # the row and quietly shrinking the day's total.
+    promise_id = Column(Integer, ForeignKey("promises.id"), nullable=True, index=True)
+    # What the session is called. Snapshot at start — a promise renamed later
+    # still reads correctly here, and every read that has a live Promise prefers
+    # its current text (same rule `focus_attribution` applies).
+    title = Column(Text, nullable=False)
+
+    # running | paused | stopped. Exactly one row may be running-or-paused at a
+    # time; `focus_session_service.active` is the one reader of that invariant
+    # and `start` enforces it by stopping whatever it finds.
+    state = Column(String, nullable=False, default="running", index=True)
+
+    # Naive UTC, like every other datetime in this schema.
+    #: When the sitting began — the envelope's left edge, never moved.
+    started_at = Column(DateTime, nullable=False, index=True)
+    #: When it was stopped. NULL while running or paused.
+    ended_at = Column(DateTime, nullable=True)
+    #: Start of the CURRENTLY OPEN run. NULL unless state == running. The closed
+    #: runs live in `segments`; this is the one edge a list of closed spans
+    #: cannot express.
+    run_started_at = Column(DateTime, nullable=True)
+    #: When the current pause began. NULL unless state == paused.
+    paused_at = Column(DateTime, nullable=True)
+    #: Accumulated pause time across the sitting, milliseconds. Written in the
+    #: same transition that closes a run, so it can never disagree with
+    #: `segments`.
+    total_paused_ms = Column(Integer, nullable=False, default=0)
+
+    #: JSON list of closed focus runs: [{"start": iso, "end": iso,
+    #: "truncated": bool?}]. Text-not-JSON, the same convention as
+    #: Settings.focus_cam — the shape grows without a migration.
+    segments = Column(Text, nullable=True)
+    #: The session was CAPPED rather than closed by a human (see
+    #: `focus_session_service.MAX_RUN_SEC`), so its minutes are a FLOOR. Rides
+    #: through to the written entry's `value_json.truncated`, which is the flag
+    #: `focus_attribution` already understands.
+    truncated = Column(Boolean, nullable=False, default=False)
+
+    #: How the session is being TIMED — stopwatch (default) or timer. A display
+    #: concern that lives here anyway, because "survives a refresh" is one of
+    #: the reasons the row exists and a target reset to 25 minutes on reload is
+    #: exactly the kind of loss it was meant to end.
+    style = Column(String, nullable=False, default="stopwatch")
+    target_ms = Column(Integer, nullable=True)
+
+    #: True once the task was marked kept while this session ran. Same reason it
+    #: used to live in the client store: both surfaces need it and one of them
+    #: may be a reload away.
+    kept = Column(Boolean, nullable=False, default=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

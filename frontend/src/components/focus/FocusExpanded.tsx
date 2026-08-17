@@ -23,9 +23,9 @@ import {
   splitSegmentsByDay,
 } from "../../services/focusTime";
 import {
-  fetchFocusCam,
   fetchSessionActivity,
   updateFocusReminder,
+  type ServerFocusSession,
   type SessionActivity,
 } from "../../services/api";
 
@@ -158,24 +158,35 @@ export function FocusExpanded() {
    * A failed read leaves the activity fields empty rather than failing the
    * stop: the session's own numbers (minutes, timeline, per-day) are already in
    * hand, and losing the recap must never cost the write. */
-  async function buildRecap(s: FocusSession, stopMs: number): Promise<SessionRecapData> {
+  async function buildRecap(
+    s: FocusSession,
+    stopMs: number,
+    stopped: ServerFocusSession | null,
+  ): Promise<SessionRecapData> {
     const spanStart = sessionStartedAt(s) ?? stopMs;
     const sealed = sealedSegments(s, stopMs);
     const perDay = splitSegmentsByDay(sealed);
-    const totalMinutes = perDay.reduce((n, d) => n + d.minutes, 0);
     const timeline = sealed
       .filter((seg) => seg.mode === "focus")
       .map((seg) => ({ start: seg.start, end: seg.end, truncated: seg.truncated === true }));
 
-    const act = await fetchSessionActivity(new Date(spanStart), new Date(stopMs)).catch(
-      () => null,
-    );
+    // The STOP response already carries the session-scoped activity, computed
+    // over the server's own runs — so the recap no longer makes a second read
+    // that could describe a slightly different window than the one that just
+    // ended. Falling back to the window read keeps the recap working if the
+    // stop response somehow arrived without it.
+    const act =
+      stopped?.activity ??
+      (await fetchSessionActivity(new Date(spanStart), new Date(stopMs)).catch(() => null));
     const eventsByKind: Record<string, number> = {};
     for (const e of act?.camera_events ?? []) eventsByKind[e.kind] = e.count;
 
     return {
       title: s.title,
-      totalMinutes,
+      // The SERVER's minutes when we have them: it sealed the runs and wrote
+      // the entry, so a client/server clock difference must not leave the recap
+      // disagreeing with the log matrix.
+      totalMinutes: stopped?.focused_minutes ?? perDay.reduce((n, d) => n + d.minutes, 0),
       spanMs: Math.max(0, stopMs - spanStart),
       spanStart,
       spanEnd: stopMs,
@@ -192,7 +203,15 @@ export function FocusExpanded() {
       // sensors genuinely observed nothing. The recap renders them differently.
       observedSeconds: act ? act.observed_seconds : null,
       warnings: act?.warnings ?? [],
-      completionFrame: null, // filled by the caller once the selfie is grabbed
+      completionFrame: stopped?.completion_frame ?? null,
+      // The score. `undefined` (no scored read) and `null` (scored, nothing
+      // observed) are DIFFERENT answers and the recap says so — unknown versus
+      // unmeasured. Neither is ever rendered as a number.
+      focusScore: act?.focus_score,
+      presencePct: act?.presence_pct,
+      scoreBasis: act?.score_basis,
+      scoreCoverage: act?.score_coverage,
+      sensorTimeline: act?.timeline_segments,
     };
   }
 
@@ -203,26 +222,23 @@ export function FocusExpanded() {
     const stopMs = Date.now();
     // Stopping — as opposed to pausing — means the task is DONE: this is the
     // one completion gesture (no separate "mark kept" click). Read before the
-    // await: the store's own `stop()` (inside `endFocusSession`) clears the
-    // session, so `session` here is the closure's snapshot, not a live ref.
+    // await: `endFocusSession` clears the store, so `session` here is the
+    // closure's snapshot, not a live ref.
     const s = session;
     const alreadyKept = kept;
     try {
-      const [recapDraft, camSnap] = await Promise.all([
-        buildRecap(s, stopMs),
-        // The "victory selfie" — whatever the sidecar's live preview last
-        // showed, grabbed at the moment of stopping. Best-effort: a session
-        // ends successfully whether or not this lands.
-        fetchFocusCam().catch(() => null),
-      ]);
-      const completionFrame = camSnap?.frame ?? null;
-      await endFocusSession(completionFrame);
-      if (!alreadyKept) {
-        // Best-effort: the timer's own write already landed, so a failure
-        // here shouldn't read as the whole stop having failed.
+      // ONE call. It seals the runs, writes the entry, releases the camera,
+      // grabs the victory selfie and hands back the sensor breakdown — so
+      // nothing here can show a recap for a session whose minutes had not
+      // landed, and there is no second window read to disagree with the first.
+      const stopped = await endFocusSession();
+      if (s.promiseId != null && !alreadyKept) {
+        // Best-effort: the session's own write already landed, so a failure
+        // here shouldn't read as the whole stop having failed. A session with
+        // no promise behind it has nothing to mark.
         await updateFocusReminder(s.promiseId, { state: "kept" }).catch(() => {});
       }
-      setRecap({ ...recapDraft, completionFrame });
+      setRecap(await buildRecap(s, stopMs, stopped));
     } catch {
       setSaveError(true);
     } finally {

@@ -2,7 +2,12 @@ import { FONT } from "../../ui";
 import { FOCUS_PALETTES } from "./focusPalette";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
 import { fmtDuration, fmtMinutes } from "../../services/focusTime";
-import { type SessionCountRow, type SessionEvidence, type SessionNameRow } from "../../services/api";
+import {
+  type FocusTimelineSegment,
+  type SessionCountRow,
+  type SessionEvidence,
+  type SessionNameRow,
+} from "../../services/api";
 
 // The richer post-session breakdown. Replaces what used to be nothing —
 // `endFocusSession` just cleared the session and the view fell straight back
@@ -59,6 +64,45 @@ export interface SessionRecapData {
   /** Caps that bit on the activity read — shown rather than silently applied. */
   warnings: string[];
   completionFrame: string | null;
+
+  // ── the score (2026-08-16) ───────────────────────────────────────────────
+  /**
+   * Share of OBSERVED session time that was focus, from the sensors.
+   *
+   * **`null` is a real answer and must render as "not measured".** What this
+   * replaced as the headline was `focused_ms / span_ms` — timer state wearing a
+   * percentage, which reported 91% for an hour spent at a whiteboard. A score
+   * that is high whenever the clock ran is a score nobody can act on.
+   * `undefined` means the activity read failed or wasn't scored, which gets
+   * different copy again: unknown, not unmeasured.
+   */
+  focusScore?: number | null;
+  /** camera-only — how much of the WATCHED time he was at the desk */
+  presencePct?: number | null;
+  /** which sensors the score rests on, e.g. ["camera","device"] */
+  scoreBasis?: string[];
+  /** how much of the session any sensor watched */
+  scoreCoverage?: number | null;
+  /** the sensor states across the session, plus the pauses between runs */
+  sensorTimeline?: FocusTimelineSegment[];
+}
+
+/** What each timeline state means, and what colour says it. */
+const STATE_LABEL: Record<string, string> = {
+  focused: "focused",
+  distracted: "distracted",
+  away: "away from desk",
+  active: "at the machine",
+  unobserved: "not observed",
+  paused: "paused",
+};
+
+function stateColor(state: string, pal: { accent: string; warn: string; rule: string; event: string }): string {
+  if (state === "focused") return pal.accent;
+  if (state === "active") return pal.event;
+  if (state === "distracted" || state === "away") return pal.warn;
+  // unobserved / paused — the absence of a signal, never a verdict
+  return pal.rule;
 }
 
 const KIND_LABEL: Record<string, string> = {
@@ -114,6 +158,13 @@ export function FocusSessionRecap({ recap, onClose }: Props) {
   const eventEntries = Object.entries(recap.eventsByKind).filter(([, n]) => n > 0);
   const totalEvents = eventEntries.reduce((n, [, v]) => n + v, 0);
 
+  const scored = recap.focusScore !== undefined;
+  const sensorTimeline = recap.sensorTimeline ?? [];
+  const sensorSpan = sensorTimeline.length
+    ? Date.parse(sensorTimeline[sensorTimeline.length - 1].end) -
+      Date.parse(sensorTimeline[0].start)
+    : 0;
+
   return (
     <div
       style={{
@@ -142,8 +193,81 @@ export function FocusSessionRecap({ recap, onClose }: Props) {
         />
       )}
 
-      {/* time distribution — focused vs paused across the whole sitting */}
+      {/* FOCUS SCORE — from the sensors, or plainly absent. The old headline
+          was `focused_ms / span_ms`: timer state wearing a percentage, high
+          whenever the clock ran. This one is null when nothing watched. */}
       <div style={{ width: "100%", maxWidth: 420, marginTop: 28 }}>
+        <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.1em", color: pal.ink3, marginBottom: 8 }}>
+          FOCUS SCORE
+        </div>
+        {!scored ? (
+          <div style={{ fontSize: 12.5, color: pal.ink3 }}>
+            breakdown unavailable — showing the timer's own record below
+          </div>
+        ) : recap.focusScore == null ? (
+          <div style={{ fontSize: 12.5, color: pal.ink3 }}>
+            not measured — no camera or device activity during this session
+          </div>
+        ) : (
+          <>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+              <span style={{ fontSize: 34, fontWeight: 500, letterSpacing: "-0.03em", fontVariantNumeric: "tabular-nums" }}>
+                {recap.focusScore}%
+              </span>
+              <span style={{ fontSize: 11.5, color: pal.ink3 }}>
+                from {(recap.scoreBasis ?? []).join(" + ") || "no sensors"}
+              </span>
+            </div>
+            <div style={{ display: "flex", height: 10, borderRadius: 999, overflow: "hidden", background: pal.rule, marginTop: 8 }}>
+              <div style={{ width: `${recap.focusScore}%`, background: pal.accent }} />
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: pal.ink3, marginTop: 6 }}>
+              <span>
+                {recap.presencePct != null ? `${recap.presencePct}% at the desk` : "presence not measured"}
+              </span>
+              {/* A claim about the SENSORS, not about Daniel — the same rule
+                  `coverage` follows one section down. */}
+              {recap.scoreCoverage != null && recap.scoreCoverage < 1 && (
+                <span>{Math.round(recap.scoreCoverage * 100)}% of it was watched</span>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* THE timeline bar: the sensor states laid across the session. */}
+        {sensorTimeline.length > 0 && sensorSpan > 0 && (
+          <>
+            <div style={{ position: "relative", height: 16, marginTop: 14, background: pal.rule, borderRadius: 4, overflow: "hidden" }}>
+              {sensorTimeline.map((seg, i) => {
+                const left = ((Date.parse(seg.start) - Date.parse(sensorTimeline[0].start)) / sensorSpan) * 100;
+                const width = Math.max(0.6, ((Date.parse(seg.end) - Date.parse(seg.start)) / sensorSpan) * 100);
+                return (
+                  <div
+                    key={i}
+                    title={`${STATE_LABEL[seg.state] ?? seg.state} · ${fmtDuration(seg.seconds)}`}
+                    style={{
+                      position: "absolute", top: 0, bottom: 0,
+                      left: `${left}%`, width: `${width}%`,
+                      background: stateColor(seg.state, pal),
+                    }}
+                  />
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 12, fontSize: 10.5, color: pal.ink3, marginTop: 7 }}>
+              {[...new Set(sensorTimeline.map((seg) => seg.state))].map((state) => (
+                <span key={state} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  <i style={{ width: 8, height: 8, borderRadius: 2, background: stateColor(state, pal), display: "inline-block" }} />
+                  {STATE_LABEL[state] ?? state}
+                </span>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* time distribution — focused vs paused across the whole sitting */}
+      <div style={{ width: "100%", maxWidth: 420, marginTop: 24 }}>
         <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.1em", color: pal.ink3, marginBottom: 8 }}>
           TIME DISTRIBUTION
         </div>
@@ -151,7 +275,10 @@ export function FocusSessionRecap({ recap, onClose }: Props) {
           <div style={{ width: `${focusPct}%`, background: pal.accent }} />
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: pal.ink3, marginTop: 6 }}>
-          <span>focused {fmtMinutes(recap.totalMinutes)} ({focusPct}%)</span>
+          {/* Deliberately NOT labelled a focus percentage any more — it is the
+              share of the sitting the clock was running, which is a fact about
+              the timer. The score above is the one about the work. */}
+          <span>focused {fmtMinutes(recap.totalMinutes)} of {fmtDuration(recap.spanMs / 1000)}</span>
           {Math.round(pausedMinutes) > 0 && <span>paused {fmtMinutes(pausedMinutes)}</span>}
         </div>
 

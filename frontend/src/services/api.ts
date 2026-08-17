@@ -2008,6 +2008,45 @@ export interface SessionActivity {
   coverage: number | null;
   /** caps that bit on this read — surfaced rather than silently truncating */
   warnings: string[];
+
+  // ── the score, present ONLY when the read was given the session's runs ────
+  // i.e. on `/focus/sessions/{id}[/activity]` and the stop response, not on
+  // the window-only `GET /focus/session-activity`. Every field is optional so
+  // the older read's payload still satisfies this type.
+
+  session_id?: number;
+  /** seconds the timer was actually running (pauses excluded) */
+  focused_seconds?: number;
+  /**
+   * Share of OBSERVED session time that was focus.
+   *
+   * **NULLABLE, and the null is the point.** A session nothing observed scores
+   * NOTHING — not zero, and not the flattering `focused_ms / span_ms` this
+   * replaced, which reported 91% for an hour spent at a whiteboard. Render a
+   * null as "not measured", never as 0.
+   */
+  focus_score?: number | null;
+  /** camera-only: how much of the WATCHED time he was at the desk */
+  presence_pct?: number | null;
+  /** how much of the scored time any sensor watched — distinct from `coverage`,
+   * which is the device-interval union over the whole window */
+  score_coverage?: number | null;
+  scored_seconds?: number;
+  unscored_seconds?: number;
+  /** which sensors the score rests on, e.g. ["camera","device"] */
+  score_basis?: string[];
+  /** seconds per state: focused | distracted | away | active | unobserved */
+  seconds?: Record<string, number>;
+  /** the sensor states across the session, plus the pauses between runs */
+  timeline_segments?: FocusTimelineSegment[];
+}
+
+export interface FocusTimelineSegment {
+  start: string;
+  end: string;
+  /** focused | distracted | away | active | unobserved | paused */
+  state: string;
+  seconds: number;
 }
 
 export async function fetchSessionActivity(
@@ -2167,6 +2206,113 @@ export async function setFocusCamControl(
     body: JSON.stringify({ control, target_reminder_id: targetReminderId ?? null }),
   });
   if (!res.ok) throw new Error("Failed to set focus-cam control");
+  return res.json();
+}
+
+// ── Focus sessions (server-side lifecycle) ──────────────────────────────────
+// The session used to live only in localStorage. It is a row now
+// (`app/services/focus_session_service.py`), which is what lets it survive a
+// refresh, a machine sleep and an app restart, and what lets Claude start and
+// stop one. The store (`useFocusSessionStore`) is a thin client over these.
+
+export type FocusSessionState = "running" | "paused" | "stopped";
+
+/** One closed focus run, as the server records it. */
+export interface FocusSessionSegment {
+  start: string;
+  end: string;
+  truncated: boolean;
+}
+
+export interface ServerFocusSession {
+  id: number;
+  promise_id: number | null;
+  title: string;
+  state: FocusSessionState;
+  started_at: string;
+  ended_at: string | null;
+  /** start of the CURRENTLY OPEN run; null unless state is running */
+  run_started_at: string | null;
+  paused_at: string | null;
+  total_paused_ms: number;
+  /** focus accrued so far, sealed at the server's `now` */
+  focused_ms: number;
+  focused_minutes: number;
+  segments: FocusSessionSegment[];
+  truncated: boolean;
+  style: "stopwatch" | "timer";
+  target_ms: number | null;
+  kept: boolean;
+  /** present on the stop response and on `?activity=1` */
+  activity?: SessionActivity;
+  /**
+   * The "victory selfie" — the sidecar's last preview frame, grabbed as the
+   * session ended and attached to the day's entry. Stop response only, and null
+   * whenever the camera had nothing to show (the ordinary case).
+   */
+  completion_frame?: string | null;
+}
+
+async function focusSessionCall(path: string, init?: RequestInit): Promise<ServerFocusSession> {
+  const res = await apiFetch(`${BASE}${path}`, init);
+  if (!res.ok) throw new Error(`focus session call failed: ${path} (${res.status})`);
+  return res.json();
+}
+
+export async function createFocusSession(body: {
+  title: string;
+  promise_id?: number | null;
+  style?: "stopwatch" | "timer";
+  target_ms?: number | null;
+}): Promise<ServerFocusSession> {
+  return focusSessionCall("/focus/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * THE restore read. Polled on mount and on an interval, so a refresh, a sleep
+ * or a second monitor all recover the same session — and so a session capped at
+ * 6h server-side disappears from every client at once.
+ */
+export async function fetchActiveFocusSession(): Promise<ServerFocusSession | null> {
+  const res = await apiFetch(`${BASE}/focus/sessions/active`);
+  if (!res.ok) throw new Error("Failed to fetch active focus session");
+  const data = (await res.json()) as { session: ServerFocusSession | null };
+  return data.session ?? null;
+}
+
+export async function pauseFocusSession(id: number): Promise<ServerFocusSession> {
+  return focusSessionCall(`/focus/sessions/${id}/pause`, { method: "POST" });
+}
+
+export async function resumeFocusSession(id: number): Promise<ServerFocusSession> {
+  return focusSessionCall(`/focus/sessions/${id}/resume`, { method: "POST" });
+}
+
+/** Ends the session and returns it WITH its activity breakdown — the recap is
+ * built from the same response that ended it, so it can never describe a
+ * session whose minutes hadn't landed. */
+export async function stopFocusSession(id: number): Promise<ServerFocusSession> {
+  return focusSessionCall(`/focus/sessions/${id}/stop`, { method: "POST" });
+}
+
+export async function patchFocusSession(
+  id: number,
+  patch: { style?: "stopwatch" | "timer"; target_ms?: number | null; kept?: boolean },
+): Promise<ServerFocusSession> {
+  return focusSessionCall(`/focus/sessions/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function fetchFocusSessionActivity(id: number): Promise<SessionActivity> {
+  const res = await apiFetch(`${BASE}/focus/sessions/${id}/activity`);
+  if (!res.ok) throw new Error("Failed to fetch focus session activity");
   return res.json();
 }
 

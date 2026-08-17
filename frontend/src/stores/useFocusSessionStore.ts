@@ -1,27 +1,42 @@
 import { create } from "zustand";
+import {
+  createFocusSession,
+  fetchActiveFocusSession,
+  pauseFocusSession,
+  patchFocusSession,
+  resumeFocusSession,
+  type ServerFocusSession,
+} from "../services/api";
 
-// The running focus session — a CLIENT store, deliberately.
+// The running focus session — a THIN CLIENT over the server, since 2026-08-16.
 //
-// There is no session table and no migration: `FocusSession` was retired into
-// `TrackableEntry` on purpose, and the only durable artifact a session produces
-// is the entry written when it ends. What the session needs while it's alive is
-// agreement between `/` and `/focus` across navigation, reload, and a second tab
-// on another monitor — which is exactly what localStorage + the `storage` event
-// give, with no server round-trip on every tick.
+// It used to be the whole thing: a localStorage store that owned the lifecycle,
+// the 6h cap, the write-then-clear ordering and the per-day retry ledger. That
+// was defensible while a session's only durable artifact was the TrackableEntry
+// it wrote on stop, and it had four ways to lose data that all shared one cause
+// — the only process that knew a session existed could be closed at any moment:
 //
-// Segments, not a single stopwatch. The brief's field list (started-at,
-// accumulated ms, running) totals correctly but can't answer "how much of this
-// landed on which calendar day" once a pause splits the window — and a session
-// crossing midnight has to write one entry per day or the daily fold lies. So a
-// closed [start, end] pair is recorded per run, and `accumulatedMs` is derived
-// from them. Each segment carries its mode: BREAK time is real elapsed time but
-// it is not focus, and only focus segments are ever written.
+//   · a tab closed mid-session left the run uncapped and the camera sensing;
+//   · a machine that slept came back to a clock that had kept counting;
+//   · nothing outside that tab could start or stop a session (so Claude
+//     couldn't, and the sidecar only ever saw a reconcile flag);
+//   · the retry ledger for a partially-written multi-day session lived in the
+//     same storage the failure could take with it.
+//
+// The lifecycle is now `app/services/focus_session_service.py` and every rule
+// lives there once. What stays here is what a client is genuinely for: an
+// optimistic local mirror so the clock is instant, a localStorage cache so the
+// first paint after a reload isn't empty, and cross-tab sync.
+//
+// **The server is the truth.** Every mutator applies its change locally, calls
+// the server, and adopts the server's answer — so a disagreement always
+// resolves the same way, and `syncFocusSession` (polled by `useFocusSessionSync`)
+// is what makes a refresh, a sleep, a second monitor and a session Claude
+// started all converge on the same row.
 
-// Every segment is focus time. BREAK was removed in pass 3, and with it the
-// only mode a segment could carry that was NOT written — so this union is a
-// single member on purpose rather than being deleted: `FocusSegment.mode` and
-// the `mode === "focus"` filter in `splitSegmentsByDay` stay exactly as they
-// are, which keeps the persisted shape and the write path untouched.
+// Every segment is focus time. BREAK was removed in pass 3; the union stays a
+// single member on purpose so `FocusSegment.mode` and the `mode === "focus"`
+// filter in `splitSegmentsByDay` need no edit.
 export type FocusMode = "focus";
 
 /**
@@ -30,9 +45,6 @@ export type FocusMode = "focus";
  *
  *   stopwatch → counts up, no target, the DEFAULT
  *   timer     → counts down from `targetMs`
- *
- * This is why it is separate from `mode` rather than replacing it: break was a
- * kind of time, stopwatch/timer is a way of watching the same time.
  */
 export type FocusStyle = "stopwatch" | "timer";
 
@@ -48,10 +60,17 @@ export interface FocusSegment {
 }
 
 export interface FocusSession {
-  promiseId: number;
+  /** the server row's id — what every lifecycle call addresses */
+  id: number;
+  /**
+   * The commitment this session is FOR. NULLABLE now: a session started from
+   * Claude legitimately has no Promise behind it, and attribution simply has
+   * nothing to bind to — which is honest rather than broken. Every consumer
+   * comparing it to a row id already behaves correctly on null.
+   */
+  promiseId: number | null;
   title: string;
   mode: FocusMode;
-  /** stopwatch (default) or timer — see FocusStyle */
   style: FocusStyle;
   /** timer target; ignored in stopwatch style */
   targetMs: number;
@@ -60,26 +79,8 @@ export interface FocusSession {
   /** closed runs so far */
   segments: FocusSegment[];
   running: boolean;
-  /**
-   * The task has been marked kept while this session runs. It lives HERE, not
-   * in either surface's local state, because both surfaces need it and one of
-   * them may be a reload away: `/focus` marks it kept, `/` has to keep showing
-   * that row struck through AND running, and a plain reload of `/` has nothing
-   * else left to learn it from — the dashboard serves ACTIVE commitments only.
-   */
+  /** the task was marked kept while this session runs */
   kept: boolean;
-  /**
-   * Local day keys whose entry has already LANDED for this session.
-   *
-   * The session outliving a failed write makes a retry reachable, and the write
-   * is one `logTrackable` per calendar day on a `agg=sum` trackable — so a retry
-   * after a PARTIAL success would add the first day's minutes a second time.
-   * `replace` is not the answer (it would collapse the day and destroy every
-   * other session logged on it). Recording the days that landed, here where the
-   * session already lives, means a retry sends only what is missing and a
-   * reload can't lose the record either.
-   */
-  writtenDates: string[];
 }
 
 const KEY = "gooni_focus_session";
@@ -87,42 +88,54 @@ const KEY = "gooni_focus_session";
 /**
  * The longest a single open run may claim.
  *
- * The whole point of the timer is that attribution is trustworthy BY
- * CONSTRUCTION, and the feature's most common failure is the least dramatic
- * one: a session left running overnight would otherwise credit ~9h of sleep as
- * focus against a Promise, which makes the primary output wrong. So the run is
- * capped and the capped segment is FLAGGED, exactly as the browser sensor does
- * it (`extension/src/tracker.js` closes a salvaged interval at its last
- * heartbeat, marks it `truncated`, and hard-clamps at the same 6h its ingest
- * rejects past — `browser_activity_service.MAX_INTERVAL_SEC`). A focus session
- * has no heartbeat to fall back to, so the clamp is all there is.
+ * Still here because the CLIENT renders the clock and must not draw a nine-hour
+ * session while the server is about to seal it at six. The server holds the
+ * same constant (`focus_session_service.MAX_RUN_SEC`) and is the one that
+ * ACTS on it — which is the whole improvement, since a client-side cap could
+ * only ever fire in a tab that was still open.
  */
 export const MAX_RUN_MS = 6 * 60 * 60 * 1000;
 
-interface FocusSessionState {
-  session: FocusSession | null;
-  start: (promiseId: number, title: string) => void;
-  pause: () => void;
-  resume: () => void;
-  setStyle: (style: FocusStyle) => void;
-  setTargetMs: (ms: number) => void;
-  /**
-   * Close the open run and hand back the segments, WITHOUT ending the session.
-   * The caller writes the entry first and calls `stop` only once that
-   * succeeded — a failed write must leave the session recoverable rather than
-   * destroying the only durable artifact it produces.
-   */
-  seal: () => FocusSegment[];
-  /** Drop the session. Call AFTER its entry is safely written. */
-  stop: () => void;
-  /** Rename in place — ticking a task from the session page shouldn't drop it. */
-  rename: (title: string) => void;
-  /** Mark (or unmark) the task kept while the session runs. */
-  setKept: (kept: boolean) => void;
-  /** Record that this local day's entry has landed, so a retry skips it. */
-  markWritten: (date: string) => void;
-  /** Adopt whatever another tab wrote. */
-  hydrate: (session: FocusSession | null) => void;
+/** ISO (or null) → epoch ms. */
+function ms(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? t : null;
+}
+
+/**
+ * A server session → the client shape.
+ *
+ * A STOPPED session becomes `null`: this store holds the LIVE session only, and
+ * a stopped row lingering here would keep a dead clock on screen.
+ */
+export function fromServer(s: ServerFocusSession | null): FocusSession | null {
+  if (!s || s.state === "stopped") return null;
+  const segments: FocusSegment[] = (s.segments ?? [])
+    .map((g) => ({
+      start: ms(g.start) ?? 0,
+      end: ms(g.end) ?? 0,
+      mode: "focus" as const,
+      ...(g.truncated ? { truncated: true } : {}),
+    }))
+    // While a session RUNS, the server's `segments` already include the open
+    // run sealed at its `now`. Keeping it would double-count against the local
+    // clock, which ticks that same run forward from `run_started_at`.
+    .filter((g) => g.end > g.start);
+  const runStart = ms(s.run_started_at);
+  const openRun = s.state === "running" && runStart != null ? runStart : null;
+  return {
+    id: s.id,
+    promiseId: s.promise_id,
+    title: s.title,
+    mode: "focus",
+    style: s.style === "timer" ? "timer" : "stopwatch",
+    targetMs: s.target_ms && s.target_ms > 0 ? s.target_ms : DEFAULT_TIMER_MS,
+    startedAt: openRun ?? ms(s.started_at) ?? Date.now(),
+    segments: openRun == null ? segments : segments.filter((g) => g.start < openRun),
+    running: s.state === "running",
+    kept: s.kept === true,
+  };
 }
 
 function read(): FocusSession | null {
@@ -130,20 +143,23 @@ function read(): FocusSession | null {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as FocusSession;
-    if (typeof parsed?.promiseId !== "number") return null;
+    // A cache written by the PRE-server build has no `id` and cannot address
+    // any lifecycle route. Dropping it is right: the server is about to answer
+    // what is really running, and a phantom local session would let the user
+    // pause a row that does not exist.
+    if (typeof parsed?.id !== "number") return null;
     const segments = Array.isArray(parsed.segments) ? parsed.segments : [];
     return {
       ...parsed,
       mode: "focus",
-      // A session persisted BEFORE break was dropped can still hold break
-      // segments. They are discarded rather than adopted: they were never
-      // going to be written, and silently promoting them to focus would credit
-      // a Promise with minutes the old build had already promised not to.
+      promiseId: typeof parsed.promiseId === "number" ? parsed.promiseId : null,
       segments: segments.filter((g) => (g as { mode?: string }).mode !== "break"),
       style: parsed.style === "timer" ? "timer" : "stopwatch",
-      targetMs: typeof parsed.targetMs === "number" && parsed.targetMs > 0 ? parsed.targetMs : DEFAULT_TIMER_MS,
+      targetMs:
+        typeof parsed.targetMs === "number" && parsed.targetMs > 0
+          ? parsed.targetMs
+          : DEFAULT_TIMER_MS,
       kept: parsed.kept === true,
-      writtenDates: Array.isArray(parsed.writtenDates) ? parsed.writtenDates : [],
     };
   } catch {
     return null;
@@ -155,7 +171,7 @@ function write(session: FocusSession | null) {
     if (session) localStorage.setItem(KEY, JSON.stringify(session));
     else localStorage.removeItem(KEY);
   } catch {
-    /* private mode / quota — the session still runs in memory */
+    /* private mode / quota — the session still runs in memory, and on the server */
   }
 }
 
@@ -163,15 +179,16 @@ function write(session: FocusSession | null) {
  * Close the open run (if any) at `now`, returning the full segment list.
  *
  * Pure, and exported: `/` folds the live session through this to work out how
- * much of it landed on TODAY, and the number it shows has to be the number that
- * would be written if the session ended right now.
+ * much of it landed on TODAY. It mirrors `focus_session_service.sealed_runs`,
+ * so the number on screen is the number the server would write.
  */
 export function sealedSegments(s: FocusSession, now: number): FocusSegment[] {
   if (!s.running) return s.segments;
   // Sub-second runs are noise, not work.
   if (now - s.startedAt < 1000) return s.segments;
   if (now - s.startedAt > MAX_RUN_MS) {
-    // Nobody closed this. Credit the cap, and say so on the segment.
+    // Nobody closed this. Credit the cap, and say so on the segment. (The
+    // server is about to do exactly this and retire the session.)
     return [
       ...s.segments,
       { start: s.startedAt, end: s.startedAt + MAX_RUN_MS, mode: s.mode, truncated: true },
@@ -183,9 +200,7 @@ export function sealedSegments(s: FocusSession, now: number): FocusSegment[] {
 /**
  * Is focus ACCRUING right now? The one liveness fact, in one place.
  *
- * It used to derive over three states (live focus / break / paused); dropping
- * break narrowed it to two. The DERIVATION stays single on purpose — every
- * consumer that starts or stops something on the session's liveness (the
+ * Every consumer that starts or stops something on the session's liveness (the
  * focus-cam control, the row indicator, the home's tick cadence) reads this
  * rather than re-deriving. Patching those call sites per-state one at a time is
  * exactly what produced two rounds of review findings.
@@ -202,17 +217,39 @@ export function sessionStartedAt(s: FocusSession | null): number | null {
   return starts.length > 0 ? Math.min(...starts) : s.startedAt;
 }
 
+interface FocusSessionState {
+  session: FocusSession | null;
+  /** true while a lifecycle call is in flight — the UI stays live, not blocked */
+  syncing: boolean;
+  start: (promiseId: number | null, title: string) => Promise<FocusSession | null>;
+  pause: () => Promise<void>;
+  resume: () => Promise<void>;
+  setStyle: (style: FocusStyle) => Promise<void>;
+  setTargetMs: (ms: number) => Promise<void>;
+  /** Drop the LOCAL mirror. The server stop goes through `endFocusSession`. */
+  clear: () => void;
+  rename: (title: string) => void;
+  setKept: (kept: boolean) => Promise<void>;
+  /** Adopt a server answer (or another tab's write). */
+  hydrate: (session: FocusSession | null) => void;
+}
+
 export const useFocusSessionStore = create<FocusSessionState>((set, get) => ({
   session: read(),
+  syncing: false,
 
-  start: (promiseId, title) => {
-    // Re-starting the task that is already running would throw away its
-    // segments and zero the clock. Nothing legitimately wants that: a genuine
-    // switch goes through `switchFocusSession`, which writes the outgoing
-    // session's entry first. Belt-and-braces with the guard there.
+  start: async (promiseId, title) => {
+    // Re-starting the task already running would throw its segments away and
+    // zero the clock. Guarded here AND in `switchFocusSession` AND on the
+    // server, because each of the three can be reached on its own.
     const live = get().session;
-    if (live && live.promiseId === promiseId) return;
-    const session: FocusSession = {
+    if (live && promiseId != null && live.promiseId === promiseId) return live;
+
+    // Optimistic: the clock starts on the click, not on the round trip. `id: 0`
+    // marks it un-addressable — every mutator below refuses to call a lifecycle
+    // route for it, so a pause during the flight can never hit a wrong row.
+    const optimistic: FocusSession = {
+      id: 0,
       promiseId,
       title,
       mode: "focus",
@@ -222,61 +259,85 @@ export const useFocusSessionStore = create<FocusSessionState>((set, get) => ({
       segments: [],
       running: true,
       kept: false,
-      writtenDates: [],
     };
-    write(session);
-    set({ session });
+    write(optimistic);
+    set({ session: optimistic, syncing: true });
+    try {
+      const server = fromServer(await createFocusSession({ title, promise_id: promiseId }));
+      write(server);
+      set({ session: server });
+      return server;
+    } catch (e) {
+      // The session never really began. Restoring the previous one is right:
+      // `switchFocusSession` has already written its predecessor's minutes, so
+      // there is nothing left to lose here but a clock that was never real.
+      write(live);
+      set({ session: live });
+      throw e;
+    } finally {
+      set({ syncing: false });
+    }
   },
 
-  pause: () => {
+  pause: async () => {
     const s = get().session;
     if (!s || !s.running) return;
     const next: FocusSession = { ...s, running: false, segments: sealedSegments(s, Date.now()) };
     write(next);
     set({ session: next });
+    if (!s.id) return; // an in-flight start owns its own reconcile
+    try {
+      const server = fromServer(await pauseFocusSession(s.id));
+      write(server);
+      set({ session: server });
+    } catch {
+      // The clock is stopped locally and the server still thinks it runs. The
+      // next sync resolves it in the server's favour, which at worst credits a
+      // few more seconds of real elapsed time — the safe direction, since the
+      // alternative is a session that looks paused and is silently accruing.
+      void syncFocusSession();
+    }
   },
 
-  resume: () => {
+  resume: async () => {
     const s = get().session;
     if (!s || s.running) return;
     const next: FocusSession = { ...s, running: true, startedAt: Date.now() };
     write(next);
     set({ session: next });
+    if (!s.id) return;
+    try {
+      const server = fromServer(await resumeFocusSession(s.id));
+      write(server);
+      set({ session: server });
+    } catch {
+      void syncFocusSession();
+    }
   },
 
   // Switching STYLE does not touch the segments: stopwatch and timer accrue
   // identically and only differ in how the same elapsed time is displayed.
-  // (The old `setMode` sealed the run on every switch, because focus↔break put
-  // the minutes either side into different buckets. Nothing does that now.)
-  setStyle: (style) => {
+  setStyle: async (style) => {
     const s = get().session;
     if (!s || s.style === style) return;
     const next: FocusSession = { ...s, style };
     write(next);
     set({ session: next });
+    if (!s.id) return;
+    await patchFocusSession(s.id, { style }).catch(() => {});
   },
 
-  setTargetMs: (ms) => {
+  setTargetMs: async (targetMs) => {
     const s = get().session;
-    if (!s || ms <= 0) return;
-    const next: FocusSession = { ...s, targetMs: ms };
+    if (!s || targetMs <= 0) return;
+    const next: FocusSession = { ...s, targetMs };
     write(next);
     set({ session: next });
+    if (!s.id) return;
+    await patchFocusSession(s.id, { target_ms: targetMs }).catch(() => {});
   },
 
-  seal: () => {
-    const s = get().session;
-    if (!s) return [];
-    const segments = sealedSegments(s, Date.now());
-    // Paused, not gone: the clock stops growing while the write is in flight,
-    // and a retry seals the same segments rather than a longer set.
-    const next: FocusSession = { ...s, running: false, segments };
-    write(next);
-    set({ session: next });
-    return segments;
-  },
-
-  stop: () => {
+  clear: () => {
     write(null);
     set({ session: null });
   },
@@ -289,32 +350,52 @@ export const useFocusSessionStore = create<FocusSessionState>((set, get) => ({
     set({ session: next });
   },
 
-  setKept: (kept) => {
+  setKept: async (kept) => {
     const s = get().session;
     if (!s || s.kept === kept) return;
     const next = { ...s, kept };
     write(next);
     set({ session: next });
+    if (!s.id) return;
+    await patchFocusSession(s.id, { kept }).catch(() => {});
   },
 
-  markWritten: (date) => {
-    const s = get().session;
-    if (!s || s.writtenDates.includes(date)) return;
-    const next = { ...s, writtenDates: [...s.writtenDates, date] };
-    write(next);
-    set({ session: next });
+  hydrate: (session) => {
+    write(session);
+    set({ session });
   },
-
-  hydrate: (session) => set({ session }),
 }));
 
-// Cross-tab sync. `storage` fires in every OTHER tab when one writes, so a
-// session started on the laptop shows as running on the second monitor without
-// either surface polling.
+/**
+ * Adopt whatever the server says is running.
+ *
+ * The one reconcile. It deliberately does NOT run while a lifecycle call is in
+ * flight: the server's answer would be the pre-call state, and adopting it
+ * would visibly undo the click that is still travelling.
+ */
+export async function syncFocusSession(): Promise<void> {
+  if (useFocusSessionStore.getState().syncing) return;
+  try {
+    const server = fromServer(await fetchActiveFocusSession());
+    const local = useFocusSessionStore.getState().session;
+    // An un-addressable optimistic session (a start still in flight, or one
+    // whose POST failed) must not be replaced by a stale `null`.
+    if (local && !local.id && server == null) return;
+    useFocusSessionStore.getState().hydrate(server);
+  } catch {
+    // Offline / backend down. The local mirror keeps ticking rather than the
+    // session vanishing — a failed fetch is not evidence that nothing is
+    // running, the same rule the popup's "empty reads as empty" follows.
+  }
+}
+
+// Cross-tab sync of the local MIRROR. Still worth having alongside the poll:
+// it is instant, and it keeps a second monitor from showing a stale clock for
+// up to a full poll interval.
 if (typeof window !== "undefined") {
   window.addEventListener("storage", (e) => {
     if (e.key !== null && e.key !== KEY) return;
-    useFocusSessionStore.getState().hydrate(read());
+    useFocusSessionStore.setState({ session: read() });
   });
 }
 

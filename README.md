@@ -108,6 +108,8 @@ app/
     intent_router.py + intent_handlers/   # dispatch extracted signals to writers
     promise_service.py       # THE actionable primitive (absorbed todos/habits/focuses/reminders)
     focus_service.py         # adapter: focus vocabulary (topics/thoughts/reminders) over Notes + Promises
+    focus_session_service.py # focus session LIFECYCLE (start/pause/resume/stop) — server-side since 2026-08-16
+    focus_session_activity.py# what the sensors saw during one session, and the score built from it
     trackable_service.py     # generic measurement substrate (Notion-tables model)
     memory_service.py        # local SQL memory: LLM extract → reconcile → cosine retrieval
     overlay_service.py       # deterministic "what matters now" ranker (no LLM)
@@ -127,6 +129,7 @@ frontend/
     components/notes/        # Sidebar, NotesList, NoteEditor (TipTap, auto-save)
     components/eval/         # EvalView (?audit=1)
     components/focus/        # FocusKiosk (the /focus hub) + FocusExpanded (running session) + GooniAsleep (idle)
+                             # + useFocusSessionSync (keeps the client pointed at the server's session)
     stores/                  # Zustand stores (persist with versioned keys)
     services/api.ts          # every fetch call, typed
     ui/                      # design tokens — single styling source of truth

@@ -37,6 +37,7 @@ ROUTER_MODULES = [
     "reflections",
     "focus",
     "focus_cam",
+    "focus_sessions",
     "browser_activity",
     "app_activity",
     "display",
