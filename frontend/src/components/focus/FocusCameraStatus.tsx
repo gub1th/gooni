@@ -4,6 +4,7 @@ import { FOCUS_PALETTES } from "./focusPalette";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
 import { FEED_REFRESH_MS, fetchFocusCam, type FocusCamBlob, type SessionActivity } from "../../services/api";
 import { parseServerDate } from "../../utils/date";
+import { DISTRACTION_KINDS } from "./focusDetectionKinds";
 
 // Can't tell if the camera is on, which one, or whether anything's been
 // flagged — the captain's exact complaint. This is the answer: a small line
@@ -14,10 +15,6 @@ import { parseServerDate } from "../../utils/date";
 // `control: running` blob with a stale frame is exactly the state that would
 // otherwise silently claim "on" while nothing is actually being sensed.
 const STALE_MS = 40_000;
-
-// `stand` and `left_desk` are not lapses — same split `focus_cam_service.
-// VIOLATION_EVENT_KINDS` makes server-side.
-const VIOLATION_KINDS = new Set(["distracted", "phone", "vape"]);
 
 type DetectionStatus = "on" | "off" | "error";
 
@@ -47,7 +44,7 @@ export function FocusCameraStatus({ activity }: Props) {
   // state it is in today. The event is the detection; the frame is optional
   // proof of one.
   const violations = (activity?.camera_events ?? [])
-    .filter((e) => VIOLATION_KINDS.has(e.kind))
+    .filter((e) => DISTRACTION_KINDS.has(e.kind))
     .reduce((n, e) => n + e.count, 0);
 
   // The control blob stays its OWN fetch, deliberately: it is liveness (which
