@@ -4,6 +4,7 @@ import { FOCUS_PALETTES } from "./focusPalette";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
 import { type SessionEvidence } from "../../services/api";
 import { parseServerDate } from "../../utils/date";
+import { kindLabel } from "./focusDetectionKinds";
 
 // The right-rail evidence strip. Deliberately NOT a filmstrip of every frame
 // the sidecar ever saw — evidence frames are only the ones the sidecar chose to
@@ -16,14 +17,6 @@ import { parseServerDate } from "../../utils/date";
 // one `/focus/session-activity` poll `FocusExpanded` runs — before that it read
 // `/focus/cam/evidence` (the last few DAYS) and filtered client-side, which is
 // the same three-scopes problem the footer had.
-
-const KIND_LABEL: Record<string, string> = {
-  phone: "phone",
-  vape: "vape",
-  distracted: "distracted",
-  stand: "stood up",
-  left_desk: "left desk",
-};
 
 function timeLabel(iso: string | null): string {
   const d = iso ? parseServerDate(iso) : null;
@@ -76,7 +69,7 @@ export function FocusEvidenceGallery({ items }: Props) {
           {it.frame ? (
             <img
               src={it.frame}
-              alt={KIND_LABEL[it.kind ?? ""] ?? "evidence"}
+              alt={kindLabel(it.kind) || "evidence"}
               style={{ display: "block", width: "100%", aspectRatio: "4 / 3", objectFit: "cover" }}
             />
           ) : (
@@ -90,7 +83,7 @@ export function FocusEvidenceGallery({ items }: Props) {
               display: "flex", justifyContent: "space-between", gap: 4,
             }}
           >
-            <span>{KIND_LABEL[it.kind ?? ""] ?? it.kind ?? "—"}</span>
+            <span>{kindLabel(it.kind)}</span>
             <span>{timeLabel(it.at)}</span>
           </div>
         </button>
@@ -110,12 +103,12 @@ export function FocusEvidenceGallery({ items }: Props) {
           {enlarged.frame && (
             <img
               src={enlarged.frame}
-              alt={KIND_LABEL[enlarged.kind ?? ""] ?? "evidence"}
+              alt={kindLabel(enlarged.kind) || "evidence"}
               style={{ maxWidth: "82vw", maxHeight: "82vh", borderRadius: 12 }}
             />
           )}
           <div style={{ position: "absolute", bottom: "9vh", color: "#fff", fontSize: 13, fontFamily: FONT }}>
-            {KIND_LABEL[enlarged.kind ?? ""] ?? enlarged.kind} · {timeLabel(enlarged.at)}
+            {kindLabel(enlarged.kind)} · {timeLabel(enlarged.at)}
           </div>
         </div>
       )}
