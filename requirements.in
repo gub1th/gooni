@@ -1,6 +1,10 @@
 # Human-editable dependency input. To change deps: edit THIS file, then run
-#   pip-compile requirements.in
-# (pip-tools; use Python 3.11 to match the Docker image) to regenerate the
+#   docker run --rm --platform linux/amd64 -v "$PWD":/w -w /w python:3.11-slim \
+#     sh -c "pip install -q pip-tools && pip-compile --generate-hashes --strip-extras requirements.in"
+# It MUST run on linux/amd64 + Python 3.11 (the deploy image): pip-compile
+# resolves for the platform it runs on, and a macOS/arm64 compile silently
+# drops platform-conditional transitive deps (greenlet, via sqlalchemy) —
+# which breaks every deploy in --require-hashes mode. Regenerate the
 # locked requirements.txt, which is what the Dockerfile installs. Never edit
 # requirements.txt by hand — it is generated.
 # Every dep carries a `>=current,<next_major` ceiling. Deploys install the
