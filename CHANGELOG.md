@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.255.2 — 2026-08-17 (patch)
+
+- fix(ultrahuman): use API key on daily_metrics, parse verified response shape (#532)
+
 ## 0.255.1 — 2026-08-17 (patch)
 
 - fix(ultrahuman): correct OAuth authorize URL to auth.ultrahuman.com/authorise (#531)
