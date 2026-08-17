@@ -54,7 +54,7 @@ def _local_today(db: Session) -> date_cls:
 
 # ── OAuth 2.0 (primary path) ────────────────────────────────────────────
 
-AUTHORIZE_URL = "https://partner.ultrahuman.com/authorize"
+AUTHORIZE_URL = "https://auth.ultrahuman.com/authorise"
 TOKEN_URL = "https://partner.ultrahuman.com/api/partners/oauth/token"
 DAILY_METRICS_URL = "https://partner.ultrahuman.com/api/v1/partner/daily_metrics"
 
