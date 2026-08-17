@@ -317,6 +317,13 @@ function IntegrationsTab() {
           blurbConfigured="Connect to surface recovery, HRV, and sleep as trackables."
           blurbNotConfigured="Set WHOOP_CLIENT_ID / WHOOP_CLIENT_SECRET / WHOOP_REDIRECT_URI on the backend to enable."
         />
+        <IntegrationSection
+          provider="ultrahuman"
+          label="Ultrahuman"
+          icon={<UltrahumanLogo />}
+          blurbConfigured="Connect to surface sleep score, recovery index, HRV, and steps as trackables."
+          blurbNotConfigured="Set ULTRAHUMAN_CLIENT_ID / ULTRAHUMAN_CLIENT_SECRET on the backend to enable."
+        />
       </div>
     </>
   );
@@ -705,6 +712,18 @@ function WhoopLogo() {
         strokeLinejoin="round"
         fill="none"
       />
+    </svg>
+  );
+}
+
+function UltrahumanLogo() {
+  // Same reasoning as WhoopLogo: a stand-in ring glyph rather than
+  // redistributing Ultrahuman's brand mark.
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+      <rect width="24" height="24" rx="6" fill="#0F0F10" />
+      <circle cx="12" cy="12" r="6.5" stroke="#FFFFFF" strokeWidth="1.7" fill="none" />
+      <circle cx="12" cy="12" r="2" fill="#FFFFFF" />
     </svg>
   );
 }

@@ -801,10 +801,10 @@ function FeedTiles() {
         {uh === null ? (
           <Dim>…</Dim>
         ) : uh === "err" || !uh.date ? (
-          // Placeholder until the captain provisions ULTRAHUMAN_API_KEY —
-          // see app/services/ultrahuman.py for the setup TODOs. No OAuth
-          // connect button (API-key auth, no browser flow), just a dim
-          // "not connected" state.
+          // No connect button here — connecting lives in Settings ▸
+          // Integrations (IntegrationSection, OAuth-based since 2026-08-17).
+          // This tile is a read-only feed; a disconnected/unconfigured
+          // account just reads "not connected".
           <Dim>not connected</Dim>
         ) : (
           <>

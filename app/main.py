@@ -273,6 +273,12 @@ async def auth_middleware(request: Request, call_next):
         or path == "/auth/google/callback"
         or path == "/auth/github/callback"
         or path == "/auth/whoop/callback"
+        # Ultrahuman OAuth: authorize is a plain browser navigation (no fetch
+        # to attach a Bearer to) and the callback is hit by Ultrahuman's own
+        # redirect with no bearer — same reasoning as the Google/Whoop lines
+        # above.
+        or path == "/ultrahuman/oauth/authorize"
+        or path == "/ultrahuman/oauth/callback"
         # Whoop webhooks carry their own HMAC signature; password gate
         # would 401 before signature check runs.
         or path == "/webhooks/whoop"
