@@ -13,7 +13,14 @@ const assert = require("node:assert");
 const { AppFocusTracker } = require("../src/appfocus");
 const { AppReporter, describeReporter, parseRetryAfter } = require("../src/appreporter");
 const { AppSensor } = require("../src/appsensor");
-const { parseFrontmost, isPermissionError, queryFrontmost } = require("../src/frontmost");
+const {
+  parseFrontmost,
+  isPermissionError,
+  queryFrontmost,
+  resolveGenericApp,
+  FRONTMOST_SCRIPT,
+  FRONTMOST_PATH_SCRIPT,
+} = require("../src/frontmost");
 
 const T0 = 1_700_000_000_000;
 
@@ -625,4 +632,83 @@ test("the query survives an execFile that throws synchronously", async () => {
   });
   assert.equal(result.app, null);
   assert.equal(result.error, "EMFILE");
+});
+
+// ── generic-name resolution ("Electron" is a runtime, not an app) ────────────
+
+test("resolveGenericApp: dev electron path reads the project's package.json name", () => {
+  const reads = [];
+  const resolved = resolveGenericApp({
+    name: "Electron",
+    appPath: "/Users/d/proj/desktop/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+    readTextFile: (p) => {
+      reads.push(p);
+      return JSON.stringify({ name: "gooni-desktop", productName: "Gooni" });
+    },
+  });
+  assert.equal(resolved, "Gooni", "productName wins — it is the display name");
+  assert.deepEqual(reads, ["/Users/d/proj/desktop/package.json"]);
+});
+
+test("resolveGenericApp: unreadable package.json falls back to the project dir name", () => {
+  const resolved = resolveGenericApp({
+    name: "Electron",
+    appPath: "/Users/d/proj/desktop/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+    readTextFile: () => { throw new Error("ENOENT"); },
+  });
+  assert.equal(resolved, "desktop");
+});
+
+test("resolveGenericApp: a packaged bundle resolves to its .app basename", () => {
+  const resolved = resolveGenericApp({
+    name: "Electron",
+    appPath: "/Applications/Cursor.app/Contents/MacOS/Cursor",
+  });
+  assert.equal(resolved, "Cursor");
+});
+
+test("resolveGenericApp: a bare Electron.app keeps the honest generic name", () => {
+  const resolved = resolveGenericApp({
+    name: "Electron",
+    appPath: "/tmp/Electron.app/Contents/MacOS/Electron",
+  });
+  assert.equal(resolved, "Electron", "no better answer available — don't invent one");
+});
+
+test("a generic frontmost name triggers the path query and comes back resolved", async () => {
+  const scripts = [];
+  const result = await queryFrontmost({
+    timeoutMs: 100,
+    execFileImpl: (_bin, args, _opts, cb) => {
+      scripts.push(args[1]);
+      if (args[1] === FRONTMOST_SCRIPT) cb(null, "Electron\n", "");
+      else cb(null, "/Applications/Cursor.app/Contents/MacOS/Cursor\n", "");
+    },
+  });
+  assert.deepEqual(scripts, [FRONTMOST_SCRIPT, FRONTMOST_PATH_SCRIPT]);
+  assert.equal(result.app, "Cursor");
+});
+
+test("a non-generic name never spawns the second query", async () => {
+  const scripts = [];
+  const result = await queryFrontmost({
+    timeoutMs: 100,
+    execFileImpl: (_bin, args, _opts, cb) => {
+      scripts.push(args[1]);
+      cb(null, "Google Chrome\n", "");
+    },
+  });
+  assert.deepEqual(scripts, [FRONTMOST_SCRIPT], "one spawn per poll is the contract for ordinary apps");
+  assert.equal(result.app, "Google Chrome");
+});
+
+test("a failed path query keeps the generic name rather than erroring the poll", async () => {
+  const result = await queryFrontmost({
+    timeoutMs: 100,
+    execFileImpl: (_bin, args, _opts, cb) => {
+      if (args[1] === FRONTMOST_SCRIPT) cb(null, "Electron\n", "");
+      else cb(new Error("boom"), "", "");
+    },
+  });
+  assert.equal(result.app, "Electron", "resolution is best-effort — a healthy poll must not become an error");
 });
