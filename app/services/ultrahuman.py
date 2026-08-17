@@ -1,35 +1,38 @@
-"""Ultrahuman ring integration — TWO auth paths, kept side by side.
+"""Ultrahuman ring integration — API key is the PRIMARY path, OAuth secondary.
 
-**OAuth 2.0** (added 2026-08-17) is now the primary path — mirrors
-`whoop.py`'s shape exactly (OAuthToken row, auto-refresh, json master +
-numeric-mirror Trackable feed) — because the real per-metric data
-(`sleep_score`, `recovery_index`, HRV, steps, ...) lives behind
-`GET /api/v1/partner/daily_metrics`, which requires a Bearer access token
-from the 3-legged Partner OAuth flow (docs:
-https://vision.ultrahuman.com/developer-docs?type=oauth). The old API-key
-`/api/v1/metrics` endpoint returns only raw HR/temp/HRV time-series, not
-the scored daily rollups — kept below as a FALLBACK when no OAuth token is
-connected, not removed.
+Verified live 2026-08-16: the Personal API Token (`ULTRAHUMAN_API_KEY`) works
+directly against `GET /api/v1/partner/daily_metrics` — the same endpoint the
+OAuth flow was built for, no Bearer token needed. Auth header is the bare key,
+no "Bearer" prefix: `Authorization: <ULTRAHUMAN_API_KEY>`. The response
+nests each metric under `data.metrics.<date>[]`, one `{type, object}` entry
+per metric (some flat as `object.value`, some structured like
+`object.sleep_score.score`) — see `_parse_daily_metrics` for the exact shape.
+
+The old `/api/v1/metrics` raw-time-series endpoint is gone: `daily_metrics`
+already returns everything it did plus the scored rollups.
+
+OAuth 2.0 (added 2026-08-17, docs: https://vision.ultrahuman.com/developer-docs?type=oauth)
+stays as a SECONDARY path for accounts without a Personal API Token — same
+`daily_metrics` endpoint, Bearer access token instead of the raw key.
 
 Setup (captain to-do, one-time at partner.ultrahuman.com):
-  1. Register an OAuth app, redirect URI:
+  1. API key (preferred): ULTRAHUMAN_API_KEY (+ optional ULTRAHUMAN_EMAIL)
+  2. OAuth app, redirect URI:
        - https://gooni-bot.fly.dev/ultrahuman/oauth/callback   (prod)
        - http://localhost:8000/ultrahuman/oauth/callback       (dev)
-  2. Env vars (client id/secret already set on Fly per the launch brief):
+     Env vars (client id/secret already set on Fly per the launch brief):
        ULTRAHUMAN_CLIENT_ID
        ULTRAHUMAN_CLIENT_SECRET
        ULTRAHUMAN_REDIRECT_URI   (optional — defaults to the prod URL above)
-  3. API-key fallback (unchanged, still supported):
-       ULTRAHUMAN_API_KEY
-       ULTRAHUMAN_EMAIL
 
-Scope requested: `ring_data` (sleep, recovery, HR, HRV, steps, temp — per
-the OAuth docs, this single scope covers every field `daily_metrics`
-returns).
+Scope requested (OAuth only): `ring_data` (sleep, recovery, HR, HRV, steps,
+temp — per the OAuth docs, this single scope covers every field
+`daily_metrics` returns).
 
-Data pulled: sleep score, recovery index, HRV, resting HR, steps, temp,
-SpO2, VO2 max — same "daily rollup" shape whoop.py produces, so it slots
-into the same trackable pattern (one json master + numeric mirrors).
+Data pulled: sleep score, recovery index, HRV, resting HR, steps, sleep
+stages, sleep efficiency, VO2 max, movement index — same "daily rollup"
+shape whoop.py produces, so it slots into the same trackable pattern (one
+json master + numeric mirrors).
 """
 
 from __future__ import annotations
@@ -204,7 +207,7 @@ def disconnect(db: Session) -> bool:
     return True
 
 
-# ── API-key fallback (unchanged path — kept for /api/v1/metrics) ───────
+# ── API key (primary path) ──────────────────────────────────────────────
 
 
 def _apikey_env() -> tuple[str | None, str | None]:
@@ -215,8 +218,8 @@ def _apikey_env() -> tuple[str | None, str | None]:
 
 
 def is_apikey_configured() -> bool:
-    api_key, email = _apikey_env()
-    return bool(api_key and email)
+    api_key, _ = _apikey_env()
+    return bool(api_key)
 
 
 # Kept for callers/tests that only care "is *some* Ultrahuman path usable".
@@ -241,121 +244,106 @@ def connection_status(db: Session) -> dict[str, Any]:
     }
 
 
-_API_BASE = "https://partner.ultrahuman.com/api/v1"
+# ── daily_metrics fetch + parse (shared by both auth paths) ────────────
+#
+# Verified live response shape (2026-08-16):
+#   {"data": {"metrics": {"<date>": [{"type": "sleep", "object": {...}}, ...]}}}
+# Most types are FLAT (`object.value`), a few are NESTED
+# (`sleep_score.object.sleep_score.score`, `total_sleep.object.total_sleep.minutes`, ...).
 
 
-def _apikey_headers() -> dict[str, str]:
-    api_key, _ = _apikey_env()
-    if not api_key:
-        raise RuntimeError("Ultrahuman not configured (ULTRAHUMAN_API_KEY missing)")
-    return {"Authorization": api_key}
+def _num(v: Any) -> Any:
+    return v if isinstance(v, (int, float)) else None
 
 
-def _apikey_get(path: str, params: dict | None = None) -> dict[str, Any]:
-    resp = httpx.get(
-        f"{_API_BASE}{path}",
-        headers=_apikey_headers(),
-        params=params or {},
-        timeout=20,
-    )
-    resp.raise_for_status()
-    return resp.json()
+def _parse_daily_metrics(raw: dict[str, Any], day: date_cls) -> dict[str, Any]:
+    metrics = ((raw.get("data") or {}).get("metrics") or {})
+    entries = metrics.get(day.isoformat()) or []
 
+    by_type: dict[str, Any] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        kind = entry.get("type")
+        obj = entry.get("object")
+        if kind and isinstance(obj, dict):
+            by_type[kind] = obj
 
-def _fetch_via_apikey(db: Session) -> dict[str, Any]:
-    """Best-guess parse of the raw-metrics endpoint — the original stub's
-    logic, unverified but left as a fallback only reached when there's no
-    OAuth connection."""
-    _, email = _apikey_env()
-    today = _local_today(db)
-    data = _apikey_get("/metrics", params={"email": email, "date": today.isoformat()})
-    sleep = data.get("sleep") or {}
-    recovery = data.get("recovery") or {}
-    activity = data.get("activity") or {}
+    sleep = by_type.get("sleep") or {}
+
+    def flat(kind: str) -> Any:
+        return _num((by_type.get(kind) or {}).get("value"))
+
+    sleep_score = _num((sleep.get("sleep_score") or {}).get("score"))
+    total_sleep_minutes = _num((sleep.get("total_sleep") or {}).get("minutes"))
+    sleep_efficiency = _num((sleep.get("sleep_efficiency") or {}).get("percentage"))
+    deep_sleep_minutes = _num((sleep.get("deep_sleep") or {}).get("minutes"))
+    light_sleep_minutes = _num((sleep.get("light_sleep") or {}).get("minutes"))
+    rem_sleep_minutes = _num((sleep.get("rem_sleep") or {}).get("minutes"))
+    restorative_sleep = _num((sleep.get("restorative_sleep") or {}).get("percentage"))
+
+    recovery_index = flat("recovery_index")
+    avg_sleep_hrv = flat("avg_sleep_hrv")
+    sleep_rhr = flat("sleep_rhr")
+    vo2_max = flat("vo2_max")
+    movement_index = flat("movement_index")
+    active_minutes = flat("active_minutes")
+    steps = _num((by_type.get("steps") or {}).get("total"))
+
     return {
-        "sleep_score": sleep.get("score"),
-        "sleep_minutes": sleep.get("duration_minutes"),
-        "recovery_score": recovery.get("score") or recovery.get("recovery_index"),
-        "recovery_index": recovery.get("recovery_index") or recovery.get("score"),
-        "hrv_ms": recovery.get("hrv") or recovery.get("hrv_ms"),
-        "resting_hr": recovery.get("resting_heart_rate"),
-        "steps": activity.get("steps"),
-        "active_calories": activity.get("active_calories"),
+        "sleep_score": sleep_score,
+        "sleep_minutes": total_sleep_minutes,
+        "total_sleep_minutes": total_sleep_minutes,
+        "sleep_efficiency": sleep_efficiency,
+        "deep_sleep_minutes": deep_sleep_minutes,
+        "light_sleep_minutes": light_sleep_minutes,
+        "rem_sleep_minutes": rem_sleep_minutes,
+        "restorative_sleep": restorative_sleep,
+        "recovery_score": recovery_index,
+        "recovery_index": recovery_index,
+        "hrv_ms": avg_sleep_hrv,
+        "avg_sleep_hrv": avg_sleep_hrv,
+        "resting_hr": sleep_rhr,
+        "sleep_rhr": sleep_rhr,
+        "steps": steps,
+        "active_minutes": active_minutes,
+        "movement_index": movement_index,
+        "vo2_max": vo2_max,
         "fetched_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
-# ── OAuth daily-metrics fetch (the real, per-metric data) ──────────────
-
-
-def _unwrap(raw: dict[str, Any]) -> dict[str, Any]:
-    """`daily_metrics` may envelope the payload under a wrapper key —
-    unconfirmed against a live account, so this tries the obvious ones
-    before falling back to the raw dict itself. TODO(captain): drop this
-    once you've seen a real response."""
-    for key in ("data", "result", "metrics"):
-        inner = raw.get(key)
-        if isinstance(inner, dict):
-            return inner
-    return raw
-
-
-def _fetch_via_oauth(db: Session, access_token: str) -> dict[str, Any]:
+def _fetch_daily_metrics(db: Session, headers: dict[str, str]) -> dict[str, Any]:
     today = _local_today(db)
     params: dict[str, Any] = {"date": today.isoformat()}
     email = os.getenv("ULTRAHUMAN_EMAIL")
     if email:
         params["email"] = email
-    resp = httpx.get(
-        DAILY_METRICS_URL,
-        headers={"Authorization": f"Bearer {access_token}"},
-        params=params,
-        timeout=20,
-    )
+    resp = httpx.get(DAILY_METRICS_URL, headers=headers, params=params, timeout=20)
     resp.raise_for_status()
-    d = _unwrap(resp.json())
+    return _parse_daily_metrics(resp.json(), today)
 
-    recovery_index = d.get("recovery_index")
-    if recovery_index is None:
-        recovery_index = d.get("recovery")
-    hrv_ms = d.get("hrv")
-    if hrv_ms is None:
-        hrv_ms = d.get("avg_sleep_hrv")
-    resting_hr = d.get("night_rhr")
-    if resting_hr is None:
-        resting_hr = d.get("sleep_rhr") or d.get("hr")
 
-    return {
-        "sleep_score": d.get("sleep_score"),
-        "sleep_minutes": d.get("total_sleep"),
-        "sleep_efficiency": d.get("sleep_efficiency"),
-        "deep_sleep_minutes": d.get("deep_sleep"),
-        "light_sleep_minutes": d.get("light_sleep"),
-        "rem_sleep_minutes": d.get("rem_sleep"),
-        "recovery_score": recovery_index,
-        "recovery_index": recovery_index,
-        "hrv_ms": hrv_ms,
-        "avg_sleep_hrv": d.get("avg_sleep_hrv"),
-        "resting_hr": resting_hr,
-        "steps": d.get("steps"),
-        "active_minutes": d.get("active_minutes"),
-        "movement_index": d.get("movement_index"),
-        "temp": d.get("temp"),
-        "spo2": d.get("spo2"),
-        "vo2_max": d.get("vo2_max"),
-        "fetched_at": datetime.now(timezone.utc).isoformat(),
-    }
+def _fetch_via_apikey(db: Session) -> dict[str, Any]:
+    api_key, _ = _apikey_env()
+    if not api_key:
+        raise RuntimeError("Ultrahuman not configured (ULTRAHUMAN_API_KEY missing)")
+    return _fetch_daily_metrics(db, {"Authorization": api_key})
+
+
+def _fetch_via_oauth(db: Session, access_token: str) -> dict[str, Any]:
+    return _fetch_daily_metrics(db, {"Authorization": f"Bearer {access_token}"})
 
 
 def fetch_today_snapshot(db: Session) -> dict[str, Any] | None:
-    """OAuth first (the real per-metric data); falls back to the API-key
-    raw-metrics endpoint when no OAuth token is connected. Returns None if
-    neither path is configured."""
+    """API key first (the verified, no-OAuth-needed path); falls back to
+    OAuth when no API key is configured. Returns None if neither is
+    configured."""
+    if is_apikey_configured():
+        return _fetch_via_apikey(db)
     token = get_valid_access_token(db)
     if token:
         return _fetch_via_oauth(db, token)
-    if is_apikey_configured():
-        return _fetch_via_apikey(db)
     return None
 
 
@@ -365,10 +353,15 @@ MASTER_KEY = "ultrahuman"
 _NUMERIC_KEYS: tuple[tuple[str, str, str | None], ...] = (
     # (trackable name, payload key, unit)
     ("ultrahuman sleep score", "sleep_score", "%"),
+    ("ultrahuman total sleep", "total_sleep_minutes", "min"),
+    ("ultrahuman deep sleep", "deep_sleep_minutes", "min"),
+    ("ultrahuman rem sleep", "rem_sleep_minutes", "min"),
+    ("ultrahuman sleep efficiency", "sleep_efficiency", "%"),
     ("ultrahuman recovery", "recovery_index", "%"),
-    ("ultrahuman hrv", "hrv_ms", "ms"),
-    ("ultrahuman rhr", "resting_hr", "bpm"),
+    ("ultrahuman hrv", "avg_sleep_hrv", "ms"),
+    ("ultrahuman rhr", "sleep_rhr", "bpm"),
     ("ultrahuman steps", "steps", None),
+    ("ultrahuman vo2 max", "vo2_max", None),
 )
 
 
