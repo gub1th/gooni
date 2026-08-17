@@ -4,9 +4,10 @@ import {
   fetchCalendarStatus, startCalendarOAuth, disconnectCalendar,
   fetchGithubStatus, startGithubOAuth, disconnectGithub,
   fetchWhoopStatus, startWhoopOAuth, disconnectWhoop,
+  fetchUltrahumanStatus, startUltrahumanOAuth, disconnectUltrahuman,
 } from "../services/api";
 
-type Provider = "google" | "github" | "whoop";
+type Provider = "google" | "github" | "whoop" | "ultrahuman";
 
 interface ProviderApi {
   fetchStatus: () => Promise<Status>;
@@ -35,6 +36,11 @@ const PROVIDERS: Record<Provider, ProviderApi> = {
     fetchStatus: fetchWhoopStatus,
     start: startWhoopOAuth,
     disconnect: disconnectWhoop,
+  },
+  ultrahuman: {
+    fetchStatus: fetchUltrahumanStatus,
+    start: startUltrahumanOAuth,
+    disconnect: disconnectUltrahuman,
   },
 };
 

@@ -449,11 +449,18 @@ export interface UltrahumanToday {
   date: string | null;
   sleep_score: number | null;
   sleep_minutes: number | null;
+  sleep_efficiency?: number | null;
   recovery_score: number | null;
+  // Same value as recovery_score under the OAuth `daily_metrics` field name —
+  // both are carried since the API-key fallback path only fills recovery_score.
+  recovery_index?: number | null;
   hrv_ms: number | null;
   resting_hr: number | null;
   steps: number | null;
+  active_minutes?: number | null;
   active_calories: number | null;
+  vo2_max?: number | null;
+  spo2?: number | null;
   updated_at: string | null;
 }
 export async function fetchUltrahumanToday(refresh = false): Promise<UltrahumanToday> {
@@ -469,11 +476,24 @@ export interface UltrahumanStatus {
   configured: boolean;
   connected: boolean;
   account_email: string | null;
+  apikey_configured?: boolean;
 }
 export async function fetchUltrahumanStatus(): Promise<UltrahumanStatus> {
   const res = await apiFetch(`${BASE}/ultrahuman/status`);
   if (!res.ok) throw new Error("Failed to fetch Ultrahuman status");
   return res.json();
+}
+// `/ultrahuman/oauth/authorize` itself 302s straight to Ultrahuman (see
+// app/routers/ultrahuman.py) — unlike the other providers' `/start` routes,
+// there's no JSON round trip first, so this just builds the URL the popup
+// should open. Also why the route is exempt from the Bearer middleware:
+// window.open() can't attach an Authorization header.
+export async function startUltrahumanOAuth(): Promise<{ authorize_url: string }> {
+  return { authorize_url: `${BASE}/ultrahuman/oauth/authorize` };
+}
+export async function disconnectUltrahuman(): Promise<void> {
+  const res = await apiFetch(`${BASE}/ultrahuman/oauth`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to disconnect Ultrahuman");
 }
 
 export async function cleanupEmptyNotes(): Promise<{ deleted: number; ids: number[] }> {
