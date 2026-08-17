@@ -210,16 +210,12 @@ def disconnect(db: Session) -> bool:
 # ── API key (primary path) ──────────────────────────────────────────────
 
 
-def _apikey_env() -> tuple[str | None, str | None]:
-    return (
-        os.getenv("ULTRAHUMAN_API_KEY"),
-        os.getenv("ULTRAHUMAN_EMAIL"),
-    )
+def _apikey_env() -> str | None:
+    return os.getenv("ULTRAHUMAN_API_KEY")
 
 
 def is_apikey_configured() -> bool:
-    api_key, _ = _apikey_env()
-    return bool(api_key)
+    return bool(_apikey_env())
 
 
 # Kept for callers/tests that only care "is *some* Ultrahuman path usable".
@@ -316,16 +312,13 @@ def _parse_daily_metrics(raw: dict[str, Any], day: date_cls) -> dict[str, Any]:
 def _fetch_daily_metrics(db: Session, headers: dict[str, str]) -> dict[str, Any]:
     today = _local_today(db)
     params: dict[str, Any] = {"date": today.isoformat()}
-    email = os.getenv("ULTRAHUMAN_EMAIL")
-    if email:
-        params["email"] = email
     resp = httpx.get(DAILY_METRICS_URL, headers=headers, params=params, timeout=20)
     resp.raise_for_status()
     return _parse_daily_metrics(resp.json(), today)
 
 
 def _fetch_via_apikey(db: Session) -> dict[str, Any]:
-    api_key, _ = _apikey_env()
+    api_key = _apikey_env()
     if not api_key:
         raise RuntimeError("Ultrahuman not configured (ULTRAHUMAN_API_KEY missing)")
     return _fetch_daily_metrics(db, {"Authorization": api_key})
