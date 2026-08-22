@@ -201,6 +201,23 @@ export function AmbientHome({
   const [replyText, setReplyText] = useState<string | null>(null);
   const [replyShown, setReplyShown] = useState(false);
   const [peekNote, setPeekNote] = useState<ApiNote | null>(null);
+
+  // POLLING GATE. The home is always mounted and portaled to document.body —
+  // a non-home surface slides in OVER it rather than replacing it — and
+  // `covered` only ever stood its CHROME down (opacity, pointer-events,
+  // `hidden`). It never gated a single fetch, so sitting on /notes kept
+  // seven pollers hitting the server about a screen nobody could see.
+  //
+  // A ref, not a dependency: `covered` is computed far below these effects
+  // (it needs `armed`/`needsWake`), so referencing it in a dep array would be
+  // a TDZ error, and re-creating the intervals on every cover/uncover would
+  // reset their phase. The timer keeps ticking and the CALLBACK skips —
+  // a no-op timer costs nothing, a request costs a round trip.
+  //
+  // Deliberately NOT applied to useFocusSessionSync: the header notch renders
+  // a running session on EVERY surface, so pausing it would freeze the clock
+  // the moment you opened notes.
+  const pollPaused = useRef(false);
   const [savedFlash, setSavedFlash] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const stickyRef = useRef<StickyHandle>(null);
@@ -288,7 +305,10 @@ export function AmbientHome({
 
   useEffect(() => {
     void reload();
-    const t = window.setInterval(() => void reload(), POLL_MS);
+    const t = window.setInterval(() => {
+      if (pollPaused.current) return;
+      void reload();
+    }, POLL_MS);
     return () => window.clearInterval(t);
   }, [reload]);
 
@@ -336,7 +356,11 @@ export function AmbientHome({
   useEffect(() => {
     void loadCommitments();
     void loadTotals();
-    const iv = window.setInterval(() => { void loadCommitments(); void loadTotals(); }, DASH_POLL_MS);
+    const iv = window.setInterval(() => {
+      if (pollPaused.current) return;
+      void loadCommitments();
+      void loadTotals();
+    }, DASH_POLL_MS);
     return () => window.clearInterval(iv);
   }, [loadCommitments, loadTotals]);
 
@@ -945,6 +969,22 @@ export function AmbientHome({
   // Capturing DIMS the home, it no longer deletes it. The ladder (and the reason
   // a covering surface is the only zero) lives in captureStates.ts.
   const captureMode = captureState({ boxOpen: boxMode, editorOpen });
+  // Keep the polling gate in step with `covered`, and REFRESH on the way
+  // back: a home that paused for ten minutes behind a panel would otherwise
+  // show its last pre-cover state until the next tick, which is exactly the
+  // staleness the polling exists to prevent.
+  const wasPaused = useRef(false);
+  useEffect(() => {
+    const paused = covered || logSheet;
+    pollPaused.current = paused;
+    if (wasPaused.current && !paused) {
+      void reload();
+      void loadCommitments();
+      void loadTotals();
+    }
+    wasPaused.current = paused;
+  }, [covered, logSheet, reload, loadCommitments, loadTotals]);
+
   const stageOpacity = homeOpacity(captureMode, covered);
   const stageLive = homeInteractive(captureMode, covered);
 
@@ -1144,7 +1184,7 @@ export function AmbientHome({
             pointerEvents: stageLive ? "auto" : "none",
           }}
         >
-          <ProactiveLine />
+          <ProactiveLine paused={covered || logSheet} />
         </div>
 
         <div
@@ -1158,7 +1198,7 @@ export function AmbientHome({
             pointerEvents: stageLive ? "auto" : "none",
           }}
         >
-          <CurrentActivityLine />
+          <CurrentActivityLine paused={covered || logSheet} />
           {/* The mic moved off the header (2026-08-15) — it's a HOME control
               (voice capture is a home function, bridged into the header via
               useHomeChromeStore only so the header could render it), so it

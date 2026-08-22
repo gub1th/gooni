@@ -42,7 +42,12 @@ import {
 
 const SLOT_H = 20;
 
-export function ProactiveLine() {
+
+// `paused` is the home's covered flag. The home is always mounted and
+// portaled, so a surface sliding over it DIMS this component rather than
+// unmounting it — without the gate the interval keeps hitting the server
+// about a line nobody can see.
+export function ProactiveLine({ paused = false }: { paused?: boolean }) {
   const [obs, setObs] = useState<ProactiveObservation | null>(null);
   const [hover, setHover] = useState(false);
   // Ids waved away in this sitting. The dismiss POST is durable, but the poll
@@ -61,10 +66,11 @@ export function ProactiveLine() {
   }, []);
 
   useEffect(() => {
+    if (paused) return;
     void load();
     const id = window.setInterval(() => void load(), PROACTIVE_POLL_MS);
     return () => window.clearInterval(id);
-  }, [load]);
+  }, [load, paused]);
 
   const dismiss = useCallback(() => {
     const target = obs;

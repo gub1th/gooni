@@ -627,7 +627,18 @@ export function NoteEditor({
   const ambient = variant === "ambient";
   const embedded = variant === "embedded" || ambient;
 
-  const { selectedSpaceId, notes, activeNoteId: storeActiveNoteId, updateNote, refetchNote, selectNote, deleteNote } = useNotesContentStore();
+  // Per-field selectors, not a whole-store destructure. Destructuring
+  // subscribes to EVERY store write, so one note's refetch re-rendered every
+  // consumer — and the save path fires several writes per edit. Zustand's
+  // actions are stable identities defined once in the creator, so selecting
+  // them individually never triggers a render on its own.
+  const selectedSpaceId = useNotesContentStore((s) => s.selectedSpaceId);
+  const notes = useNotesContentStore((s) => s.notes);
+  const storeActiveNoteId = useNotesContentStore((s) => s.activeNoteId);
+  const updateNote = useNotesContentStore((s) => s.updateNote);
+  const refetchNote = useNotesContentStore((s) => s.refetchNote);
+  const selectNote = useNotesContentStore((s) => s.selectNote);
+  const deleteNote = useNotesContentStore((s) => s.deleteNote);
   // THE ephemeral switch, in one line. Every guard downstream is already
   // `activeNoteId && activeNoteId > 0`, so nulling it here is what makes the
   // ambient composer create-only: no hydration, no autosave, no save-on-leave,
@@ -896,6 +907,30 @@ export function NoteEditor({
             embedded ? "min-height: 80px" : "min-height: 200px",
           ].join("; "),
           class: "gooni-note-editor",
+        },
+        // URL paste -> smartlink. THIS is where it belongs, not on a React
+        // onPaste on the wrapper div: that fires in the BUBBLE phase, by
+        // which point ProseMirror has already inserted the pasted text into
+        // the doc. `preventDefault()` there is too late, so a pasted link
+        // produced BOTH the raw URL and the card. `handlePaste` is a direct
+        // view prop — ProseMirror calls it before its own handling, and
+        // returning true suppresses the default insert entirely.
+        //
+        // Sync detect + return true, then insert asynchronously: the OG
+        // fetch cannot be awaited here (the hook must answer immediately),
+        // and pasteAsLinkCardIfUrl already inserts a placeholder card first
+        // and patches its attrs when the metadata lands.
+        handlePaste: (_view, event) => {
+          const text = event.clipboardData?.getData("text/plain") ?? "";
+          const trimmed = text.trim();
+          if (!URL_PASTE_RE.test(trimmed)) return false;
+          const ed = editorRef.current;
+          if (!ed) return false;
+          void pasteAsLinkCardIfUrl(ed, trimmed).then(() => {
+            hasChanges.current = true;
+            scheduleSave();
+          });
+          return true;
         },
         handleKeyDown: (_view, event) => {
           // The ambient composer is a note editor, so Enter is a NEWLINE there
@@ -1919,17 +1954,10 @@ export function NoteEditor({
               }}
               onPaste={async (e) => {
                 if (!editor) return;
-                // URL paste → LinkCard (Slack/Confluence smartcard).
-                // Sync detect + preventDefault first; only then await.
-                const text = e.clipboardData?.getData("text/plain") ?? "";
-                const trimmed = text.trim();
-                if (URL_PASTE_RE.test(trimmed)) {
-                  e.preventDefault();
-                  await pasteAsLinkCardIfUrl(editor, trimmed);
-                  hasChanges.current = true;
-                  scheduleSave();
-                  return;
-                }
+                // URL paste is handled in editorProps.handlePaste, which
+                // runs BEFORE ProseMirror inserts the text. Doing it here
+                // (bubble phase, after the insert) is what produced both the
+                // raw link and the card.
                 // File paste — existing path.
                 const all = Array.from(e.clipboardData?.files ?? []);
                 if (!all.length) return;
@@ -2472,16 +2500,7 @@ export function NoteEditor({
                   }}
                   onPaste={async (e) => {
                     if (!editor) return;
-                    // URL paste → LinkCard. Same logic as embedded variant.
-                    const text = e.clipboardData?.getData("text/plain") ?? "";
-                    const trimmed = text.trim();
-                    if (URL_PASTE_RE.test(trimmed)) {
-                      e.preventDefault();
-                      await pasteAsLinkCardIfUrl(editor, trimmed);
-                      hasChanges.current = true;
-                      scheduleSave();
-                      return;
-                    }
+                    // URL paste is handled in editorProps.handlePaste.
                     const all = Array.from(e.clipboardData?.files ?? []);
                     if (!all.length) return;
                     e.preventDefault();

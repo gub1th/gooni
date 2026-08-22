@@ -298,7 +298,18 @@ function SectionHeader({ label }: { label: string }) {
 }
 
 export function NotesList() {
-  const { selectedSpaceId, notes, activeNoteId, createNote, selectNote, deleteNote, loadNotes } = useNotesContentStore();
+  // Per-field selectors, not a whole-store destructure. Destructuring
+  // subscribes to EVERY store write, so one note's refetch re-rendered every
+  // consumer — and the save path fires several writes per edit. Zustand's
+  // actions are stable identities defined once in the creator, so selecting
+  // them individually never triggers a render on its own.
+  const selectedSpaceId = useNotesContentStore((s) => s.selectedSpaceId);
+  const notes = useNotesContentStore((s) => s.notes);
+  const activeNoteId = useNotesContentStore((s) => s.activeNoteId);
+  const createNote = useNotesContentStore((s) => s.createNote);
+  const selectNote = useNotesContentStore((s) => s.selectNote);
+  const deleteNote = useNotesContentStore((s) => s.deleteNote);
+  const loadNotes = useNotesContentStore((s) => s.loadNotes);
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [cleanConfirm, setCleanConfirm] = useState(false);
   const [search, setSearch] = useState("");

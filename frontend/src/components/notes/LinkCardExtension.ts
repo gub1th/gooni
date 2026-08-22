@@ -74,31 +74,18 @@ export const LinkCard = Node.create({
   },
 
   renderHTML({ HTMLAttributes, node }) {
+    // The SMARTLINK shape — one row, title + host, no thumbnail and no
+    // description. Must mirror LinkCardNodeView: this output is what gets
+    // stored in the note body and what the public page renders, so a
+    // divergence means a note looks different once published.
+    //
+    // `description` and `image` are still carried as data-attributes even
+    // though nothing renders them. The OG fetch writes them, and stripping
+    // them here would quietly destroy metadata on every note that has it the
+    // next time its body was saved.
     const url = (node.attrs.url as string) || "";
     const title = (node.attrs.title as string) || url;
-    const description = (node.attrs.description as string) || "";
-    const image = (node.attrs.image as string) || "";
     const siteName = (node.attrs.siteName as string) || hostnameFromUrl(url);
-    const children: (string | [string, Record<string, string>, ...unknown[]])[] = [
-      [
-        "span",
-        { class: "gooni-link-card-body" },
-        ["span", { class: "gooni-link-card-site" }, siteName] as const,
-        ["span", { class: "gooni-link-card-title" }, title] as const,
-        ...(description
-          ? ([["span", { class: "gooni-link-card-desc" }, description]] as const)
-          : []),
-      ] as const,
-    ] as unknown as (string | [string, Record<string, string>, ...unknown[]])[];
-    if (image) {
-      children.push([
-        "span",
-        {
-          class: "gooni-link-card-thumb",
-          style: `background-image: url(${JSON.stringify(image)})`,
-        },
-      ]);
-    }
     return [
       "a",
       mergeAttributes(HTMLAttributes, {
@@ -108,7 +95,8 @@ export const LinkCard = Node.create({
         rel: "noopener noreferrer",
         class: "gooni-link-card",
       }),
-      ...children,
+      ["span", { class: "gooni-link-card-title" }, title],
+      ["span", { class: "gooni-link-card-site" }, siteName],
     ];
   },
 

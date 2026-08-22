@@ -262,7 +262,7 @@ def _not_archived(q):
     browsing, search and feed surface shares.
 
     One helper rather than an inline `filter(Note.is_archived == False)` per
-    call site for the same reason `_hide_thought_leaves` is one helper: the
+    call site for the same reason `_hide_machine_notes` is one helper: the
     failure mode of a hide feature is a surface someone forgot, and it is much
     easier to grep for the callers of a named predicate than for a boolean
     comparison. The `is_(None)` arm is defensive against a row written before

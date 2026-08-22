@@ -160,7 +160,7 @@ class DirectGateway(Gateway):
         # Mirrors GET /notes exactly, archive exclusion included (even under
         # `tag` — see that route's docstring).
         from ..db.models import Note
-        from ..routers.notes import _hide_thought_leaves
+        from ..routers.notes import _hide_machine_notes
         from ..serializers import _not_archived, _notes_order, _serialize_note_lite
 
         with self._session() as db:
@@ -170,7 +170,7 @@ class DirectGateway(Gateway):
                     Note.tags.is_not(None), Note.tags.like(f'%"{tag.strip().lower()}"%')
                 )
             else:
-                query = _hide_thought_leaves(query)
+                query = _hide_machine_notes(query)
             rows = query.order_by(_notes_order()).limit(limit).all()
             return [_serialize_note_lite(n) for n in rows]
 
@@ -179,12 +179,12 @@ class DirectGateway(Gateway):
         # included — at conversation velocity logged thoughts would otherwise
         # be the only thing this ever returns.
         from ..db.models import Note
-        from ..routers.notes import _hide_thought_leaves
+        from ..routers.notes import _hide_machine_notes
         from ..serializers import _not_archived, _notes_order, _serialize_note_lite
 
         with self._session() as db:
             rows = (
-                _hide_thought_leaves(_not_archived(db.query(Note)))
+                _hide_machine_notes(_not_archived(db.query(Note)))
                 .order_by(_notes_order())
                 .limit(limit)
                 .all()

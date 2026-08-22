@@ -250,37 +250,34 @@ function PublicNotePage() {
                  thumbnail on the right. Whole card is the <a>, so clicking
                  anywhere opens the URL in a new tab. */
               .public-prose a.gooni-link-card {
-                  display: flex; align-items: stretch;
-                  border: 1px solid rgba(0,0,0,0.12); border-radius: 8px;
-                  margin: 12px 0; background: #FAFAFA;
+                  display: inline-flex; align-items: center; gap: 7px;
+                  max-width: 100%;
+                  border: 1px solid rgba(0,0,0,0.12); border-radius: 6px;
+                  margin: 2px 0; padding: 2px 8px;
+                  background: #FAFAFA; line-height: 1.45;
                   text-decoration: none; color: inherit;
-                  overflow: hidden; min-height: 72px;
                   transition: background 120ms;
               }
               .public-prose a.gooni-link-card:hover { background: #F2F2F4; }
-              .public-prose a.gooni-link-card .gooni-link-card-body {
-                  flex: 1; min-width: 0;
-                  padding: 10px 14px;
-                  display: flex; flex-direction: column; gap: 4px;
+              .public-prose a.gooni-link-card .gooni-link-card-title {
+                  font-size: 13.5px; font-weight: 500; color: #1C1C1E;
+                  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                  min-width: 0;
               }
               .public-prose a.gooni-link-card .gooni-link-card-site {
-                  font-size: 11px; color: #8E8E93; letter-spacing: 0.2px;
-                  text-transform: uppercase; font-weight: 600;
+                  font-size: 11.5px; color: #8E8E93; flex-shrink: 0;
               }
-              .public-prose a.gooni-link-card .gooni-link-card-title {
-                  font-size: 14px; font-weight: 600; color: #1C1C1E;
-                  line-height: 1.3;
-                  overflow: hidden; text-overflow: ellipsis;
-                  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+              /* Older notes stored the chunky shape (body wrapper, description,
+                 thumbnail). Those spans are still in their saved HTML, so they
+                 are hidden rather than left to render a card this CSS no longer
+                 styles — the title/site spans inside the body wrapper still
+                 show, which is exactly the smartlink. */
+              .public-prose a.gooni-link-card .gooni-link-card-body {
+                  display: contents;
               }
-              .public-prose a.gooni-link-card .gooni-link-card-desc {
-                  font-size: 12.5px; color: #6E6E73; line-height: 1.4;
-                  overflow: hidden; text-overflow: ellipsis;
-                  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-              }
+              .public-prose a.gooni-link-card .gooni-link-card-desc,
               .public-prose a.gooni-link-card .gooni-link-card-thumb {
-                  flex-shrink: 0; width: 110px;
-                  background-size: cover; background-position: center;
+                  display: none;
               }
               /* First heading in content shouldn't double-space against the meta line. */
               .public-prose > :first-child { margin-top: 0; }
