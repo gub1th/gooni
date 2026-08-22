@@ -14,8 +14,8 @@ promise_service, feature_request_tool). The internal reconcile dance
 stays inside memory_service for now — phase 3 will extract it.
 
 Return shape: dict keyed by signal type, with whatever the handler chose
-to surface (memory rows written, feature titles, promise serializations,
-tone rules). Callers stitch this into traces / acks.
+to surface (memory rows written, feature titles, promise serializations).
+Callers stitch this into traces / acks.
 """
 
 from __future__ import annotations
@@ -55,7 +55,6 @@ class RouterResult:
     # BacklogTicket that has not existed since the v2 nuke; feature requests
     # are `feature-request`-tagged Notes.
     captured_features: list[dict] = field(default_factory=list)
-    tone_rules: list[str] = field(default_factory=list)
     # Serialized Promise rows created this turn. Slice 3: chat-side
     # auto-create is gone (creates glow instead) — this only populates
     # from explicit creation paths (promote route re-dispatch, future
@@ -90,7 +89,6 @@ class RouterResult:
         so it isn't a reliable same-turn signal."""
         return bool(
             self.captured_features
-            or self.tone_rules
             or self.captured_promises
             or self.completed_promises
             or self.broken_promises
@@ -101,7 +99,7 @@ def dispatch(signals: dict, ctx: RouterContext) -> RouterResult:
     """Fan out signals to per-type handlers. Each handler is wrapped so
     a single handler failure doesn't kill the rest of the routing.
     """
-    from .intent_handlers import features, memories, promises, tones
+    from .intent_handlers import features, memories, promises
 
     result = RouterResult()
     # Pass through reply_intent (phase 5) — extractor classifies, caller
@@ -112,14 +110,7 @@ def dispatch(signals: dict, ctx: RouterContext) -> RouterResult:
     ):
         result.reply_intent = intent
 
-    # Order matters slightly: tone_corrections need to look at
-    # prev_assistant to set feedback_for_message_id on the user message,
-    # so they run first. Other handlers are order-independent.
-    try:
-        tones.handle(signals.get("tone_corrections") or [], ctx, result)
-    except Exception as e:
-        print(f"[intent_router] tone handler error: {e}")
-
+    # Handlers are order-independent.
     try:
         features.handle(signals.get("feature_requests") or [], ctx, result)
     except Exception as e:

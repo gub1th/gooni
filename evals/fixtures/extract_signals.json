@@ -3,17 +3,6 @@
   "description": "Golden cases for app/services/memory_extraction.py::extract_signals. Add a case any time a real conversation reveals a false-positive or false-negative. The runner asserts each `expected.<field>` matches one of: 'empty', 'fires', or a substring the title/rule must contain.",
   "cases": [
     {
-      "id": "fp1_dumbass_venting",
-      "source": "eval#83 msg #537",
-      "text": "i am doing it dumbass",
-      "prev_assistant": "Take a break, you need it!",
-      "expected": {
-        "tone_corrections": "empty",
-        "feature_requests": "empty"
-      },
-      "notes": "Speaker-flip: Daniel venting AT Gooni, not directing tone. No instruction phrase = no rule."
-    },
-    {
       "id": "fp2_are_you_able",
       "source": "eval#83 msg #550",
       "text": "Are you able to add to my calendar?",
@@ -21,7 +10,7 @@
       "expected": {
         "feature_requests": "empty"
       },
-      "notes": "Capability question — must hit hard gate, not auto-log feature."
+      "notes": "Capability question \u2014 must hit hard gate, not auto-log feature."
     },
     {
       "id": "fp3_do_you_have_ability",
@@ -31,7 +20,7 @@
       "expected": {
         "feature_requests": "empty"
       },
-      "notes": "Capability question — was previously slipping through prompt's example list, now caught by hard gate."
+      "notes": "Capability question \u2014 was previously slipping through prompt's example list, now caught by hard gate."
     },
     {
       "id": "fp4_can_i",
@@ -54,16 +43,6 @@
       "notes": "Polite-imperative shape that English speakers use to mean 'please add X'. Hard gate treats as question. If the right behavior is to fire here, this case will need to flip."
     },
     {
-      "id": "ctl1_real_tone_correction",
-      "source": "synthetic",
-      "text": "stop using filler like \"happy to help\"",
-      "prev_assistant": "I'd be happy to help with that!",
-      "expected": {
-        "tone_corrections": "fires"
-      },
-      "notes": "Explicit instruction phrase + grounded evidence — must fire."
-    },
-    {
       "id": "ctl2_real_feature_imperative",
       "source": "synthetic",
       "text": "add calendar integration",
@@ -71,7 +50,7 @@
       "expected": {
         "feature_requests": "Add calendar integration"
       },
-      "notes": "Plain imperative — must fire. Title should contain 'calendar' or similar."
+      "notes": "Plain imperative \u2014 must fire. Title should contain 'calendar' or similar."
     },
     {
       "id": "ctl3_real_feature_should",
@@ -81,7 +60,7 @@
       "expected": {
         "feature_requests": "Set timers"
       },
-      "notes": "Wish-form imperative — must fire."
+      "notes": "Wish-form imperative \u2014 must fire."
     },
     {
       "id": "ctl4_question_plus_imperative",

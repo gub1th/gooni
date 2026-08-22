@@ -7,26 +7,6 @@ from typing import Any
 from .parsers import _validate_candidate
 
 
-def _normalize_tone(items: Any) -> list[dict]:
-    out = []
-    if not isinstance(items, list):
-        return out
-    for it in items:
-        if not isinstance(it, dict):
-            continue
-        rule = it.get("rule")
-        if not (isinstance(rule, str) and rule.strip()):
-            continue
-        evidence = it.get("evidence")
-        anti_pattern = it.get("anti_pattern")
-        out.append({
-            "rule": rule.strip()[:240],
-            "evidence": evidence.strip()[:240] if isinstance(evidence, str) else "",
-            "anti_pattern": anti_pattern.strip()[:240] if isinstance(anti_pattern, str) else "",
-        })
-    return out
-
-
 def _normalize_features(items: Any) -> list[dict]:
     out = []
     if not isinstance(items, list):

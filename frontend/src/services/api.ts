@@ -1097,7 +1097,6 @@ export async function createConversation(content?: string): Promise<ApiConversat
 // was classified as (tone correction, feature request, memory) without
 // reading the raw debug payload.
 export interface RouterSignals {
-  tone_corrections: { rule: string; evidence?: string; anti_pattern?: string }[];
   feature_requests: { title: string; why: string }[];
   memory_count: number;
 }

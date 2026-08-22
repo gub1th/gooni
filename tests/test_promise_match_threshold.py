@@ -60,7 +60,6 @@ def _emb_at(c: float) -> str:
 
 def _empty_signals() -> dict:
     return {
-        "tone_corrections": [],
         "feature_requests": [],
         "promises": [],
         "reply_intent": "acknowledge",

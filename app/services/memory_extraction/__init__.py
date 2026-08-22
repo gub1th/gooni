@@ -1,4 +1,4 @@
-"""LLM-driven extraction + reconciliation for memories, tone corrections,
+"""LLM-driven extraction + reconciliation for memories,
 and feature requests.
 
 Single unified extractor (`extract_signals`) emits all three signal types in
@@ -6,7 +6,7 @@ one LLM call so the orchestrator and note-save path don't run overlapping
 classifiers per turn.
 
 Pipeline:
-1. extract_signals(text, prev_assistant?) → {tone_corrections, feature_requests, memories}
+1. extract_signals(text, prev_assistant?) → {feature_requests, promises, memories}
 2. for each memory candidate:
      cosine-search similar active memories of the same type
      reconcile_candidate (LLM) — decide ADD / UPDATE / DELETE / NONE
