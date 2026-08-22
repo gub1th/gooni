@@ -16,7 +16,6 @@ from .normalizers import (
     _normalize_memories,
     _normalize_promise_signals,
     _normalize_reply_intent,
-    _normalize_tone,
 )
 
 
@@ -29,15 +28,12 @@ def extract_signals(
 
     Returns:
       {
-        "tone_corrections": [{"rule": str}],
         "feature_requests": [{"title": str, "why": str}],
         "promises":         [{"kind", "utterance", "cadence", ...}],
         "memories":         [memory candidate dicts],
       }
 
     All-empty on parse failure or no signal — never raises.
-    Pass prev_assistant when this text is a chat reply (helps tone detection);
-    leave None for note saves (tone usually empty for those).
 
     `today` is the user's local calendar date (callers pass
     common.local_today(db)); it anchors relative-date resolution
@@ -46,7 +42,6 @@ def extract_signals(
     server-UTC, so DB-backed callers should always pass it.
     """
     empty = {
-        "tone_corrections": [],
         "feature_requests": [],
         "promises": [],
         "reply_intent": "answer",
@@ -87,7 +82,6 @@ def extract_signals(
     if not isinstance(parsed, dict):
         return {**empty, "extract_failed": True}
     return {
-        "tone_corrections": _normalize_tone(parsed.get("tone_corrections")),
         "feature_requests": _normalize_features(parsed.get("feature_requests")),
         "promises":         _normalize_promise_signals(parsed.get("promises"), today_d),
         "reply_intent":     _normalize_reply_intent(parsed.get("reply_intent")),

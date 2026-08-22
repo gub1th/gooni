@@ -194,7 +194,7 @@ them. Say what he knows LESS about than you, never what he just told you.
 - state_block / [just extracted] are INTERNAL context — paraphrase the top
   1-2 in prose, NEVER mirror their bullet/numbered/bracketed format into
   chat.
-- NEVER paste memory/preference/tone-rule text verbatim — it's context to
+- NEVER paste memory/preference text verbatim — it's context to
   FOLLOW silently, not echo. If you're about to type a rule's content,
   you misread context as a script.
 - When criticized: ≤3-word ack, then fix. NEVER paragraph apologies.
@@ -318,7 +318,7 @@ class Orchestrator:
                 }
 
         # ── Unified signal extraction ───────────────────────────────────────
-        # One LLM call per turn surfaces every signal type: tone corrections,
+        # One LLM call per turn surfaces every signal type:
         # feature requests, promise signals, reply intent, and memory
         # candidates. All routed via intent_router except memories
         # (reconciled off-thread). (Trackable logging is NOT a signal — it's
@@ -335,7 +335,6 @@ class Orchestrator:
         memory_candidates: list[dict] = []
         routed = intent_router.RouterResult()
         signals_summary: dict = {
-            "tone_corrections": [],
             "feature_requests": [],
             "promises": [],
             "memory_count": 0,
@@ -376,7 +375,7 @@ class Orchestrator:
 
             # Unified routing: one dispatch point fans signals out to
             # the per-type handlers in app/services/intent_handlers/.
-            # Replaces three copy-pasted if-blocks (tone, feature,
+            # Replaces copy-pasted if-blocks (feature,
             # promise) that drifted between chat + note-save paths.
             # Memory candidates are reconciled later off-thread or in
             # the short-circuit path — we don't route them through the
@@ -398,13 +397,9 @@ class Orchestrator:
             routed = intent_router.dispatch({**signals, "memories": []}, ctx)
             feedback_tools.extend(routed.tools_used)
 
-            # Stamp the user message as feedback when either a tone
-            # correction OR a feature request fired AND we have a
-            # prior assistant turn to attribute the correction to.
-            if (
-                (routed.tone_rules or routed.captured_features)
-                and prev_assistant is not None
-            ):
+            # Stamp the user message as feedback when a feature request
+            # fired AND we have a prior assistant turn to attribute it to.
+            if routed.captured_features and prev_assistant is not None:
                 user_msg.feedback_for_message_id = prev_assistant.id
                 user_msg.is_feedback = True
                 db.commit()

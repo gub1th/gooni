@@ -45,7 +45,6 @@ def _empty_signals() -> dict:
     like the real call). Every key extract_signals can emit must be present —
     that's the invariant the subset-drop bug violated."""
     return {
-        "tone_corrections": [],
         "feature_requests": [],
         "promises": [],
         "reply_intent": "acknowledge",

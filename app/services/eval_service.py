@@ -909,7 +909,7 @@ _STEP_LEGEND: list[tuple[str, str, str]] = [
      "extraction, no recall, no model call for the body of the reply."),
     ("extracted_signals", "Extract signals",
      "One gpt-5.4-mini call over the user's message emitting promises, feature "
-     "requests, tone corrections, reply intent and memory candidates. Promise "
+     "requests, reply intent and memory candidates. Promise "
      "CREATES are annotated onto the message as a glow, never auto-inserted."),
     ("memory_recall", "Recall memories",
      "Always-injected preferences plus the top cosine matches for this turn. "

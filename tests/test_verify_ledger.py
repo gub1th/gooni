@@ -64,7 +64,6 @@ from app.services.orchestrator import steps  # noqa: E402
 from app.services.orchestrator.write_ledger import (  # noqa: E402
     DONE,
     NOTICED,
-    QUEUED,
     READ,
     build_ledger,
 )
@@ -129,13 +128,9 @@ def main() -> int:  # noqa: C901 — a flat list of cases reads better than help
     check(fails, "NOT WRITTEN" in ledger.render(),
           f"glow omitted or unmarked in the ledger: {ledger.render()!r}")
 
-    # ── 3. Off-thread tone preference: dispatched, never confirmed.
-    routed = RouterResult(tone_rules=["less hedging"])
-    ledger = build_ledger(routed=routed, tool_call_ids=[], db=db)
-    check(fails, [r.status for r in ledger.records] == [QUEUED],
-          f"tone rule not queued: {ledger.records}")
-    check(fails, steps._deterministic_unbacked_check(draft=CLAIM, ledger=ledger) is not None,
-          "det rail treated an unconfirmed off-thread write as backing")
+    # ── 3. (was: off-thread tone preference -> QUEUED.) Tone extraction and
+    # the only producer of the QUEUED status were deleted with the tone
+    # vertical. Re-add a case here if another off-thread router write appears.
 
     # ── 4. Read-only tools back nothing; write tools do.
     read_id = _tool(db, "search_notes", args={"query": "protein"})
