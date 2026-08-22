@@ -2,17 +2,14 @@
 
 import json
 
+from ...common import strip_code_fence
+
 
 VALID_TYPES = {"fact", "routine", "constraint", "episode"}
 
 
 def _parse_json_array(raw: str) -> list:
-    cleaned = (raw or "").strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("```", 2)[1].strip()
-        if cleaned.startswith("json"):
-            cleaned = cleaned[4:].strip()
-        cleaned = cleaned.rsplit("```", 1)[0].strip()
+    cleaned = strip_code_fence(raw)
     try:
         parsed = json.loads(cleaned)
     except json.JSONDecodeError as e:
@@ -22,12 +19,7 @@ def _parse_json_array(raw: str) -> list:
 
 
 def _parse_json_object(raw: str) -> dict | None:
-    cleaned = (raw or "").strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("```", 2)[1].strip()
-        if cleaned.startswith("json"):
-            cleaned = cleaned[4:].strip()
-        cleaned = cleaned.rsplit("```", 1)[0].strip()
+    cleaned = strip_code_fence(raw)
     try:
         parsed = json.loads(cleaned)
     except json.JSONDecodeError as e:

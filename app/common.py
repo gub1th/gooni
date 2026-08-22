@@ -290,3 +290,40 @@ def _unique_viewers_for_note(db: Session, note_id: int) -> int:
         .scalar()
         or 0
     )
+
+
+def strip_code_fence(raw: str | None) -> str:
+    """Strip a ```-fenced wrapper off an LLM response. THE one implementation.
+
+    Every model that is asked for JSON will occasionally wrap it in a fence
+    despite being told not to, so five call sites grew their own copy — and
+    they had already drifted into two different algorithms with different
+    bugs. The worst was a regex version doing `.rstrip("`")`, which strips
+    EVERY trailing backtick and so eats content from a payload that
+    legitimately ends in one. Two of the five also skipped the inner
+    `.strip()`, so `\n{...}\n` inside a fence parsed in some callers and
+    failed in others.
+
+    That matters more than it looks: all five feed `json.loads`, and every
+    one of them catches `JSONDecodeError` and returns empty. A drifted copy
+    therefore does not crash — it silently drops a turn's captures.
+
+    Handles a bare fence, a ```json fence, and text with no fence at all.
+    Never raises; a `None` or blank input returns "".
+    """
+    cleaned = (raw or "").strip()
+    if not cleaned.startswith("```"):
+        return cleaned
+    # Drop the opening fence line (which may carry a language tag), then
+    # everything from the closing fence onward. Splitting on the delimiter
+    # rather than regex-trimming is what keeps a trailing backtick that is
+    # part of the payload.
+    cleaned = cleaned[3:]
+    newline = cleaned.find("\n")
+    if newline != -1 and "```" not in cleaned[:newline]:
+        # ```json\n{...}  -> drop the language tag line
+        cleaned = cleaned[newline + 1:]
+    close = cleaned.rfind("```")
+    if close != -1:
+        cleaned = cleaned[:close]
+    return cleaned.strip()

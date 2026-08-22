@@ -1,4 +1,6 @@
 import json
+
+from ...common import strip_code_fence
 import re
 
 from ...common import WRITE_CLAIM_RE
@@ -154,10 +156,10 @@ def _run_verify(
         raw = llm_client.generate_simple_completion(
             prompt, max_tokens=200, temperature=0.0, model="gpt-4o-mini",
         )
-        # Strip code fences if any.
-        s = (raw or "").strip()
-        if s.startswith("```"):
-            s = re.sub(r"^```(?:json)?\s*", "", s).rstrip("`").rstrip()
+        # Strip code fences if any. Shared implementation — this call site
+        # used `.rstrip("`")`, which strips EVERY trailing backtick and so
+        # ate content from a payload legitimately ending in one.
+        s = strip_code_fence(raw)
         parsed = json.loads(s)
         ok = bool(parsed.get("ok", True))
         critique = (parsed.get("critique") or "").strip()

@@ -9,7 +9,6 @@ from ...db.models import Conversation as ConvModel
 from ...llm.client import llm_client
 from .. import intent_router
 from ..conversation_service import conversation_service
-from ..memory_extraction import extract_signals
 from ..memory_service import memory_service
 from ..trace_builder import TraceBuilder
 from .steps import (
@@ -350,11 +349,35 @@ class Orchestrator:
                 if prev_assistant and prev_assistant.id != user_msg.id
                 else None
             )
-            from ...common import local_today
-            signals = extract_signals(
-                saved_message, prev_assistant=prev_text, today=local_today(db)
+            # ONE capture path, shared with the note sweeper. See
+            # services/capture.py — the two callers had drifted, and the note
+            # side had silently lost its extract-failed guard.
+            from ..capture import capture
+
+            ctx = intent_router.RouterContext(
+                db=db,
+                source_message_id=user_msg.id,
+                prev_assistant_text=prev_assistant.content if prev_assistant is not None else None,
+                prev_assistant_id=prev_assistant.id if prev_assistant is not None else None,
+                on_tool_call=tb.tool_call,
             )
-            memory_candidates = signals["memories"]
+            # route_memories=False: chat reconciles memory candidates
+            # off-thread below, so they are stripped before dispatch. The
+            # note path passes True and writes them directly. Stated at both
+            # call sites on purpose — this is the difference the two
+            # hand-rolled adapters disagreed about without saying so.
+            #
+            # Everything ELSE in the signals dict is forwarded whole. A
+            # hand-picked subset once silently dropped a whole signal type for
+            # weeks (extract emitted it, the call never forwarded it, the
+            # handler got [] and nothing landed).
+            result = capture(
+                saved_message, ctx, db=db,
+                prev_assistant=prev_text, route_memories=False,
+            )
+            signals = result.signals
+            routed = result.routed
+            memory_candidates = signals.get("memories") or []
             signals_summary = _summarize_signals(signals, memory_candidates)
             tb.extracted_signals(saved_message, signals)
 
@@ -363,7 +386,7 @@ class Orchestrator:
             # can render a retry affordance instead of silence — dropped
             # captures are trust-fatal for an ambient assistant (this
             # exact class already bit us: audit 2026-06-10).
-            if signals.get("extract_failed") and user_msg is not None:
+            if result.failed and user_msg is not None:
                 try:
                     user_msg.signal_preview = json.dumps({
                         "signals": [], "status": "extract_failed",
@@ -373,28 +396,6 @@ class Orchestrator:
                 except Exception as e:
                     print(f"[extract-failed mark] {e}")
 
-            # Unified routing: one dispatch point fans signals out to
-            # the per-type handlers in app/services/intent_handlers/.
-            # Replaces copy-pasted if-blocks (feature,
-            # promise) that drifted between chat + note-save paths.
-            # Memory candidates are reconciled later off-thread or in
-            # the short-circuit path — we don't route them through the
-            # router here so the existing background-thread shape
-            # survives.
-            ctx = intent_router.RouterContext(
-                db=db,
-                source_message_id=user_msg.id,
-                prev_assistant_text=prev_assistant.content if prev_assistant is not None else None,
-                prev_assistant_id=prev_assistant.id if prev_assistant is not None else None,
-                on_tool_call=tb.tool_call,
-            )
-            # Forward the FULL signals dict — never a hand-picked subset. A
-            # hand-picked subset once silently dropped a whole signal type for
-            # weeks (extract emitted it; this call never forwarded it, so the
-            # handler got [] and nothing landed). Forwarding everything means
-            # any new signal type extract_signals grows is routed automatically.
-            # `memories` is the lone exception: reconciled off-thread below.
-            routed = intent_router.dispatch({**signals, "memories": []}, ctx)
             feedback_tools.extend(routed.tools_used)
 
             # Stamp the user message as feedback when a feature request

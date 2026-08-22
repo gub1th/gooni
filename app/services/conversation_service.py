@@ -1,4 +1,6 @@
 import json
+
+from ..common import strip_code_fence
 from datetime import datetime, timezone, timedelta
 
 from sqlalchemy.orm import Session
@@ -41,12 +43,7 @@ def _build_topic_graph_via_llm(messages: list[Message]) -> dict | None:
     except Exception as e:
         print(f"topic_graph LLM error: {e}")
         return None
-    cleaned = raw.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("```", 2)[1]
-        if cleaned.startswith("json"):
-            cleaned = cleaned[4:]
-        cleaned = cleaned.rsplit("```", 1)[0].strip()
+    cleaned = strip_code_fence(raw)
     try:
         parsed = json.loads(cleaned)
     except json.JSONDecodeError as e:

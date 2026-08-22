@@ -5,6 +5,8 @@ extract_signals, reconcile_candidate.
 """
 
 import json
+
+from ...common import strip_code_fence
 from datetime import date as _date
 from typing import Any
 
@@ -68,12 +70,7 @@ def extract_signals(
         # the orchestrator marks the Message row so the log can offer retry
         # instead of silently losing the turn's captures.
         return {**empty, "extract_failed": True}
-    cleaned = (raw or "").strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("```", 2)[1].strip()
-        if cleaned.startswith("json"):
-            cleaned = cleaned[4:].strip()
-        cleaned = cleaned.rsplit("```", 1)[0].strip()
+    cleaned = strip_code_fence(raw)
     try:
         parsed = json.loads(cleaned)
     except json.JSONDecodeError as e:

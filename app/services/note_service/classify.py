@@ -58,43 +58,32 @@ def classify_note(note_id: int) -> None:
                 # fall through and re-classify
 
         text_for_llm = f"{(note.title or '').strip()}\n\n{plaintext}".strip()
-        from ...common import local_today
-        signals = extract_signals(text_for_llm, prev_assistant=None, today=local_today(db))
 
-        # Unified routing via intent_router — same dispatch point chat
-        # uses, eliminates the two-layer drift that caused the
-        # "demo for gooni" bug (note #258 phase 2). Tone + promise
-        # handlers self-skip without prev_assistant / source_message.
+        # ONE capture path, shared with the chat orchestrator. This used to be
+        # a hand-rolled extract -> dispatch -> summarize block that had
+        # drifted from the chat one in two ways; see services/capture.py.
         from .. import intent_router
-        ctx = intent_router.RouterContext(
-            db=db,
-            source_note_id=note.id,
-        )
-        routed = intent_router.dispatch(signals, ctx)
-        memories_written = routed.memories_written
+        from ..capture import capture
 
-        # Map router's captured_features (title + note_id) into the note's
-        # signals_summary shape. `list_item_id` stays as the historical key
-        # name so the FE disclosure renders unchanged — it is a Note id and
-        # has been since the v2 nuke.
-        feature_summaries = [
-            {"title": f["title"], "list_item_id": f["note_id"]}
-            for f in routed.captured_features
-            if f.get("note_id") is not None
-        ]
+        ctx = intent_router.RouterContext(db=db, source_note_id=note.id)
+        # route_memories=True: a note is a settled artifact, so its memory
+        # candidates are written directly. Chat passes False and reconciles
+        # off-thread instead. The two callers genuinely differ here and the
+        # difference is now stated at the call site rather than buried in
+        # two adapters that disagreed silently.
+        result = capture(text_for_llm, ctx, db=db, route_memories=True)
 
-        # Persist the signals snapshot so the editor can render a "Routed:"
-        # disclosure mirroring the chat bubble. Empty payload still writes
-        # so the frontend can tell "yes we classified, no signals" apart
-        # from "haven't classified yet".
-        from datetime import datetime, timezone
-        signals_summary = {
-            "feature_requests": feature_summaries,
-            "memory_count": len(memories_written),
-            "memory_types": [m.type for m in memories_written],
-            "classified_at": datetime.now(timezone.utc).isoformat(),
-        }
-        note.last_classify_signals = json.dumps(signals_summary)
+        # EXTRACT FAILED -> write the summary, but DO NOT snapshot the dedup
+        # embedding. That snapshot is what tells the next sweep "this note's
+        # meaning hasn't moved, skip it" — stamping it after a failed
+        # extraction retired the note permanently with its captures lost,
+        # and the stored summary was byte-identical to a clean "nothing to
+        # capture". The chat side has always guarded this; the note side
+        # never did.
+        note.last_classify_signals = json.dumps(result.summary)
+        if result.failed:
+            db.commit()
+            return
 
         # Snapshot the embedding we just classified against. Future saves
         # will compare against this to decide whether to re-run.
