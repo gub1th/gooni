@@ -377,12 +377,6 @@ function NoteRow({
             marginTop: 2,
           }}
         >
-          {(note.tags ?? []).length > 0 && (
-            <>
-              <span>{note.tags.slice(0, 3).map((t) => `#${t}`).join(" ")}</span>
-              <span>·</span>
-            </>
-          )}
           <span>{updated}</span>
           {thumb && (
             <>

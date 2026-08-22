@@ -179,6 +179,8 @@ def _serialize_note(n: Note) -> dict:
         "last_opened_at": n.last_opened_at,
         "is_public": bool(n.is_public),
         "is_pinned": bool(n.is_pinned),
+        # Which folder the note lives in (a Topic id). Null = unfiled.
+        "topic_id": n.topic_id,
         "is_public_pinned": bool(getattr(n, "is_public_pinned", False)),
         "is_archived": bool(getattr(n, "is_archived", False)),
         "archived_at": getattr(n, "archived_at", None),
@@ -213,6 +215,8 @@ def _serialize_note_lite(n: Note) -> dict:
         "last_opened_at": n.last_opened_at,
         "is_public": bool(n.is_public),
         "is_pinned": bool(n.is_pinned),
+        # Which folder the note lives in (a Topic id). Null = unfiled.
+        "topic_id": n.topic_id,
         "is_public_pinned": bool(getattr(n, "is_public_pinned", False)),
         "is_archived": bool(getattr(n, "is_archived", False)),
         "archived_at": getattr(n, "archived_at", None),
