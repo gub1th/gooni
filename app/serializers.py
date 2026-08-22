@@ -181,6 +181,8 @@ def _serialize_note(n: Note) -> dict:
         "is_pinned": bool(n.is_pinned),
         "is_public_pinned": bool(getattr(n, "is_public_pinned", False)),
         "is_draft": bool(getattr(n, "is_draft", False)),
+        "is_archived": bool(getattr(n, "is_archived", False)),
+        "archived_at": getattr(n, "archived_at", None),
         # Snapshot of what classify_note routed for this note's most recent
         # save. Drives the "Routed:" disclosure under the title — same shape
         # as the chat bubble so Daniel sees memory writes + backlog items
@@ -214,6 +216,8 @@ def _serialize_note_lite(n: Note) -> dict:
         "is_pinned": bool(n.is_pinned),
         "is_public_pinned": bool(getattr(n, "is_public_pinned", False)),
         "is_draft": bool(getattr(n, "is_draft", False)),
+        "is_archived": bool(getattr(n, "is_archived", False)),
+        "archived_at": getattr(n, "archived_at", None),
         "classify_signals": None,
         "parent_note_id": n.parent_note_id,
         "excerpt_anchor": n.excerpt_anchor,
@@ -249,6 +253,33 @@ def _notes_order():
     from sqlalchemy import func
 
     return func.coalesce(Note.updated_at, Note.created_at).desc()
+
+
+def _not_archived(q):
+    """Drop archived notes from a Note query — THE one predicate every
+    browsing, search and feed surface shares.
+
+    One helper rather than an inline `filter(Note.is_archived == False)` per
+    call site for the same reason `_hide_thought_leaves` is one helper: the
+    failure mode of a hide feature is a surface someone forgot, and it is much
+    easier to grep for the callers of a named predicate than for a boolean
+    comparison. The `is_(None)` arm is defensive against a row written before
+    the backfill in migration `b2f7c34ae901` landed — under SQL three-valued
+    logic a NULL would fail `== False` and quietly vanish from every list.
+
+    Reads that fetch a note BY ID deliberately do NOT use this: the captain
+    archived a note to stop it turning up unasked, not to make it unreachable,
+    and the archive view's own rows have to open.
+    """
+    return q.filter((Note.is_archived == False) | (Note.is_archived.is_(None)))  # noqa: E712
+
+
+def _archived_order():
+    """Newest-archived first. Falls back to the edit/creation clock for a row
+    archived before `archived_at` existed (or written straight to the flag)."""
+    from sqlalchemy import func
+
+    return func.coalesce(Note.archived_at, Note.updated_at, Note.created_at).desc()
 
 
 def _serialize_promise(p) -> dict:

@@ -152,6 +152,7 @@ class FindNoteTool(BaseTool):
 
     def execute(self, db=None, match: str = "", limit: int = 5, **kwargs) -> str:
         from ..db.models import Note
+        from ..serializers import _not_archived
         from ..services.note_service import NoteService
 
         if db is None:
@@ -160,8 +161,11 @@ class FindNoteTool(BaseTool):
         if not match_l:
             return "(empty match string)"
         limit = max(1, min(int(limit or 5), 10))
+        # Archived notes excluded — this is a recall surface, and handing
+        # the model a note the captain put away is exactly what archiving is
+        # meant to stop. `read_note` below still reaches one by id.
         scan = (
-            db.query(Note)
+            _not_archived(db.query(Note))
             .order_by(Note.updated_at.desc())
             .limit(100)
             .all()
@@ -202,6 +206,8 @@ class ReadNoteTool(BaseTool):
     }
 
     def execute(self, db=None, note_id: int = 0, **kwargs) -> str:
+        # By-id read: archived notes ARE returned. Archiving stops a note
+        # being OFFERED, not being reachable when it is named outright.
         from ..db.models import Note
         from ..services.note_service import NoteService
 
@@ -238,12 +244,14 @@ class ListRecentNotesTool(BaseTool):
 
     def execute(self, db=None, limit: int = 5, **kwargs) -> str:
         from ..db.models import Note
+        from ..serializers import _not_archived
 
         if db is None:
             return "(no db session)"
         limit = max(1, min(int(limit or 5), 15))
+        # Archived notes excluded — a browsing list.
         rows = (
-            db.query(Note)
+            _not_archived(db.query(Note))
             .order_by(Note.updated_at.desc())
             .limit(limit)
             .all()

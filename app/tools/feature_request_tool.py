@@ -69,8 +69,14 @@ def create_feature_request_note(db, *, title: str, why: str = ""):
     if not title:
         return None
 
+    # Archived feature-request notes can't absorb a new request: deduping
+    # against one would return a note no surface shows, so the capture would
+    # look like it landed and be invisible. An archived request is a closed
+    # one — raising it again should mint a fresh note.
+    from ..serializers import _not_archived
+
     existing = (
-        db.query(Note)
+        _not_archived(db.query(Note))
         .filter(Note.tags.is_not(None), Note.tags.like('%feature-request%'))
         .order_by(Note.id.desc())
         .limit(40)

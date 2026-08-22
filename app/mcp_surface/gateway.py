@@ -159,12 +159,14 @@ class DirectGateway(Gateway):
             return [_serialize_note(n) for n in note_service.search_by_query(q, limit, db)]
 
     def list_notes(self, *, tag, limit) -> list[dict]:
+        # Mirrors GET /notes exactly, archive exclusion included (even under
+        # `tag` — see that route's docstring).
         from ..db.models import Note
         from ..routers.notes import _hide_thought_leaves
-        from ..serializers import _notes_order, _serialize_note_lite
+        from ..serializers import _not_archived, _notes_order, _serialize_note_lite
 
         with self._session() as db:
-            query = db.query(Note)
+            query = _not_archived(db.query(Note))
             if tag:
                 query = query.filter(
                     Note.tags.is_not(None), Note.tags.like(f'%"{tag.strip().lower()}"%')
@@ -175,17 +177,32 @@ class DirectGateway(Gateway):
             return [_serialize_note_lite(n) for n in rows]
 
     def recent_notes(self, *, limit) -> list[dict]:
-        # Same query as GET /notes/recent, thought-leaf exclusion included — at
-        # conversation velocity logged thoughts would otherwise be the only
-        # thing this ever returns.
+        # Same query as GET /notes/recent, thought-leaf and archive exclusions
+        # included — at conversation velocity logged thoughts would otherwise
+        # be the only thing this ever returns.
         from ..db.models import Note
         from ..routers.notes import _hide_thought_leaves
-        from ..serializers import _notes_order, _serialize_note_lite
+        from ..serializers import _not_archived, _notes_order, _serialize_note_lite
 
         with self._session() as db:
             rows = (
-                _hide_thought_leaves(db.query(Note))
+                _hide_thought_leaves(_not_archived(db.query(Note)))
                 .order_by(_notes_order())
+                .limit(limit)
+                .all()
+            )
+            return [_serialize_note_lite(n) for n in rows]
+
+    def archived_notes(self, *, limit) -> list[dict]:
+        # Same query as GET /notes/archived — the ONE read that shows them.
+        from ..db.models import Note
+        from ..serializers import _archived_order, _serialize_note_lite
+
+        with self._session() as db:
+            rows = (
+                db.query(Note)
+                .filter(Note.is_archived == True)  # noqa: E712
+                .order_by(_archived_order())
                 .limit(limit)
                 .all()
             )
@@ -225,9 +242,24 @@ class DirectGateway(Gateway):
                 note.is_draft = bool(patch["is_draft"])
             if "is_pinned" in patch:
                 note.is_pinned = bool(patch["is_pinned"])
+            if "is_archived" in patch:
+                # Same transition rules as PATCH /notes/{id}: stamp
+                # `archived_at` only on the way IN (so a repeated archive
+                # can't rewrite the original date) and clear it on the way out.
+                want_archived = bool(patch["is_archived"])
+                if want_archived and not note.is_archived:
+                    note.archived_at = datetime.utcnow()
+                elif not want_archived:
+                    note.archived_at = None
+                note.is_archived = want_archived
             if "tags" in patch:
                 note.tags = json.dumps(_normalize_tags(patch["tags"] or []))
-            note.updated_at = datetime.utcnow()
+            # An archive-only patch does NOT bump updated_at — putting a note
+            # away isn't an edit, and bumping would send it straight to the
+            # top of every recency list the moment it is restored. Matches
+            # PATCH /notes/{id}, so both gateways answer identically.
+            if set(patch) - {"is_archived"}:
+                note.updated_at = datetime.utcnow()
             db.flush()
             return _serialize_note(note)
 
@@ -570,6 +602,10 @@ class HttpGateway(Gateway):
 
     def recent_notes(self, *, limit) -> list[dict]:
         return self._get("/notes/recent", {"limit": limit})
+
+    def archived_notes(self, *, limit) -> list[dict]:
+        # The route serves the whole archive; slice here, same as list_notes.
+        return self._get("/notes/archived")[:limit]
 
     def query_thoughts(self, *, topic, since, text, limit) -> list[dict]:
         params: dict = {}

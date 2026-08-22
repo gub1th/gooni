@@ -14,7 +14,7 @@ from ..db.models import (
 )
 
 from ..serializers import (
-    _notes_order, _parse_tags
+    _not_archived, _notes_order, _parse_tags
 )
 from ..common import (
     _unique_viewers_for_note
@@ -130,9 +130,15 @@ def _read_time_min(html: str) -> int:
 def get_public_notes(db: Session = Depends(get_db)):
     """Return all public notes. Public-pinned first, then newest. No
     auth. Slice 6: Spaces died — tags carry the grouping signal; the FE
-    renders the first tag where it used to show a space name."""
+    renders the first tag where it used to show a space name.
+
+    Archived notes are excluded HERE TOO. "Stop showing me this" reads even
+    more strongly for the surface strangers see than for the sidebar, and an
+    archived-but-still-published note would be the one place the captain
+    couldn't tell it was still up. `is_public` is preserved on the row, so
+    unarchiving republishes it exactly as it was."""
     rows = (
-        db.query(Note)
+        _not_archived(db.query(Note))
         .filter(Note.is_public == True)  # noqa: E712
         .order_by(Note.is_public_pinned.desc(), _notes_order())
         .all()
@@ -156,8 +162,13 @@ def get_public_notes(db: Session = Depends(get_db)):
 
 @router.get("/public/notes/{note_id}")
 def get_public_note(note_id: int, db: Session = Depends(get_db)):
-    """Return a single public note's full content. 404 if not public."""
-    note = db.query(Note).filter(Note.id == note_id, Note.is_public == True).first()  # noqa: E712
+    """Return a single public note's full content. 404 if not public.
+
+    An archived note 404s here even though `GET /notes/{id}` still serves it:
+    the by-id exemption exists so the OWNER can reach a note they put away,
+    and it does not extend to a public URL. Otherwise a stale link would keep
+    serving a post the captain believes is off the site."""
+    note = _not_archived(db.query(Note)).filter(Note.id == note_id, Note.is_public == True).first()  # noqa: E712
     if not note:
         raise HTTPException(status_code=404, detail="Not found")
     tags = _parse_tags(note.tags)
@@ -177,7 +188,7 @@ def get_public_note(note_id: int, db: Session = Depends(get_db)):
 def get_public_note_comments(note_id: int, db: Session = Depends(get_db)):
     """NoteComment died in the Slice 6 nuke. Kept as an empty-list stub so
     the public page's comment fetch degrades silently instead of 404ing."""
-    note = db.query(Note).filter(Note.id == note_id, Note.is_public == True).first()  # noqa: E712
+    note = _not_archived(db.query(Note)).filter(Note.id == note_id, Note.is_public == True).first()  # noqa: E712
     if not note:
         raise HTTPException(status_code=404, detail="Not found")
     return []

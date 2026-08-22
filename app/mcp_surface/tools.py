@@ -326,6 +326,7 @@ def search_notes(
     since: str = "",
     limit: int = 10,
     match: str = "semantic",
+    archived: bool = False,
 ) -> list[dict]:
     """Read back what Daniel has written — THE note reader. Call this to recall
     "what did I think about X", "what have I logged this week", "did I ever
@@ -344,6 +345,13 @@ def search_notes(
       - `topic` / `since` (thoughts): one subject; only thoughts on or after an
         ISO date "YYYY-MM-DD".
       - `limit`: max rows (default 10).
+      - `archived`: normally FALSE and normally omitted — archived notes are
+        excluded from every other filter here, because Daniel archived them to
+        stop them turning up. Pass True ONLY when he is explicitly looking
+        through what he put away ("what did I archive", "find that old note I
+        filed"); it returns the archive INSTEAD of the live notes, newest
+        archived first, and ignores `q`/`tag`/`kind`. Restore one with
+        `edit_note(id, is_archived=False)`.
 
     Use `list_topics` instead when you only want the ranked landscape of
     subjects rather than their contents. Returns rows of
@@ -353,6 +361,20 @@ def search_notes(
     kind = (kind or "").strip().lower()
     query = (q or "").strip()
     limit = max(1, min(int(limit or 10), 100))
+
+    if archived:
+        # Deliberately a MODE, not a filter that widens the other searches:
+        # mixing archived rows into an ordinary recall would make the archive
+        # meaningless to the model, and the whole point of asking for it is
+        # that you want to see that set on its own.
+        return [
+            {
+                "id": n["id"], "kind": "note", "title": n.get("title") or "(untitled)",
+                "snippet": _snippet(n.get("excerpt") or n.get("content")),
+                "tags": n.get("tags") or [], "archived_at": n.get("archived_at"),
+            }
+            for n in gw.archived_notes(limit=limit)
+        ]
 
     if kind == "thought":
         rows = gw.query_thoughts(
@@ -427,11 +449,13 @@ def edit_note(
     content: str | None = None,
     is_draft: bool | None = None,
     is_pinned: bool | None = None,
+    is_archived: bool | None = None,
     tags: list[str] | None = None,
 ) -> str:
     """Edit an existing note — update a progress note or evolving doc, or flip
-    the draft/pinned flags. This is also how you edit a note's checklist: read
-    it with `read_note`, then write the updated body back through `content`.
+    the draft/pinned/archived flags. This is also how you edit a note's
+    checklist: read it with `read_note`, then write the updated body back
+    through `content`.
 
     Args:
         note_id: numeric id of the note to edit
@@ -439,6 +463,12 @@ def edit_note(
         content: new body, plain text or HTML (omit to keep current)
         is_draft: set/clear the Drafts-sidebar flag (omit to leave unchanged)
         is_pinned: set/clear the pinned flag (omit to leave unchanged)
+        is_archived: True files the note away — it disappears from every note
+            list, search and feed WITHOUT being deleted, and keeps its content,
+            tags and pins. False restores it. This is the safe alternative to
+            `delete_note`: reach for it whenever Daniel wants a note gone but
+            hasn't said to destroy it. Find archived notes with
+            `search_notes(archived=True)`.
         tags: REPLACE the tag set. Omit to keep current; to add without
             blowing away existing tags, read the note first and pass the merge.
     """
@@ -451,6 +481,8 @@ def edit_note(
         patch["is_draft"] = bool(is_draft)
     if is_pinned is not None:
         patch["is_pinned"] = bool(is_pinned)
+    if is_archived is not None:
+        patch["is_archived"] = bool(is_archived)
     if tags is not None:
         patch["tags"] = list(tags)
     if not patch:
@@ -463,6 +495,8 @@ def edit_note(
         flags.append(f"draft={bool(is_draft)}")
     if is_pinned is not None:
         flags.append(f"pinned={bool(is_pinned)}")
+    if is_archived is not None:
+        flags.append("archived" if is_archived else "unarchived")
     if tags is not None:
         flags.append(f"tags={note.get('tags') or []}")
     suffix = f" [{', '.join(flags)}]" if flags else ""

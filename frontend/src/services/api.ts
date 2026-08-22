@@ -79,6 +79,13 @@ export interface ApiNote {
   is_public: boolean;
   is_pinned: boolean;
   is_draft: boolean;
+  // Archived = filed away, not deleted. An archived note is absent from every
+  // note list, search and feed the app serves; it shows up only in the
+  // Archived filter (`fetchArchivedNotes`) and still opens by id. Content,
+  // tags and pins survive untouched, so unarchiving restores it exactly.
+  is_archived?: boolean;
+  // When it was archived — null on a live note. Sorts the archived list.
+  archived_at?: string | null;
   // Snapshot of what classify_note routed for this note's most recent save.
   // Mirrors the chat-side `signals` payload — drives the "Routed:" disclosure
   // under the title so Daniel sees memory writes + backlog items as soon as
@@ -239,6 +246,15 @@ export async function fetchPinnedNotes(): Promise<ApiNote[]> {
 export async function fetchDraftNotes(): Promise<ApiNote[]> {
   const res = await apiFetch(`${BASE}/notes/drafts`);
   if (!res.ok) throw new Error("Failed to fetch draft notes");
+  return res.json();
+}
+
+/** The archive — the one read that returns archived notes. Newest-archived
+ *  first (the server orders by `archived_at`, not `updated_at`: an archived
+ *  note's last EDIT is usually long before it was put away). */
+export async function fetchArchivedNotes(): Promise<ApiNote[]> {
+  const res = await apiFetch(`${BASE}/notes/archived`);
+  if (!res.ok) throw new Error("Failed to fetch archived notes");
   return res.json();
 }
 
@@ -504,7 +520,7 @@ export async function cleanupEmptyNotes(): Promise<{ deleted: number; ids: numbe
 
 export async function patchNote(
   id: number,
-  patch: { is_public?: boolean; is_pinned?: boolean; is_public_pinned?: boolean; is_draft?: boolean; title?: string; content?: string; tags?: string[]; icon?: string | null },
+  patch: { is_public?: boolean; is_pinned?: boolean; is_public_pinned?: boolean; is_draft?: boolean; is_archived?: boolean; title?: string; content?: string; tags?: string[]; icon?: string | null },
 ): Promise<ApiNote> {
   const res = await apiFetch(`${BASE}/notes/${id}`, {
     method: "PATCH",

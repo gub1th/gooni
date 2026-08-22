@@ -251,9 +251,16 @@ def collect_items(db: Session) -> tuple[list[Item], bool]:
     # Thought-batches — a run of Claude's thinking, `title` is its label. LIKE
     # against the JSON tags column is the documented pattern for low-cardinality
     # note subtypes (see focus_service._tagged).
+    # Archived batches are excluded on the same rule that excludes superseded
+    # memories and resolved promises: an initiative is a claim about the
+    # PRESENT, and a note the captain put away is not part of it.
+    from ..serializers import _not_archived
+
     cutoff = datetime.utcnow() - timedelta(days=THOUGHT_WINDOW_DAYS)
     rows = (
-        db.query(Note.id, Note.title, Note.excerpt, Note.created_at, Note.embedding)
+        _not_archived(
+            db.query(Note.id, Note.title, Note.excerpt, Note.created_at, Note.embedding)
+        )
         .filter(
             Note.tags.like(f'%"{BATCH_TAG}"%'),
             Note.created_at >= cutoff,
