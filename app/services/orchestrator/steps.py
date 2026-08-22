@@ -34,7 +34,7 @@ Rules — be CONSERVATIVE (default ok=true):
     remembered, not formally tracked / only in conversation context / not
     durable / I'd need a tool for that / no recurring reminder support"
 - THE LEDGER IS THE WHOLE ANSWER ON FACT-OF-ACTION. The router fires
-  promise/feature/tone hooks upstream of the reply, so a claim CAN be backed
+  promise/feature hooks upstream of the reply, so a claim CAN be backed
   with no tool call at all — but only by a `[router]` line that is actually
   listed above. A router-flavoured VERB ("captured" / "logged as a feature
   request" / "added that promise") is NOT itself evidence that the router

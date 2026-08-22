@@ -104,11 +104,16 @@ RETRIEVAL_PER_TYPE: dict[str, dict[str, float | int]] = {
 }
 
 # Cap on feedback-derived preferences (key prefixed with `feedback__`) that
-# get always-injected. Without this, every tone correction Daniel ever wrote
-# accumulates and bloats the system prompt — saw a turn pulling 50+ active
-# preferences. Manually-curated prefs (no feedback prefix) bypass the cap so
-# explicit user choices stay sticky. Most-recent-N is the simplest "still
-# relevant" heuristic until we have richer signals (usage count, last-used).
+# get always-injected.
+#
+# NOTHING WRITES THESE ANY MORE — tone extraction and
+# `add_feedback_preference` were deleted. The READER stays, and deliberately:
+# the rows already in the table are the accumulated voice spec ("use scoops
+# for protein, not grams", "stop overusing 'i think'"), they are the only
+# preferences that exist (there are no curated ones left), and dropping the
+# cap would not tidy anything — it would stop injecting them, taking the
+# voice with it. The set is now FROZEN: no new rules, and no supersession
+# either, since that ran through the writer.
 FEEDBACK_PREF_CAP = 8
 
 # Max content length for an extracted candidate before we drop it as garbage.
@@ -411,75 +416,6 @@ class MemoryService:
             if owns:
                 sess.close()
         return written
-
-    def add_feedback_preference(
-        self,
-        rule: str,
-        evidence: str,
-        db: Session | None = None,
-        anti_pattern: str = "",
-    ) -> Memory | None:
-        """Persist a tone-correction rule from chat feedback.
-
-        Goes through the same per-candidate reconcile path as
-        `apply_memory_candidates` so a repeated rule supersedes the older
-        row instead of stacking. Stored as
-        type='preference' so it's always injected into the system prompt by
-        `build_memory_context`.
-
-        `evidence` is the offending phrase from the prior assistant reply that
-        triggered Daniel's correction. `anti_pattern` is a concrete bad
-        example for future-Gooni to recognize. Both are appended to the
-        stored content when present so the system prompt teaches future
-        Gooni *what specifically to avoid*, not just an abstract rule.
-        """
-        rule = (rule or "").strip()
-        if not rule:
-            return None
-        # Compose stored content. Future Gooni reads this verbatim; richer
-        # phrasing (with concrete pattern) generalizes better than a bland
-        # rule like "less directive".
-        parts = [rule]
-        anti = (anti_pattern or "").strip()
-        if anti:
-            parts.append(f'(avoid e.g. "{anti}")')
-        ev = (evidence or "").strip()
-        if ev and not anti:
-            # Only fall back to evidence in the content if anti_pattern is
-            # missing — anti_pattern is the cleaner future-facing signal.
-            parts.append(f'(triggered by: "{ev[:120]}")')
-        content = " ".join(parts)
-        candidate = {
-            "type": "preference",
-            "key": _slug_rule(rule),
-            "content": content,
-            "context": {"time": None, "location": None, "scope": "global"},
-            "confidence": 0.9,
-        }
-        from .intent_handlers.memories import _reconcile_one
-
-        sess, owns = self._scoped(db)
-        try:
-            _reconcile_one(sess, candidate)
-            self._has_memories_cache = True
-            # Return the freshly-inserted/active row for this key for caller
-            # convenience (e.g. so we can link it to the audit page later).
-            return (
-                sess.query(Memory)
-                .filter(
-                    Memory.type == "preference",
-                    Memory.key == candidate["key"],
-                    Memory.is_active == True,
-                )
-                .order_by(Memory.id.desc())
-                .first()
-            )
-        except Exception as e:
-            print(f"memory add_feedback_preference error: {e}")
-            return None
-        finally:
-            if owns:
-                sess.close()
 
     def add_memory(
         self,

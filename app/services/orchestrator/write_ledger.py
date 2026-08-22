@@ -1,7 +1,7 @@
 """Turn-scoped write ledger — ONE reconstruction of what a turn changed.
 
 The orchestrator has TWO writers and they cannot see each other.
-`intent_router` fires promise / feature / tone hooks UPSTREAM of the chat
+`intent_router` fires promise / feature hooks UPSTREAM of the chat
 model (before a single reply token exists), while the chat tool loop writes
 from INSIDE it and leaves `ToolCall` audit rows behind. Nothing joined the
 two, so "did the reply's claim actually land?" had several independent
@@ -27,9 +27,6 @@ omitted, because the failure this fixes is a verifier reasoning from absence:
     inserted rows since Slice 3; the router annotates the source Message and
     Daniel promotes it later. A draft saying "added that promise" off a glow
     is exactly the lie the old whitelist blessed by name.
-  * ``queued, unconfirmed`` — a tone preference. `add_feedback_preference`
-    runs on a daemon thread, so the turn cannot know it landed. Same reason
-    `RouterResult.wrote_anything` excludes memories.
   * ``read-only`` — a chat tool that reads. Reading a note does not back
     "saved it".
   * ``FAILED`` — the write was attempted and did not land.
@@ -59,7 +56,6 @@ DONE = "done"
 #: Attempted, did not land.
 FAILED = "failed"
 #: Dispatched off-thread — this turn cannot know the outcome.
-QUEUED = "queued"
 #: Deliberately NOT a write (a glow annotation awaiting promotion).
 NOTICED = "noticed"
 #: A chat tool that only read.
@@ -69,7 +65,6 @@ UNFINISHED = "unfinished"
 
 _STATUS_NOTE = {
     FAILED: "FAILED — did not land",
-    QUEUED: "queued, unconfirmed — dispatched off-thread",
     NOTICED: "NOT WRITTEN — noticed only, awaiting review",
     READ: "read-only — backs no write claim",
     UNFINISHED: "unfinished — never reported a result",
@@ -88,7 +83,7 @@ class WriteRecord:
 
     layer: str          # "router" | "tool"
     action: str         # what was attempted
-    status: str         # DONE | FAILED | QUEUED | NOTICED | READ | UNFINISHED
+    status: str         # DONE | FAILED | NOTICED | READ | UNFINISHED
     obj: str = ""       # the object it landed on, for claim matching
     ref: str = ""       # durable id, e.g. "Note #12"
 
@@ -185,16 +180,6 @@ def _router_records(routed: Any) -> list[WriteRecord]:
             action="noticed a commitment (glow on the message)",
             status=NOTICED,
             obj=_preview(s.get("summary") or s.get("utterance")),
-        ))
-
-    # Tone preferences land on a daemon thread; the turn never learns whether
-    # the write succeeded, so it cannot back a "saved that" claim.
-    for rule in getattr(routed, "tone_rules", None) or []:
-        out.append(WriteRecord(
-            layer="router",
-            action="tone preference",
-            status=QUEUED,
-            obj=_preview(rule),
         ))
 
     for fa in getattr(routed, "failed_promise_actions", None) or []:

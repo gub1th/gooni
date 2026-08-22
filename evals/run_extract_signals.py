@@ -31,7 +31,6 @@ FIXTURE_PATH = Path(__file__).parent / "fixtures" / "extract_signals.json"
 
 # Map output field → key inside each item used for substring assertions.
 ITEM_LABEL_KEY = {
-    "tone_corrections": "rule",
     "feature_requests": "title",
     "memories": "content",
 }
@@ -105,7 +104,7 @@ def run(verbose: bool = False, case_filter: str | None = None) -> int:
         for d in diagnostics:
             print(d)
         if verbose:
-            print(f"  raw: tone={len(out['tone_corrections'])} "
+            print(f"  raw: "
                   f"feature={len(out['feature_requests'])} "
                   f"memory={len(out['memories'])}")
         print()

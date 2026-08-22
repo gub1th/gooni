@@ -468,7 +468,7 @@ def reextract_message(message_id: int, db: Session = Depends(get_db)):
     """Retry signal extraction on a message whose original extract died
     (status == "extract_failed" — LLM error / truncated JSON at capture
     time). Re-runs extract_signals + the full intent-router dispatch, so
-    promises re-glow and fitness/tone signals land exactly as they would
+    promises re-glow and signals land exactly as they would
     have on the original turn. Only failed messages are retryable — a
     clean no-signal message has nothing to recover."""
     from ..common import local_today

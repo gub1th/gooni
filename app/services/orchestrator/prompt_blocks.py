@@ -71,14 +71,6 @@ def _summarize_signals(signals: dict, memory_candidates: list) -> dict:
     here so handle_chat doesn't carry the ~25-line dict literal inline.
     """
     return {
-        "tone_corrections": [
-            {
-                "rule": t["rule"],
-                "evidence": t.get("evidence", ""),
-                "anti_pattern": t.get("anti_pattern", ""),
-            }
-            for t in signals.get("tone_corrections", [])
-        ],
         "feature_requests": [
             {"title": f["title"], "why": f.get("why", "")}
             for f in signals.get("feature_requests", [])
@@ -122,7 +114,6 @@ def _build_ack(routed: "RouterResult") -> str | None:
     # rendering logic below is untouched. `routed` is the single source of
     # truth for what got captured this turn (RouterResult, all-empty-list
     # defaults — so a no-signal turn renders nothing and returns None).
-    tone_rules = routed.tone_rules
     captured_features = routed.captured_features
     captured_promises = routed.captured_promises
     completed_promises = routed.completed_promises
@@ -134,11 +125,6 @@ def _build_ack(routed: "RouterResult") -> str | None:
         return s if len(s) <= n else s[:n].rstrip() + "…"
 
     parts: list[str] = []
-    if tone_rules:
-        if len(tone_rules) > 1:
-            parts.append(f"{len(tone_rules)} rules sharpened")
-        else:
-            parts.append(_trim(tone_rules[0]).lower().rstrip("."))
     if captured_features:
         titles = [
             f"\"{_trim(f.get('title'))}\""
@@ -864,7 +850,6 @@ def _build_just_extracted_block(routed: "RouterResult") -> str:
     kind+id pair printed here is a write the LLM is licensed to confirm.
     """
     # See _build_ack — unpack so the rendering body below stays as-is.
-    tone_rules = routed.tone_rules
     captured_features = routed.captured_features
     captured_promises = routed.captured_promises
     completed_promises = routed.completed_promises
@@ -872,8 +857,6 @@ def _build_just_extracted_block(routed: "RouterResult") -> str:
     failed_promise_actions = routed.failed_promise_actions
 
     lines: list[str] = []
-    if tone_rules:
-        lines.append(f"- {len(tone_rules)} tone rule(s) logged")
     for f in captured_features[:3]:
         title = (f.get("title") or "").strip()
         # `Note`, not `BacklogTicket`. BacklogTicket has not existed since the

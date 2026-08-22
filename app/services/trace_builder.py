@@ -162,17 +162,15 @@ class TraceBuilder:
 
     def extracted_signals(self, message: str, signals: dict) -> None:
         """All signal types from extract_signals, in one step so the reviewer
-        rates the extractor as a unit. Covers tone/feature/memory AND the
+        rates the extractor as a unit. Covers feature/memory AND the
         router-routed promise signals — without these a dropped promise is
         invisible in the eval UI.
         """
-        tone = signals.get("tone_corrections") or []
         features = signals.get("feature_requests") or []
         memories = signals.get("memories") or []
         promises = signals.get("promises") or []
         reply_intent = signals.get("reply_intent")
         counts = {
-            "tone": len(tone),
             "feature": len(features),
             "memory": len(memories),
             "promise": len(promises),
@@ -184,7 +182,6 @@ class TraceBuilder:
             label,
             input={"message_preview": message[:300]},
             output={
-                "tone_corrections": tone,
                 "feature_requests": features,
                 "memory_candidates": memories,
                 "promises": promises,
@@ -223,7 +220,7 @@ class TraceBuilder:
 
     def tool_call(self, name: str, label: str | None = None, args: dict | None = None,
                   result: Any = None) -> None:
-        """A tool/router action the orchestrator took (tone capture, feature
+        """A tool/router action the orchestrator took (feature
         request log, undo feedback, etc.). The legend popup in the eval UI
         sources its descriptions from `eval_service.tool_legend()`, which reads
         the live chat registry — it used to say "a static dict in main.py",
