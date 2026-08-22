@@ -36,7 +36,7 @@ import { SendButton } from "../chat/SendButton";
 import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, autoTitleNote as apiAutoTitleNote, uploadImage as apiUploadImage, uploadAttachment as apiUploadAttachment, fetchOgMetadata, saveLocalNoteDraft, readLocalNoteDraft, clearLocalNoteDraft, type ApiNote, type ApiMemory, type NoteClassifySignals } from "../../services/api";
 import { NoteMemoriesPanel } from "./NoteMemoriesPanel";
 import { DOMSerializer } from "@tiptap/pm/model";
-import { CornerUpRight } from "lucide-react";
+import { Archive as ArchiveIcon, ArchiveRestore as ArchiveRestoreIcon, CornerUpRight } from "lucide-react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { useDraftVersionStore } from "../../stores/useDraftVersionStore";
@@ -1458,6 +1458,38 @@ export function NoteEditor({
     }
   }
 
+  async function handleToggleArchive() {
+    if (!activeNote || !activeNoteId || activeNoteId < 0) return;
+    const newArchived = !activeNote.is_archived;
+    try {
+      await apiPatchNote(activeNoteId, { is_archived: newArchived });
+      // Archiving has to make the note LEAVE the list, not just flip a flag on
+      // a row that stays put — the cached lists mirror `GET /notes`, which no
+      // longer contains it. Dropping it optimistically here means the sidebar
+      // reacts on the click; the forced reload below is what brings it back on
+      // an unarchive (the row isn't in any cached list to restore).
+      useNotesContentStore.setState((s) => {
+        const updated: Record<string, ApiNote[]> = {};
+        for (const [k, list] of Object.entries(s.notes)) {
+          updated[k] = newArchived
+            ? list.filter((n) => n.id !== activeNoteId)
+            : list.map((n) => (n.id === activeNoteId ? { ...n, is_archived: false } : n));
+        }
+        return { notes: updated };
+      });
+      // Pinned + Drafts are separate sidebar reads with their own endpoints,
+      // and an archived note has to leave both.
+      usePinnedVersionStore.getState().bump();
+      useDraftVersionStore.getState().bump();
+      void useNotesContentStore.getState().loadNotes(
+        useNotesContentStore.getState().selectedSpaceId ?? "general",
+        { force: true },
+      );
+    } catch (e) {
+      console.error("archive toggle failed", e);
+    }
+  }
+
   async function handlePublishPublic() {
     if (!activeNote || !activeNoteId || activeNoteId < 0) return;
     const wasDraft = activeNote.is_draft;
@@ -1776,6 +1808,37 @@ export function NoteEditor({
                 strokeWidth={1.7}
                 color={activeNote.is_draft ? "#8B5CF6" : ctok.muted}
               />
+            </button>
+          </Tooltip>
+        )}
+
+        {/* Archive toggle — files the note away without destroying it: it
+            leaves every list, search and feed but keeps its content, tags and
+            pins, and comes back whole. The wording is "Archive", never "hide"
+            or "remove", so it can't be read as the delete it exists to
+            replace. Lit state stays neutral-grey rather than taking a warning
+            colour — an archived note is at rest, not in trouble. */}
+        {activeNote && activeNoteId && activeNoteId > 0 && (
+          <Tooltip label={activeNote.is_archived ? "Unarchive — put back in your notes" : "Archive — hide from lists and search, keeps the note"}>
+            <button
+              onClick={handleToggleArchive}
+              style={{
+                width: 30, height: 30, borderRadius: 8,
+                border: "none",
+                background: activeNote.is_archived ? "rgba(120,120,128,0.20)" : "transparent",
+                cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                padding: 0, flexShrink: 0,
+                transition: "background 0.12s",
+              }}
+              onMouseEnter={(e) => { if (!activeNote.is_archived) (e.currentTarget as HTMLButtonElement).style.background = ctok.hover; }}
+              onMouseLeave={(e) => { if (!activeNote.is_archived) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+            >
+              {activeNote.is_archived ? (
+                <ArchiveRestoreIcon size={15} strokeWidth={1.7} color={ctok.text} />
+              ) : (
+                <ArchiveIcon size={15} strokeWidth={1.7} color={ctok.muted} />
+              )}
             </button>
           </Tooltip>
         )}

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..db.models import Note
 from ..llm.client import llm_client
+from ..serializers import _not_archived
 
 
 # FTS5 query special chars. Stripping is the cheap-and-correct way to
@@ -93,13 +94,20 @@ class NoteService:
         No RRF fusion yet — simple union with cosine-preferred ordering.
         Worth the upgrade once both layers are populated enough that the
         ranking divergence matters.
+
+        ARCHIVED notes keep their embedding and their FTS row but are dropped
+        from results. Keeping the vector is the whole reason unarchiving is
+        instant — nothing has to be recomputed, and an archive that quietly
+        cost you an embedding would make the action expensive to undo. Both
+        passes are filtered BEFORE the merge rather than after, so an archived
+        hit can't burn one of the `limit` slots and silently shorten the page.
         """
         # Cosine pass — same shape as before, just one source of the merge.
         cosine_ids: list[int] = []
         query_embedding, _ = llm_client.generate_embedding(query)
         if query_embedding:
             candidates = (
-                db.query(Note.id, Note.embedding)
+                _not_archived(db.query(Note.id, Note.embedding))
                 .filter(Note.embedding.isnot(None))
                 .all()
             )
@@ -115,7 +123,18 @@ class NoteService:
 
         # FTS pass — separate query for the same ids that cosine might
         # have missed. Limit doubled so we have headroom when merging.
+        # The FTS virtual table has no is_archived column (its triggers mirror
+        # title/content only), so the archive filter is a second cheap pass
+        # over the returned ids rather than part of the MATCH.
         fts_ids = self._search_fts(query, limit * 2, db)
+        if fts_ids:
+            live = {
+                nid
+                for (nid,) in _not_archived(db.query(Note.id)).filter(
+                    Note.id.in_(fts_ids)
+                )
+            }
+            fts_ids = [nid for nid in fts_ids if nid in live]
 
         # Merge: cosine first (semantic is the primary signal Gooni's
         # built around), FTS-only matches appended. Dedup by id.
@@ -145,9 +164,13 @@ class NoteService:
         both snappier (no per-keystroke embedding) and more intuitive than
         cosine ranking. Empty query returns most-recent notes so bare `@`
         surfaces a recency list. Newest-edited first.
+
+        Archived notes excluded — mentioning is authoring, and an archived
+        note is the one you have decided not to reach for. Link an archived
+        note by unarchiving it first.
         """
         q = (query or "").strip()
-        rows = db.query(Note)
+        rows = _not_archived(db.query(Note))
         if q:
             rows = rows.filter(Note.title.ilike(f"%{q}%"))
         return (

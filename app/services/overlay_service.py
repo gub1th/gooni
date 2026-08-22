@@ -159,7 +159,13 @@ def _anchor(db: Session, settings: Settings | None) -> dict | None:
     note_id = settings.overlay_anchor_note_id if settings else None
     if not note_id:
         return None
-    note = db.query(Note).filter(Note.id == note_id).first()
+    # An archived anchor renders as NO anchor rather than as itself. The
+    # anchor is the overlay's most prominent note slot, so it's the last place
+    # an archived note should keep showing; the setting is left pointing at it
+    # so unarchiving restores the anchor without re-picking.
+    from ..serializers import _not_archived
+
+    note = _not_archived(db.query(Note)).filter(Note.id == note_id).first()
     if note is None:
         return None
     return {

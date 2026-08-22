@@ -210,8 +210,16 @@ def _tagged(query, tag: str):
     quoted token is an exact member test — `"thought"` can't partial-match
     `"thoughtful"` because the quotes bound it. This is the documented pattern
     for the tags column (low per-note cardinality, no join needed).
+
+    Archived notes are dropped here rather than at each call site, because
+    every caller of this helper is a READ (the thought stream, the batch
+    cards, the dashboard, the per-batch counts) and every one of them is a
+    surface. A thought-batch is a Note, so archiving one has to remove it from
+    the focus surfaces too or the archive means nothing there.
     """
-    return query.filter(Note.tags.like(f'%"{tag}"%'))
+    from ..serializers import _not_archived
+
+    return _not_archived(query).filter(Note.tags.like(f'%"{tag}"%'))
 
 
 def _tags_json(*tags: str) -> str:

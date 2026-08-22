@@ -109,13 +109,20 @@ def _messages(db: Session, before_aware, limit: int) -> list[dict]:
 def _notes(db: Session, before_naive, limit: int) -> list[dict]:
     from ..db.models import Note
 
+    from ..serializers import _not_archived
+
     try:
-        q = db.query(
-            Note.id, Note.title, Note.excerpt, Note.created_at, Note.updated_at
+        q = _not_archived(
+            db.query(
+                Note.id, Note.title, Note.excerpt, Note.created_at, Note.updated_at
+            )
         ).filter(
             # exclude structural notes: stickies (home_pos) + daily-matrix cells (log_date)
             Note.home_pos.is_(None),
             Note.log_date.is_(None),
+            # Archived notes drop out of the feed too. The rail/log sheet is a
+            # browsing surface, and an archived note surfacing there on its
+            # (unchanged) updated_at is the note walking back into the room.
         )
         if before_naive is not None:
             q = q.filter(Note.updated_at < before_naive)

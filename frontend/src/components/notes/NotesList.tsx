@@ -3,6 +3,7 @@ import { Pin as PinIcon } from "lucide-react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import {
   cleanupEmptyNotes,
+  fetchArchivedNotes,
   patchNote,
   type ApiNote,
 } from "../../services/api";
@@ -318,6 +319,16 @@ export function NotesList() {
   const [publicOnly, setPublicOnly] = useState(false);
   const [draftOnly, setDraftOnly] = useState(false);
   const [pinnedOnly, setPinnedOnly] = useState(false);
+  // The Archived view. Deliberately NOT another AND-stacked status filter
+  // like the three above: archived notes are absent from the store's list
+  // entirely (the server excludes them from GET /notes), so this switches the
+  // list's SOURCE to the archive read rather than narrowing what's loaded.
+  const [archivedOnly, setArchivedOnly] = useState(false);
+  const [archivedNotes, setArchivedNotes] = useState<ApiNote[]>([]);
+  const [archivedLoading, setArchivedLoading] = useState(false);
+  // Bumped after every archive/unarchive so the archive list refetches while
+  // it's on screen — unarchiving from inside it has to make the row leave.
+  const [archiveVersion, setArchiveVersion] = useState(0);
   // Tag filter — set by the Sidebar's Tags section via gooni:filter-tag.
   // Seeded from the module-level stash so a tag click that mounted this
   // component still applies (see pendingTagFilter above).
@@ -339,6 +350,19 @@ export function NotesList() {
     return () => window.removeEventListener("gooni:filter-tag", onFilterTag);
   }, []);
 
+  // Load the archive only while the view is open. It's a recovery surface,
+  // not something worth fetching on every notes visit.
+  useEffect(() => {
+    if (!archivedOnly) return;
+    let cancelled = false;
+    setArchivedLoading(true);
+    fetchArchivedNotes()
+      .then((rows) => { if (!cancelled) setArchivedNotes(rows); })
+      .catch(() => { if (!cancelled) setArchivedNotes([]); })
+      .finally(() => { if (!cancelled) setArchivedLoading(false); });
+    return () => { cancelled = true; };
+  }, [archivedOnly, archiveVersion]);
+
   function clearTagFilter() {
     pendingTagFilter = null;
     setTagFilter(null);
@@ -348,7 +372,10 @@ export function NotesList() {
   // List rows only carry `excerpt` (no full body) — full-content search
   // lives behind the semantic `/mcp/notes/search` route used by AllNotes.
   const searchTrimmed = search.trim().toLowerCase();
-  const statusFiltered = allNotes.filter((n) => {
+  // In the Archived view the archive read IS the list — the store's notes
+  // never contain archived rows, so there is nothing to filter down to.
+  const sourceNotes = archivedOnly ? archivedNotes : allNotes;
+  const statusFiltered = sourceNotes.filter((n) => {
     if (publicOnly && !n.is_public) return false;
     if (draftOnly && !n.is_draft) return false;
     if (pinnedOnly && !n.is_pinned) return false;
@@ -361,7 +388,7 @@ export function NotesList() {
     const plain = (n.excerpt ?? (n.content ? stripHtml(n.content) : "")).toLowerCase();
     return plain.includes(searchTrimmed);
   });
-  const anyFilterActive = publicOnly || draftOnly || pinnedOnly || tagFilter !== null;
+  const anyFilterActive = publicOnly || draftOnly || pinnedOnly || archivedOnly || tagFilter !== null;
 
   const headerName = "All Notes";
 
@@ -396,6 +423,22 @@ export function NotesList() {
     const id = contextMenu.noteId;
     setContextMenu(null);
     await deleteNote(id, spaceId);
+  }
+
+  async function handleArchive(archive: boolean) {
+    if (!contextMenu) return;
+    const id = contextMenu.noteId;
+    setContextMenu(null);
+    // One click each way, no confirm step: archiving destroys nothing, and a
+    // confirm dialog would make it read like the delete it exists to replace.
+    await patchNote(id, { is_archived: archive });
+    // Pins live in their own sidebar section fed by a separate read, and an
+    // archived note has to leave it — bump so the sidebar refetches.
+    usePinnedVersionStore.getState().bump();
+    setArchiveVersion((v) => v + 1);
+    // Force past the cache TTL: the row has to disappear from (or reappear
+    // in) the main list on this click, not on the next natural refetch.
+    loadNotes(spaceId, { force: true });
   }
 
   async function handleTogglePin(note: ApiNote) {
@@ -522,6 +565,12 @@ export function NotesList() {
             active={pinnedOnly}
             onClick={() => setPinnedOnly((v) => !v)}
           />
+          <FilterPill
+            label="Archived"
+            icon="🗄"
+            active={archivedOnly}
+            onClick={() => setArchivedOnly((v) => !v)}
+          />
           {/* Tag filter chip — set by the Sidebar's Tags section. Click ✕
               (or the chip) to clear. */}
           {tagFilter !== null && (
@@ -537,6 +586,7 @@ export function NotesList() {
                 setPublicOnly(false);
                 setDraftOnly(false);
                 setPinnedOnly(false);
+                setArchivedOnly(false);
                 clearTagFilter();
               }}
               title="Clear all filters"
@@ -555,7 +605,11 @@ export function NotesList() {
       <div style={{ flex: 1, overflowY: "auto" }}>
         {noteList.length === 0 && (
           <div style={{ padding: "32px 14px", textAlign: "center", color: ctok.faint, fontSize: 13, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
-            {searchTrimmed
+            {archivedLoading
+              ? "Loading archive…"
+              : archivedOnly && !searchTrimmed
+              ? "Nothing archived. Right-click a note › Archive to file it away."
+              : searchTrimmed
               ? `No notes match “${search.trim()}”`
               : anyFilterActive
                 ? "No notes match the active filters. Click 'clear' to reset."
@@ -609,6 +663,20 @@ export function NotesList() {
           }}
         >
           {!contextMenu.confirming ? (
+            <>
+            {/* Archive sits ABOVE delete and reads in neutral ink, not
+                `danger` — the wording and the colour both have to say
+                "filed away", never "removed", or it gets mistaken for the
+                destructive action directly beneath it. */}
+            <button
+              onClick={() => handleArchive(!archivedOnly)}
+              style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 10px", border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, fontSize: 13.5, color: "var(--gooni-text, #1C1C1E)", textAlign: "left" }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
+              title={archivedOnly ? "Put this note back in the notes list" : "Hide from lists and search — keeps the note"}
+            >
+              {archivedOnly ? "↩︎ Unarchive Note" : "🗄 Archive Note"}
+            </button>
             <button
               onClick={handleDelete}
               style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 10px", border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, fontSize: 13.5, color: ctok.danger, textAlign: "left" }}
@@ -617,6 +685,7 @@ export function NotesList() {
             >
               🗑 Delete Note
             </button>
+            </>
           ) : (
             <div style={{ padding: "6px 10px" }}>
               <div style={{ fontSize: 13, color: "var(--gooni-text, #1C1C1E)", marginBottom: 8, fontWeight: 500 }}>Delete this note?</div>
