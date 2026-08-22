@@ -86,7 +86,7 @@ export function AllNotesDiscovery({ onSelectNote, onCompose }: AllNotesDiscovery
     try {
       const { deleted } = await cleanupEmptyNotes();
       if (deleted > 0) {
-        await loadNotes("general");
+        await loadNotes({ force: true });
         await refreshRecent();
       }
     } catch (e) {

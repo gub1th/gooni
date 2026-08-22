@@ -303,7 +303,6 @@ export function NotesList() {
   // consumer — and the save path fires several writes per edit. Zustand's
   // actions are stable identities defined once in the creator, so selecting
   // them individually never triggers a render on its own.
-  const selectedSpaceId = useNotesContentStore((s) => s.selectedSpaceId);
   const notes = useNotesContentStore((s) => s.notes);
   const activeNoteId = useNotesContentStore((s) => s.activeNoteId);
   const createNote = useNotesContentStore((s) => s.createNote);
@@ -335,8 +334,7 @@ export function NotesList() {
   const menuRef = useRef<HTMLDivElement>(null);
 
   // All notes live in the one "general" bucket since Spaces died.
-  const spaceId = selectedSpaceId ?? "general";
-  const allNotes = notes[spaceId] ?? [];
+  const allNotes = notes;
 
   // Follow subsequent folder clicks while mounted.
   useEffect(() => {
@@ -435,7 +433,7 @@ export function NotesList() {
     }
     const id = contextMenu.noteId;
     setContextMenu(null);
-    await deleteNote(id, spaceId);
+    await deleteNote(id);
   }
 
   async function handleArchive(archive: boolean) {
@@ -451,7 +449,7 @@ export function NotesList() {
     setArchiveVersion((v) => v + 1);
     // Force past the cache TTL: the row has to disappear from (or reappear
     // in) the main list on this click, not on the next natural refetch.
-    loadNotes(spaceId, { force: true });
+    loadNotes({ force: true });
   }
 
   async function handleTogglePin(note: ApiNote) {
@@ -459,7 +457,7 @@ export function NotesList() {
     usePinnedVersionStore.getState().bump();
     // Force-bypass the cache TTL — pinning shifts list order on the server,
     // and the user expects to see the change immediately.
-    loadNotes(spaceId, { force: true });
+    loadNotes({ force: true });
     return updated;
   }
 
@@ -472,7 +470,7 @@ export function NotesList() {
     const { deleted } = await cleanupEmptyNotes();
     // Always force after cleanup — if 0 deleted, no-op refetch is fine and
     // it surfaces any external deletes that happened since the last fetch.
-    if (deleted > 0) loadNotes(spaceId, { force: true });
+    if (deleted > 0) loadNotes({ force: true });
   }
 
   // Skip date grouping while searching — a flat, recency-ordered list reads better.
@@ -503,7 +501,7 @@ export function NotesList() {
           {cleanConfirm ? "sure?" : "🧹"}
         </button>
         <button
-          onClick={() => createNote(spaceId)}
+          onClick={() => createNote()}
           title="New note"
           style={{ width: 28, height: 28, borderRadius: 7, background: "rgba(0,0,0,0.06)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--gooni-text, #3C3C43)", padding: 0, flexShrink: 0, transition: "background 0.1s" }}
           onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.12)")}
