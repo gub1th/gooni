@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.258.0 — 2026-08-22 (minor)
+
+- feat(notes): delete drafts — a note is private or public, nothing between (#540)
+
 ## 0.257.0 — 2026-08-22 (minor)
 
 - feat(notes): selecting text starts a focus session, shown inline (#536)
