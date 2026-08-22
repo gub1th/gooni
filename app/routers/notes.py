@@ -19,6 +19,7 @@ from ..common import (
     _unique_viewers_for_note,
     _parse_iso_date,
 )
+from ..deps import note_or_404
 
 
 router = APIRouter()
@@ -230,12 +231,12 @@ def publish_note(note_id: int, body: dict, db: Session = Depends(get_db)):
     (the visibility flag still applies).
     """
     from datetime import datetime
-    note = db.query(Note).filter(Note.id == note_id).first()
-    if not note:
-        return {"error": "note not found"}, 404
+    note = note_or_404(note_id, db)
     visibility = (body.get("visibility") or "private").lower()
     if visibility not in ("public", "private"):
-        return {"error": "visibility must be 'public' or 'private'"}, 400
+        raise HTTPException(
+            status_code=400, detail="visibility must be 'public' or 'private'"
+        )
     note.is_draft = False
     note.is_public = visibility == "public"
     note.updated_at = datetime.utcnow()
@@ -250,9 +251,7 @@ def unpublish_note(note_id: int, db: Session = Depends(get_db)):
     public site (if it was public) AND flags it as a draft again.
     """
     from datetime import datetime
-    note = db.query(Note).filter(Note.id == note_id).first()
-    if not note:
-        return {"error": "note not found"}, 404
+    note = note_or_404(note_id, db)
     note.is_draft = True
     note.is_public = False
     note.updated_at = datetime.utcnow()
@@ -269,9 +268,7 @@ def update_note(
 ):
     from datetime import datetime
 
-    note = db.query(Note).filter(Note.id == note_id).first()
-    if not note:
-        raise HTTPException(status_code=404, detail="Note not found")
+    note = note_or_404(note_id, db)
 
     # Track whether title/content ACTUALLY differ from what's on disk. The
     # frontend's save-on-leave path PATCHes unconditionally to avoid losing
@@ -388,9 +385,7 @@ def extract_to_child_note(note_id: int, body: dict, db: Session = Depends(get_db
     """
     from datetime import datetime
 
-    parent = db.query(Note).filter(Note.id == note_id).first()
-    if not parent:
-        raise HTTPException(status_code=404, detail="parent note not found")
+    parent = note_or_404(note_id, db, what="parent note")
     selected_html = body.get("selected_html") or ""
     if not selected_html.strip():
         raise HTTPException(status_code=400, detail="selected_html required")
@@ -656,17 +651,23 @@ def cleanup_empty_notes(dry_run: bool = False, db: Session = Depends(get_db)):
     }
 
 
-@router.post("/notes/{note_id}/embed")
-def embed_note(note_id: int, db: Session = Depends(get_db)):
-    """Generate embedding for a note. Called on blur (not on every save)
-    to avoid wasteful API calls. Kicks the unified classifier off-thread
-    so signal extraction doesn't block the response.
+@router.post("/notes/{note_id}/classify")
+def classify_note_route(note_id: int, db: Session = Depends(get_db)):
+    """Embed the note, then run the unified classifier off-thread.
+
+    Named for the bigger half of what it does. It shipped as `/embed`, which
+    described only the synchronous step and hid the part that actually writes:
+    `classify_note` extracts signals and routes them through `intent_router`,
+    minting memories and feature-request notes. Every adjacent identifier
+    already says classify (`classified_embedding`, `classify_signals`,
+    `NoteClassifySignals`), so the route now matches them.
+
+    Called on blur / dirty-leave, never on every save — both halves cost an
+    LLM call.
     """
     import threading
 
-    note = db.query(Note).filter(Note.id == note_id).first()
-    if not note:
-        raise HTTPException(status_code=404, detail="Note not found")
+    note_or_404(note_id, db)
     note_service.update_embedding(note_id)  # opens/closes its own session
 
     # Unified extractor: runs in a daemon thread so the embed endpoint
@@ -687,9 +688,7 @@ def touch_note(note_id: int, db: Session = Depends(get_db)):
     """Update last_opened_at. Called whenever a note is selected."""
     from datetime import datetime
 
-    note = db.query(Note).filter(Note.id == note_id).first()
-    if not note:
-        raise HTTPException(status_code=404, detail="Note not found")
+    note = note_or_404(note_id, db)
     note.last_opened_at = datetime.utcnow()
     db.commit()
     return {"ok": True}
@@ -703,9 +702,7 @@ async def auto_title_note(note_id: int, db: Session = Depends(get_db)):
     placeholder title so we don't clobber user-typed titles.
     Returns the new title or the existing one if the note is too short.
     """
-    note = db.query(Note).filter(Note.id == note_id).first()
-    if not note:
-        raise HTTPException(status_code=404, detail="Note not found")
+    note = note_or_404(note_id, db)
 
     plaintext = note_service._strip_html(note.content or "").strip()
     # Below ~40 chars there isn't enough signal — return existing title.
@@ -722,34 +719,11 @@ async def auto_title_note(note_id: int, db: Session = Depends(get_db)):
     return {"title": title, "generated": True}
 
 
-@router.post("/notes/{note_id}/memorize")
-def memorize_note(note_id: int, db: Session = Depends(get_db)):
-    """Extract facts from a note when the user leaves it.
-    Note embeddings are handled by the PATCH endpoint background task —
-    we no longer create Memory episodes from notes (episodes are for chat only).
-    """
-    import re
-
-    note = db.query(Note).filter(Note.id == note_id).first()
-    if not note:
-        raise HTTPException(status_code=404, detail="Note not found")
-    raw = re.sub(r"<[^>]+>", " ", note.content or "").strip()
-    if len(raw) <= 10:
-        return {"ok": True, "facts_saved": 0}
-    try:
-        memory_service.add_memory(raw, type="episode", db=db)
-    except Exception:
-        pass
-    return {"ok": True, "facts_saved": 1}
-
-
 @router.delete("/notes/{note_id}")
 def delete_note(note_id: int, db: Session = Depends(get_db)):
     from datetime import datetime
 
-    note = db.query(Note).filter(Note.id == note_id).first()
-    if not note:
-        raise HTTPException(status_code=404, detail="Note not found")
+    note = note_or_404(note_id, db)
     # Sweep parent notes for any NoteLink chip pointing at this id and
     # replace it with its label as plain text — otherwise the parent
     # carries a dead chip that 404s when Daniel clicks it.
@@ -792,7 +766,7 @@ def delete_note(note_id: int, db: Session = Depends(get_db)):
 
 @router.get("/notes/{note_id}/memories")
 def get_note_memories(note_id: int, limit: int = 6, db: Session = Depends(get_db)):
-    """Memories linked to this note (extracted via memorize). Used by the
+    """Memories linked to this note. Used by the
     editor's Memories pill section so Daniel sees what the note contributed."""
     from ..db.models import Memory
     rows = (
@@ -844,9 +818,7 @@ def get_note(note_id: int, db: Session = Depends(get_db)):
     offer it up unasked; it does not make it unreachable, and the archive
     view's rows have to open somewhere. `is_archived` rides on the payload so
     the editor can show it's looking at an archived note."""
-    note = db.query(Note).filter(Note.id == note_id).first()
-    if not note:
-        raise HTTPException(status_code=404, detail="Note not found")
+    note = note_or_404(note_id, db)
     payload = _serialize_note(note)
     payload["unique_viewers"] = _unique_viewers_for_note(db, note.id)
     return payload

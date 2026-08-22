@@ -148,6 +148,11 @@ async def _lifespan(app: FastAPI):
     # that one pulls EXTERNAL data hourly, this one infers over Gooni's own rows
     # daily, and folding them would make one cadence serve two jobs.
     initiative_task = asyncio.create_task(background._initiative_loop())
+    # The note sweeper — embeds + classifies notes an hour after they go quiet.
+    # Both halves used to run on the write path (blur / dirty-leave / submit),
+    # which paid for an embedding and an extraction over each half-finished
+    # state of a note being actively typed into.
+    note_sweep_task = asyncio.create_task(background._note_sweep_loop())
     from contextlib import AsyncExitStack
 
     async with AsyncExitStack() as _stack:
@@ -161,7 +166,7 @@ async def _lifespan(app: FastAPI):
         finally:
             for t in (
                 excerpt_task, mem_task, refresh_task, proactive_task,
-                initiative_task,
+                initiative_task, note_sweep_task,
             ):
                 t.cancel()
                 try:
@@ -319,7 +324,7 @@ async def auth_middleware(request: Request, call_next):
 # current 1-machine Fly deploy but would need Redis if we scale horizontally.
 # Rules:
 #   - /auth           → 10/min per IP  (cap offline brute-force against the password)
-#   - /chat, /embed   → 30/min per IP  (cap OpenAI cost-abuse)
+#   - /chat, /classify → 30/min per IP (cap OpenAI cost-abuse)
 #   - everything else → 300/min per IP (generic DoS backstop)
 
 _RATE_BUCKETS: dict[tuple[str, str], deque[float]] = defaultdict(deque)
@@ -327,7 +332,7 @@ _RATE_RULES: list[tuple[re.Pattern[str], str, int, int]] = [
     # (path regex, bucket name, max_requests, window_seconds)
     (re.compile(r"^/auth$"), "auth", 10, 60),
     (re.compile(r"^/chat(/|$)"), "chat", 30, 60),
-    (re.compile(r"^/notes/\d+/(embed|memorize)$"), "embed", 30, 60),
+    (re.compile(r"^/notes/\d+/classify$"), "classify", 30, 60),
 ]
 _DEFAULT_BUCKET = ("default", 300, 60)
 

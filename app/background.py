@@ -34,6 +34,12 @@ from .serializers import _excerpt_from_html
 # this one constant to change cadence.
 INTEGRATION_REFRESH_INTERVAL_S = 3600
 
+# How often the note sweeper looks for notes that have gone quiet. The cadence
+# only decides when to LOOK — `sweep_stale_notes` decides what is actually due
+# (idle > SWEEP_IDLE_SECONDS and embedded against older content), so ticking
+# often costs one indexed query and nothing else.
+NOTE_SWEEP_INTERVAL_S = 600
+
 
 async def _backfill_note_excerpts_loop():
     """One-shot lazy backfill of the new `notes.excerpt` column. Old rows
@@ -344,3 +350,41 @@ async def _proactive_loop():
         except Exception as e:
             print(f"[proactive] loop error: {e}", flush=True)
         await asyncio.sleep(proactive_service.interval_minutes() * 60)
+
+
+def _run_note_sweep() -> dict:
+    from .services.note_service import sweep_stale_notes
+
+    return sweep_stale_notes()
+
+
+async def _note_sweep_loop():
+    """Embed + classify notes that have gone quiet.
+
+    This work used to sit on the write path — the editor POSTed on blur, on
+    dirty-leave and on submit, so one editing session paid for several
+    embedding calls and several extractions over successive half-finished
+    states of the same note. Neither job is read in the seconds after a
+    keystroke: the embedding feeds search, the extractor feeds memory.
+
+    Fails open, like every loop here: a tick that raises is logged and the
+    cadence continues. The blocking body goes off the event loop via
+    `asyncio.to_thread` — no request may wait on an embedding call, which is
+    the exact bug the old inline `update_embedding` was.
+    """
+    # After the boot storm (alembic, excerpt backfill, fly-revive).
+    await asyncio.sleep(90)
+    while True:
+        try:
+            result = await asyncio.to_thread(_run_note_sweep)
+            if result.get("processed") or result.get("failed"):
+                print(
+                    f"[note-sweep] due={result['due']} "
+                    f"processed={result['processed']} failed={result['failed']}",
+                    flush=True,
+                )
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            print(f"[note-sweep] loop error: {e}", flush=True)
+        await asyncio.sleep(NOTE_SWEEP_INTERVAL_S)
