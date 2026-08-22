@@ -11,7 +11,7 @@ import { BubbleMenu } from "@tiptap/react/menus";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import {
-  Trash2, Pin as PinIcon,
+  Trash2, Pin as PinIcon, Code as CodeIcon, StickyNote, CheckCircle2,
   ArrowLeftToLine, ArrowRightToLine, ArrowUpToLine, ArrowDownToLine,
   Columns3, Rows3, Heading as HeadingIcon, Trash,
   AlarmClock,
@@ -867,9 +867,10 @@ export function NoteEditor({
     {
       extensions: [
         // Limit heading levels to 1 + 2 — note bodies don't need a 6-level
-        // outline depth. Reachable via the slash command menu; the
-        // selection BubbleMenu no longer offers formatting at all (see its
-        // comment below — it's a single Focus action now).
+        // outline depth. Headings are reachable via the slash menu and the
+        // markdown shortcut; the selection BubbleMenu deliberately does not
+        // carry them (see its comment below — it holds two actions and the
+        // two formats that have no other keyboard path).
         StarterKit.configure({ heading: { levels: [1, 2] } }),
         Figure,
         Attachment,
@@ -2318,12 +2319,19 @@ export function NoteEditor({
                         "0 8px 22px rgb(var(--gooni-tint, 0 0 0) / 0.14), 0 1px 3px rgb(var(--gooni-tint, 0 0 0) / 0.10), inset 0 0 0 0.5px rgb(var(--gooni-tint, 0 0 0) / 0.06)",
                     }}
                   >
-                    {/* The selection popup is down to TWO actions — Focus,
-                        then Extract. Formatting (H1/H2, bold/italic/strike/
-                        code) and Card + its done/color controls lived here
-                        and are unreachable from the UI now — a deliberate,
-                        captain-approved trade, not an oversight. No overflow
-                        menu, no "…" — the popup says what it does. */}
+                    {/* FOUR entries: the two ACTIONS (Focus, Extract) then
+                        the two FORMATS (inline code, Card), split by a rule.
+                        #536 cut the menu to Focus+Extract; headings,
+                        bold/italic/strike and the card colour swatches stay
+                        cut — markdown shortcuts still reach the first group
+                        and colour was never load-bearing. Code and Card came
+                        back because they have no keyboard path (Card) or a
+                        non-obvious one (⌘⇧M for code).
+
+                        The Card check toggle rides along and is HIDDEN unless
+                        the cursor is already in a card: Card without it is
+                        uncheckable from the toolbar, and it is meaningless
+                        anywhere else. No overflow menu, no "…". */}
                     <button
                       title={focusStarting ? "Starting…" : "Focus on this"}
                       disabled={focusStarting}
@@ -2431,6 +2439,70 @@ export function NoteEditor({
                         </button>
                       </>
                     )}
+
+                    {/* Actions | formats. The rule is what stops a one-click
+                        lifecycle action (Focus starts a real server-side
+                        session) from sitting flush against a text toggle. */}
+                    <span style={{ width: 1, height: 18, background: ctok.border, margin: "0 4px" }} />
+
+                    {([
+                      {
+                        Icon: CodeIcon,
+                        title: "Inline code",
+                        action: () => editor.chain().focus().toggleCode().run(),
+                        active: editor.isActive("code"),
+                      },
+                      // Card block — wraps the selected paragraphs in one
+                      // full-width pastel panel. Clicking again lifts them
+                      // back out.
+                      {
+                        Icon: StickyNote,
+                        title: editor.isActive("noteCard") ? "Remove card" : "Card",
+                        action: () => editor.chain().focus().toggleNoteCard().run(),
+                        active: editor.isActive("noteCard"),
+                      },
+                      {
+                        Icon: CheckCircle2,
+                        title: editor.isActive("noteCard", { checked: true })
+                          ? "Mark card undone"
+                          : "Mark card done",
+                        action: () =>
+                          editor
+                            .chain()
+                            .focus()
+                            .setNoteCardChecked(!editor.isActive("noteCard", { checked: true }))
+                            .run(),
+                        active: editor.isActive("noteCard", { checked: true }),
+                        // Only meaningful inside an existing card. cmd+click
+                        // on the card body toggles it too.
+                        hidden: !editor.isActive("noteCard"),
+                      },
+                    ] as const).filter((item) => !("hidden" in item && item.hidden)).map((item) => (
+                      <button
+                        key={item.title}
+                        title={item.title}
+                        onMouseDown={(e) => { e.preventDefault(); item.action(); }}
+                        style={{
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          width: 30, height: 30,
+                          padding: 0,
+                          borderRadius: 8,
+                          border: "none",
+                          background: item.active ? ctok.hover : "transparent",
+                          color: item.active ? "var(--gooni-text, #0F172A)" : "var(--gooni-muted, #475569)",
+                          cursor: "pointer",
+                          transition: "background 0.12s, color 0.12s",
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!item.active) (e.currentTarget as HTMLButtonElement).style.background = ctok.hover;
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!item.active) (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+                        }}
+                      >
+                        <item.Icon size={15} strokeWidth={1.9} />
+                      </button>
+                    ))}
                   </BubbleMenu>
                 )}
 
@@ -2446,7 +2518,24 @@ export function NoteEditor({
                   <BubbleMenu
                     editor={editor}
                     pluginKey="tableMenu"
-                    shouldShow={({ editor }) => editor.isActive("table")}
+                    // A CELL SELECTION, not merely "the cursor is in a table".
+                    // `isActive("table")` is true for every caret position
+                    // inside one, so the bar was pinned open the entire time
+                    // you typed — floating below the cell and covering the row
+                    // under it. It now appears when you actually select cells
+                    // (drag across them, or click a cell's edge handle), which
+                    // is when a structural action is what you want.
+                    //
+                    // ProseMirror's CellSelection is duck-typed here rather
+                    // than imported: prosemirror-tables is a transitive dep of
+                    // @tiptap/extension-table, and importing through it would
+                    // pin a package.json we do not own. `$anchorCell` exists on
+                    // CellSelection and on nothing else.
+                    shouldShow={({ editor }) => {
+                      if (!editor.isActive("table")) return false;
+                      const sel = editor.state.selection as unknown as { $anchorCell?: unknown };
+                      return sel.$anchorCell !== undefined;
+                    }}
                     // Pin BELOW the cell. The text-format BubbleMenu above
                     // defaults to "top"; selecting text inside a cell shows
                     // both, so dropping this one underneath stops them
