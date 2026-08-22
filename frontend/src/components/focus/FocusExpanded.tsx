@@ -5,13 +5,11 @@ import { FOCUS_PALETTES } from "./focusPalette";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
 import { FocusEvidenceGallery } from "./FocusEvidenceGallery";
 import { FocusCameraStatus } from "./FocusCameraStatus";
-import { type SessionRecapData } from "./FocusSessionRecap";
 import {
   elapsedMs,
   sealedSegments,
   sessionStartedAt,
   useFocusSessionStore,
-  type FocusSession,
   type FocusStyle,
 } from "../../stores/useFocusSessionStore";
 import { useFocusRecapStore } from "../../stores/useFocusRecapStore";
@@ -22,12 +20,7 @@ import {
   fmtMinutes,
   splitSegmentsByDay,
 } from "../../services/focusTime";
-import {
-  fetchSessionActivity,
-  updateFocusReminder,
-  type ServerFocusSession,
-  type SessionActivity,
-} from "../../services/api";
+import { updateFocusReminder, type SessionActivity } from "../../services/api";
 
 // The expanded focus surface — the ring, FOCUS/BREAK, the sensor line, mark
 // kept. ONE component, two hosts:
@@ -105,7 +98,7 @@ export function FocusExpanded() {
   const session = useFocusSessionStore((s) => s.session);
   const [now, setNow] = useState(() => Date.now());
   const [saveError, setSaveError] = useState(false);
-  const setRecap = useFocusRecapStore((s) => s.setRecap);
+  const showRecap = useFocusRecapStore((s) => s.show);
   const stopping = useRef(false);
 
   const kept = session?.kept ?? false;
@@ -145,81 +138,10 @@ export function FocusExpanded() {
     return splitSegmentsByDay(sealedSegments(session, now)).reduce((n, d) => n + d.minutes, 0);
   }, [session, now]);
 
-  /** Build the recap from data the session itself produced — no invented score.
-   *
-   * The activity half is a FRESH read of the session's exact `[start, stop)`
-   * window, not the polled one: the poll's `until` is "now at poll time", so
-   * reusing it would drop whatever happened between the last tick and the stop.
-   * It also used to fold `/focus/cam/evidence` — a table the sidecar does not
-   * write to yet — which is the whole of why the recap always said "nothing
-   * flagged" even when the camera had fired all session. It reads the EVENTS
-   * now (which the sidecar does write) and the evidence frames beside them.
-   *
-   * A failed read leaves the activity fields empty rather than failing the
-   * stop: the session's own numbers (minutes, timeline, per-day) are already in
-   * hand, and losing the recap must never cost the write. */
-  async function buildRecap(
-    s: FocusSession,
-    stopMs: number,
-    stopped: ServerFocusSession | null,
-  ): Promise<SessionRecapData> {
-    const spanStart = sessionStartedAt(s) ?? stopMs;
-    const sealed = sealedSegments(s, stopMs);
-    const perDay = splitSegmentsByDay(sealed);
-    const timeline = sealed
-      .filter((seg) => seg.mode === "focus")
-      .map((seg) => ({ start: seg.start, end: seg.end, truncated: seg.truncated === true }));
-
-    // The STOP response already carries the session-scoped activity, computed
-    // over the server's own runs — so the recap no longer makes a second read
-    // that could describe a slightly different window than the one that just
-    // ended. Falling back to the window read keeps the recap working if the
-    // stop response somehow arrived without it.
-    const act =
-      stopped?.activity ??
-      (await fetchSessionActivity(new Date(spanStart), new Date(stopMs)).catch(() => null));
-    const eventsByKind: Record<string, number> = {};
-    for (const e of act?.camera_events ?? []) eventsByKind[e.kind] = e.count;
-
-    return {
-      title: s.title,
-      // The SERVER's minutes when we have them: it sealed the runs and wrote
-      // the entry, so a client/server clock difference must not leave the recap
-      // disagreeing with the log matrix.
-      totalMinutes: stopped?.focused_minutes ?? perDay.reduce((n, d) => n + d.minutes, 0),
-      spanMs: Math.max(0, stopMs - spanStart),
-      spanStart,
-      spanEnd: stopMs,
-      perDay,
-      timeline,
-      eventsByKind,
-      evidence: act?.camera_evidence ?? [],
-      browser: act?.browser.top ?? [],
-      apps: act?.app.top ?? [],
-      device: act?.device.top ?? [],
-      browserOtherSec: act?.browser.other_sec ?? 0,
-      appOtherSec: act?.app.other_sec ?? 0,
-      // `null` means the read FAILED — distinct from `0`, which means the
-      // sensors genuinely observed nothing. The recap renders them differently.
-      observedSeconds: act ? act.observed_seconds : null,
-      warnings: act?.warnings ?? [],
-      completionFrame: stopped?.completion_frame ?? null,
-      // The score. `undefined` (no scored read) and `null` (scored, nothing
-      // observed) are DIFFERENT answers and the recap says so — unknown versus
-      // unmeasured. Neither is ever rendered as a number.
-      focusScore: act?.focus_score,
-      presencePct: act?.presence_pct,
-      scoreBasis: act?.score_basis,
-      scoreCoverage: act?.score_coverage,
-      sensorTimeline: act?.timeline_segments,
-    };
-  }
-
   async function stop() {
     if (stopping.current || !session) return;
     stopping.current = true;
     setSaveError(false);
-    const stopMs = Date.now();
     // Stopping — as opposed to pausing — means the task is DONE: this is the
     // one completion gesture (no separate "mark kept" click). Read before the
     // await: `endFocusSession` clears the store, so `session` here is the
@@ -228,9 +150,12 @@ export function FocusExpanded() {
     const alreadyKept = kept;
     try {
       // ONE call. It seals the runs, writes the entry, releases the camera,
-      // grabs the victory selfie and hands back the sensor breakdown — so
-      // nothing here can show a recap for a session whose minutes had not
-      // landed, and there is no second window read to disagree with the first.
+      // grabs the victory selfie and hands back the sensor breakdown. The
+      // response already IS what `recapFromSession` needs — this component no
+      // longer builds the recap itself; it just points the recap view at the
+      // session id that resulted. That is what makes the post-stop dashboard
+      // and a past session's dashboard the SAME code path: see
+      // `useFocusRecapStore` and `FocusSessionRecapView`.
       const stopped = await endFocusSession();
       if (s.promiseId != null && !alreadyKept) {
         // Best-effort: the session's own write already landed, so a failure
@@ -238,7 +163,7 @@ export function FocusExpanded() {
         // no promise behind it has nothing to mark.
         await updateFocusReminder(s.promiseId, { state: "kept" }).catch(() => {});
       }
-      setRecap(await buildRecap(s, stopMs, stopped));
+      if (stopped) showRecap(stopped.id);
     } catch {
       setSaveError(true);
     } finally {

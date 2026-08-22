@@ -3,8 +3,8 @@ import { FONT, frostInk } from "../../ui";
 import { GooniAsleep } from "./GooniAsleep";
 import { FOCUS_PALETTES } from "./focusPalette";
 import { FocusExpanded } from "./FocusExpanded";
-import { FocusHistory } from "./FocusHistory";
-import { FocusSessionRecap } from "./FocusSessionRecap";
+import { FocusSessionList } from "./FocusSessionList";
+import { FocusSessionRecapView } from "./FocusSessionRecapView";
 import { TodayList, type TodayRow } from "../ambient/TodayList";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
 import { useFocusSessionStore } from "../../stores/useFocusSessionStore";
@@ -26,22 +26,30 @@ const DASH_POLL_MS = 30_000;
 const EMPTY_TOTALS: FocusTotals = { today: 0, byPromise: {} };
 
 // `/focus` — grown from a chromeless second-monitor kiosk into a real hub
-// (2026-08-15): today's tasks (+ add), clickable session history with an
-// attribution drill-down, and the same start-a-session gesture the home's
-// task rows use. It's a normal shell citizen now — the shared IconRail,
-// AppHeader and FooterIsland all render around it (via __root's SurfacePanel,
-// no longer `fullBleed`), so this component owns none of that chrome itself.
+// (2026-08-15): today's tasks (+ add), a clickable recent-sessions list, and
+// the same start-a-session gesture the home's task rows use. It's a normal
+// shell citizen now — the shared IconRail, AppHeader and FooterIsland all
+// render around it (via __root's SurfacePanel, no longer `fullBleed`), so
+// this component owns none of that chrome itself.
 //
 // GooniAsleep stays the idle-state centrepiece — 2D SVG, low-opacity,
-// pointer-events:none, unchanged — with the task list and history laid over
-// the lower half of the screen the same way the old "focus starts from a
-// task" caption used to sit there.
+// pointer-events:none, unchanged — with the task list and session list laid
+// over the lower half of the screen the same way the old "focus starts from
+// a task" caption used to sit there.
+//
+// `recapSessionId` (2026-08-21) replaced a promise-attribution history list
+// (`FocusHistory.tsx`, deleted) with the analytics DASHBOARD itself: clicking
+// any past session in `FocusSessionList` — or a session that just stopped —
+// addresses it by id here rather than by an in-memory recap object, which is
+// what makes the dashboard survive a reload and reachable for any session,
+// not just the one that just ended in this tab. See `useFocusRecapStore`.
 export function FocusKiosk() {
   const theme = useGooniThemeStore((s) => s.theme);
   const pal = FOCUS_PALETTES[theme];
   const session = useFocusSessionStore((s) => s.session);
-  const recap = useFocusRecapStore((s) => s.recap);
+  const recapSessionId = useFocusRecapStore((s) => s.sessionId);
   const clearRecap = useFocusRecapStore((s) => s.clear);
+  const showRecap = useFocusRecapStore((s) => s.show);
 
   const [shortTerm, setShortTerm] = useState<FocusReminder[]>([]);
   const [totals, setTotals] = useState<FocusTotals>(EMPTY_TOTALS);
@@ -123,8 +131,8 @@ export function FocusKiosk() {
     <div style={{ position: "relative", width: "100%", height: "100%", background: frostInk.sheet, fontFamily: FONT, overflow: "hidden" }}>
       {session ? (
         <FocusExpanded />
-      ) : recap ? (
-        <FocusSessionRecap recap={recap} onClose={clearRecap} />
+      ) : recapSessionId != null ? (
+        <FocusSessionRecapView sessionId={recapSessionId} onClose={clearRecap} />
       ) : (
         <>
           <GooniAsleep pal={pal} />
@@ -150,7 +158,7 @@ export function FocusKiosk() {
             </div>
 
             <div style={{ width: "min(92vw, 460px)" }}>
-              <FocusHistory pal={pal} />
+              <FocusSessionList pal={pal} onOpen={showRecap} />
             </div>
           </div>
         </>

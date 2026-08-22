@@ -93,20 +93,30 @@ def _iso(dt: datetime | None) -> str | None:
     return dt.replace(tzinfo=timezone.utc).isoformat() if dt is not None else None
 
 
-def load_segments(s: FocusSession) -> list[dict]:
-    """The CLOSED runs, defensively. `segments` is free-form Text, so a
-    malformed blob costs the run list rather than the read — the same contract
-    `parse_focus_entry` applies to a written entry."""
+def _raw_segments_blob(s: FocusSession) -> list | dict:
+    """Parse `s.segments` defensively, returning whatever JSON shape is
+    stored (a bare list of runs, the legacy-only format, or the envelope
+    dict below) — never raising. A malformed blob costs the run list rather
+    than the read, the same contract `parse_focus_entry` applies."""
     if not s.segments:
         return []
     try:
         raw = json.loads(s.segments)
     except (TypeError, ValueError):
         return []
-    if not isinstance(raw, list):
+    if isinstance(raw, (list, dict)):
+        return raw
+    return []
+
+
+def load_segments(s: FocusSession) -> list[dict]:
+    """The CLOSED runs, defensively."""
+    raw = _raw_segments_blob(s)
+    items = raw.get("runs") if isinstance(raw, dict) else raw
+    if not isinstance(items, list):
         return []
     out = []
-    for item in raw:
+    for item in items:
         if not isinstance(item, dict):
             continue
         start = _parse(item.get("start"))
@@ -118,23 +128,48 @@ def load_segments(s: FocusSession) -> list[dict]:
     return out
 
 
+def has_manual_title(s: FocusSession) -> bool:
+    """Whether `s.title` was set by a human rename rather than snapshotted at
+    start. Rides in the SAME free-form `segments` Text as the run list — no
+    new column, same convention as `Settings.focus_cam`'s "shape grows
+    without a migration" — because `s.segments` is otherwise never read
+    outside this module (verified: nothing else touches `FocusSession.segments`),
+    so widening its envelope from a bare list to `{"runs": [...],
+    "manual_title": bool}` is safe. `serialize()` is the one reader that acts
+    on this flag: a manually-set title must WIN over the linked Promise's
+    live text, or a rename would be silently invisible the moment the
+    commitment's own wording changes (the captain's explicit call — see
+    `set_title`)."""
+    raw = _raw_segments_blob(s)
+    return isinstance(raw, dict) and raw.get("manual_title") is True
+
+
 def _parse(raw) -> datetime | None:
     from .interval_ingest import parse_dt
 
     return parse_dt(raw)
 
 
-def _dump_segments(runs: list[dict]) -> str:
-    return json.dumps(
-        [
-            {
-                "start": _iso(r["start"]),
-                "end": _iso(r["end"]),
-                **({"truncated": True} if r.get("truncated") else {}),
-            }
-            for r in runs
-        ]
-    )
+def _dump_segments(runs: list[dict], *, manual_title: bool = False) -> str:
+    """Serialize the run list, carrying `manual_title` forward as the
+    envelope's own key so pause/resume/stop — which all overwrite
+    `s.segments` with a fresh run list — can never silently drop a rename
+    that happened earlier in the sitting. Every writer MUST read the flag
+    off the row it is about to overwrite (`has_manual_title(s)`) before
+    calling this, or a pause immediately after a rename would erase it."""
+    runs_json = [
+        {
+            "start": _iso(r["start"]),
+            "end": _iso(r["end"]),
+            **({"truncated": True} if r.get("truncated") else {}),
+        }
+        for r in runs
+    ]
+    if not manual_title:
+        # Plain list, unchanged from before this feature existed — a session
+        # never renamed round-trips through the exact format it always did.
+        return json.dumps(runs_json)
+    return json.dumps({"runs": runs_json, "manual_title": True})
 
 
 def sealed_runs(s: FocusSession, now: datetime | None = None) -> list[dict]:
@@ -461,8 +496,9 @@ def pause(db: Session, s: FocusSession, *, now: datetime | None = None) -> Focus
     now = now or _utcnow()
     if s.state != "running":
         return s
+    manual_title = has_manual_title(s)
     runs = sealed_runs(s, now)
-    s.segments = _dump_segments(runs)
+    s.segments = _dump_segments(runs, manual_title=manual_title)
     s.truncated = s.truncated or any(r.get("truncated") for r in runs)
     s.state = "paused"
     s.paused_at = now
@@ -507,11 +543,12 @@ def stop(db: Session, s: FocusSession, *, now: datetime | None = None) -> FocusS
     if s.state == "stopped":
         return s
 
+    manual_title = has_manual_title(s)
     runs = sealed_runs(s, now)
     # Seal FIRST, in memory, so a write failure below leaves a paused session
     # holding exactly these runs rather than a still-open one that would seal
     # longer on the retry.
-    s.segments = _dump_segments(runs)
+    s.segments = _dump_segments(runs, manual_title=manual_title)
     s.truncated = s.truncated or any(r.get("truncated") for r in runs)
     if s.state == "paused" and s.paused_at is not None:
         s.total_paused_ms = int(s.total_paused_ms or 0) + int(
@@ -558,6 +595,27 @@ def set_kept(db: Session, s: FocusSession, kept: bool) -> FocusSession:
     return s
 
 
+def set_title(db: Session, s: FocusSession, title: str) -> FocusSession:
+    """A human rename. Captain's explicit call: it must WIN over the linked
+    Promise's live text (`serialize()` normally prefers that, so a
+    commitment renamed after the session started still shows correctly) —
+    renaming the session is not the same act as renaming the commitment, and
+    a naive title write would otherwise be silently invisible the instant
+    `serialize()` next ran. Marks `manual_title` in the same `segments`
+    envelope `_dump_segments` writes (see `has_manual_title`); every later
+    pause/stop already reads that flag back before it overwrites the
+    envelope, so the rename survives the rest of the sitting. Does NOT touch
+    the underlying Promise — only this session's own label."""
+    title = (title or "").strip()
+    if not title:
+        raise ValueError("title required")
+    s.title = title
+    s.segments = _dump_segments(load_segments(s), manual_title=True)
+    db.commit()
+    db.refresh(s)
+    return s
+
+
 # ── serialization ────────────────────────────────────────────────────────────
 
 
@@ -595,7 +653,12 @@ def serialize(db: Session, s: FocusSession, *, now: datetime | None = None) -> d
     now = now or _utcnow()
     runs = sealed_runs(s, now)
     title = s.title
-    if s.promise_id is not None:
+    # A manual rename WINS over the live Promise text — the captain's explicit
+    # call (see `set_title`). Without this branch, the override two lines
+    # below would silently swallow every rename the instant the promise's own
+    # wording next changed, which is exactly the bug this feature exists to
+    # avoid.
+    if s.promise_id is not None and not has_manual_title(s):
         p = db.query(Promise).filter(Promise.id == s.promise_id).first()
         if p is not None:
             # Live promise text beats the snapshot: a commitment renamed since
@@ -605,6 +668,7 @@ def serialize(db: Session, s: FocusSession, *, now: datetime | None = None) -> d
         "id": s.id,
         "promise_id": s.promise_id,
         "title": title,
+        "title_is_manual": has_manual_title(s),
         "state": s.state,
         "started_at": _iso(s.started_at),
         "ended_at": _iso(s.ended_at),

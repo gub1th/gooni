@@ -2248,6 +2248,10 @@ export interface ServerFocusSession {
   id: number;
   promise_id: number | null;
   title: string;
+  /** True once a human renamed this session — that title then WINS over the
+   *  linked Promise's live text (which `serialize()` otherwise prefers), so a
+   *  commitment renamed afterward can't silently swallow it. */
+  title_is_manual: boolean;
   state: FocusSessionState;
   started_at: string;
   ended_at: string | null;
@@ -2321,7 +2325,7 @@ export async function stopFocusSession(id: number): Promise<ServerFocusSession> 
 
 export async function patchFocusSession(
   id: number,
-  patch: { style?: "stopwatch" | "timer"; target_ms?: number | null; kept?: boolean },
+  patch: { style?: "stopwatch" | "timer"; target_ms?: number | null; kept?: boolean; title?: string },
 ): Promise<ServerFocusSession> {
   return focusSessionCall(`/focus/sessions/${id}`, {
     method: "PATCH",
@@ -2334,6 +2338,33 @@ export async function fetchFocusSessionActivity(id: number): Promise<SessionActi
   const res = await apiFetch(`${BASE}/focus/sessions/${id}/activity`);
   if (!res.ok) throw new Error("Failed to fetch focus session activity");
   return res.json();
+}
+
+/** One session, `?activity=1` folding in the same sensor breakdown the stop
+ *  response carries — the read behind the past-session dashboard. */
+export async function fetchFocusSession(
+  id: number,
+  opts: { activity?: boolean } = {},
+): Promise<ServerFocusSession> {
+  const q = opts.activity ? "?activity=1" : "";
+  return focusSessionCall(`/focus/sessions/${id}${q}`);
+}
+
+/**
+ * Recent sessions, newest first — the `/focus` idle screen's history list.
+ * `activity: true` folds each row's sensor breakdown (score included) into
+ * one request rather than N follow-ups for a list already bounded by `limit`.
+ */
+export async function listFocusSessions(
+  opts: { limit?: number; activity?: boolean } = {},
+): Promise<ServerFocusSession[]> {
+  const q = new URLSearchParams();
+  if (opts.limit != null) q.set("limit", String(opts.limit));
+  if (opts.activity) q.set("activity", "1");
+  const res = await apiFetch(`${BASE}/focus/sessions?${q}`);
+  if (!res.ok) throw new Error("Failed to fetch focus sessions");
+  const data = (await res.json()) as { sessions: ServerFocusSession[] };
+  return data.sessions;
 }
 
 // ── Ambient display state (the persistent kiosk's reconcile target) ──────────
