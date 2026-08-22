@@ -189,7 +189,15 @@ function SidebarChildRow({
 // ExpandToggle — "Show all N" / "Show less" row under a capped list.
 export function Sidebar({ onAllNotes, onSelectNote }: SidebarProps) {
   const navigate = useNavigate();
-  const { selectSpace, loadNotes, selectNote, activeNoteId } = useNotesContentStore();
+  // Per-field selectors, not a whole-store destructure. Destructuring
+  // subscribes to EVERY store write, so one note's refetch re-rendered every
+  // consumer — and the save path fires several writes per edit. Zustand's
+  // actions are stable identities defined once in the creator, so selecting
+  // them individually never triggers a render on its own.
+  const selectSpace = useNotesContentStore((s) => s.selectSpace);
+  const loadNotes = useNotesContentStore((s) => s.loadNotes);
+  const selectNote = useNotesContentStore((s) => s.selectNote);
+  const activeNoteId = useNotesContentStore((s) => s.activeNoteId);
 
   const [pinnedNotes, setPinnedNotes] = useState<ApiNote[]>([]);
   const [recentNotes, setRecentNotes] = useState<ApiNote[]>([]);

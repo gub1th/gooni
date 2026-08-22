@@ -95,7 +95,12 @@ function ActivityIcon({ name, src }: { name: string; src: string | null }) {
   );
 }
 
-export function CurrentActivityLine() {
+
+// `paused` is the home's covered flag. The home is always mounted and
+// portaled, so a surface sliding over it DIMS this component rather than
+// unmounting it — without the gate the interval keeps hitting the server
+// about a line nobody can see.
+export function CurrentActivityLine({ paused = false }: { paused?: boolean }) {
   const [activity, setActivity] = useState<CurrentActivity | null>(null);
 
   useEffect(() => {
@@ -108,13 +113,14 @@ export function CurrentActivityLine() {
         /* ambient — stay quiet */
       }
     };
+    if (paused) return;
     void load();
     const id = window.setInterval(() => void load(), FEED_REFRESH_MS);
     return () => {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, []);
+  }, [paused]);
 
   // Prefer the desktop app over the browser tab — frontmost app is the
   // broader context (it's what's actually on screen; a background browser

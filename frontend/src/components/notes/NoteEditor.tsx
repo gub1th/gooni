@@ -627,7 +627,18 @@ export function NoteEditor({
   const ambient = variant === "ambient";
   const embedded = variant === "embedded" || ambient;
 
-  const { selectedSpaceId, notes, activeNoteId: storeActiveNoteId, updateNote, refetchNote, selectNote, deleteNote } = useNotesContentStore();
+  // Per-field selectors, not a whole-store destructure. Destructuring
+  // subscribes to EVERY store write, so one note's refetch re-rendered every
+  // consumer — and the save path fires several writes per edit. Zustand's
+  // actions are stable identities defined once in the creator, so selecting
+  // them individually never triggers a render on its own.
+  const selectedSpaceId = useNotesContentStore((s) => s.selectedSpaceId);
+  const notes = useNotesContentStore((s) => s.notes);
+  const storeActiveNoteId = useNotesContentStore((s) => s.activeNoteId);
+  const updateNote = useNotesContentStore((s) => s.updateNote);
+  const refetchNote = useNotesContentStore((s) => s.refetchNote);
+  const selectNote = useNotesContentStore((s) => s.selectNote);
+  const deleteNote = useNotesContentStore((s) => s.deleteNote);
   // THE ephemeral switch, in one line. Every guard downstream is already
   // `activeNoteId && activeNoteId > 0`, so nulling it here is what makes the
   // ambient composer create-only: no hydration, no autosave, no save-on-leave,

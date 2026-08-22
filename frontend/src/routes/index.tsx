@@ -92,10 +92,15 @@ export const Route = createFileRoute("/")({
 });
 
 function LogPage() {
-  const { loadNotes, createNote, selectNote } = useNotesContentStore();
+  // Per-field selectors, not two whole-store destructures. Destructuring
+  // subscribes to every store write; this component only needs three stable
+  // actions and one id.
+  const loadNotes = useNotesContentStore((s) => s.loadNotes);
+  const createNote = useNotesContentStore((s) => s.createNote);
+  const selectNote = useNotesContentStore((s) => s.selectNote);
+  const activeNoteId = useNotesContentStore((s) => s.activeNoteId);
   const navigate = useNavigate({ from: "/" });
   const search = Route.useSearch();
-  const { activeNoteId } = useNotesContentStore();
 
   // View is DERIVED from the URL, not stored locally. Single source of
   // truth: search params own the answer, so any navigate() — deep link,

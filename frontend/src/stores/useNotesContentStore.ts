@@ -170,11 +170,29 @@ export const useNotesContentStore = create<NotesContentState>()(
         try {
           const fresh = await apiFetchNote(id);
           set((s) => {
+            // Rebuild ONLY the buckets that actually hold this note, and only
+            // when its row differs. The old version mapped every bucket
+            // unconditionally, so each call handed back a new array identity
+            // for every list in the store — every subscriber re-rendered on a
+            // refetch of one note, whether or not it was showing that note.
+            // Compounded by the save path firing several store writes per
+            // edit (patch → resolve → post-classify refetch).
+            let changed = false;
             const newNotes: Record<string, ApiNote[]> = {};
             for (const [key, list] of Object.entries(s.notes)) {
-              newNotes[key] = list.map((n) => (n.id === id ? fresh : n));
+              const i = list.findIndex((n) => n.id === id);
+              if (i === -1 || list[i] === fresh) {
+                newNotes[key] = list;          // same identity — no re-render
+                continue;
+              }
+              const next = list.slice();
+              next[i] = fresh;
+              newNotes[key] = next;
+              changed = true;
             }
-            return { notes: newNotes };
+            // No bucket held it: return the SAME object so zustand's identity
+            // check short-circuits instead of notifying every subscriber.
+            return changed ? { notes: newNotes } : s;
           });
         } catch {
           // note may have been deleted — ignore

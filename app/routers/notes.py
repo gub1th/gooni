@@ -52,13 +52,32 @@ def _encode_home_pos(raw) -> str | None:
 # carrying Claude's third-person label and any pinned image. That's the row worth
 # seeing in a browsing surface, and it's the one that makes photo cards render
 # again. `?tag=thought` still returns the leaves for anyone who asks directly.
-_BROWSE_HIDDEN_TAG = "thought"
+# `feature-request` joins it for the same reason, one layer up: those notes
+# are written by `create_feature_request_note` off the extractor, not by
+# Daniel. They arrive titled with a one-line why, so they LOOK like notes he
+# wrote, which is what made them worse than thought leaves — a browse list of
+# "Auto-execute approved requests", "Process activity into value" reads as his
+# own writing until he opens one. They are machine capture, and the notes tab
+# is for what he wrote.
+#
+# HIDDEN, NOT DROPPED. They are still created, still classified, still
+# embedded, still semantically searchable, and `?tag=feature-request` returns
+# them in full — this is a default-view rule, not a deletion. Same contract
+# `thought` has had.
+_BROWSE_HIDDEN_TAGS = ("thought", "feature-request")
 
 
-def _hide_thought_leaves(q):
-    return q.filter(
-        (Note.tags.is_(None)) | (~Note.tags.like(f'%"{_BROWSE_HIDDEN_TAG}"%'))
-    )
+def _hide_machine_notes(q):
+    """Drop machine-written notes from the DEFAULT browse list.
+
+    Renamed from `_hide_machine_notes` once it stopped being about thoughts
+    alone. An explicit `?tag=` still reaches every one of them: a tag is a
+    request for a specific kind of row, and answering it with a filtered list
+    would make the tag useless.
+    """
+    for tag in _BROWSE_HIDDEN_TAGS:
+        q = q.filter((Note.tags.is_(None)) | (~Note.tags.like(f'%"{tag}"%')))
+    return q
 
 
 @router.get("/notes")
@@ -71,8 +90,8 @@ def list_notes(
     """All notes, newest first (Slice 6: Spaces died — this replaces
     GET /spaces/{id}/notes; optional ?tag= filters server-side).
 
-    Leaf `thought` notes are excluded unless explicitly asked for by tag —
-    see `_hide_thought_leaves`.
+    Machine-written notes (`thought` leaves, `feature-request` captures) are
+    excluded unless explicitly asked for by tag — see `_hide_machine_notes`.
 
     Archived notes are excluded, and unlike the thought-leaf rule that holds
     even under `?tag=`: an explicit tag is a narrowing of what to browse, not
@@ -82,7 +101,7 @@ def list_notes(
     if tag:
         q = q.filter(Note.tags.is_not(None), Note.tags.like(f'%"{tag.strip().lower()}"%'))
     else:
-        q = _hide_thought_leaves(q)
+        q = _hide_machine_notes(q)
     # Folder narrowing. `topic_id` and `unfiled` are mutually exclusive views
     # of the same axis — a note is in one folder or in none — so `unfiled`
     # wins if both arrive rather than ANDing into a guaranteed empty list.
@@ -127,7 +146,7 @@ def get_recent_notes(limit: int = 5, db: Session = Depends(get_db)):
     at conversation velocity they'd be the only thing this ever returns.
     Archived notes excluded: this is a browsing surface."""
     notes = (
-        _hide_thought_leaves(_not_archived(db.query(Note)))
+        _hide_machine_notes(_not_archived(db.query(Note)))
         .order_by(_notes_order())
         .limit(limit)
         .all()

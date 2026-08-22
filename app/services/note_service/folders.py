@@ -26,18 +26,19 @@ from sqlalchemy.orm import Session
 from ...db.models import Note, Topic
 from ...serializers import _not_archived
 
-# Notes tagged `thought` are Claude's own logged thinking. They are hidden
-# from ordinary note lists (`_hide_thought_leaves` in the notes router) and
-# must be hidden from folder contents + counts for the same reason: a folder
-# showing 400 logged thoughts is not a folder anybody can use.
-_HIDDEN_TAG = "thought"
-
-
 def _visible(q):
-    """Live, non-thought notes — the rows a human browses."""
-    return _not_archived(q).filter(
-        (Note.tags.is_(None)) | (~Note.tags.like(f'%"{_HIDDEN_TAG}"%'))
-    )
+    """Live, human-written notes — the rows a person browses.
+
+    Shares `_BROWSE_HIDDEN_TAGS` with the notes router rather than restating
+    the list: counts and contents must hide exactly what the notes tab hides,
+    or a folder reports 40 and opens on 6.
+    """
+    from ...routers.notes import _BROWSE_HIDDEN_TAGS
+
+    q = _not_archived(q)
+    for tag in _BROWSE_HIDDEN_TAGS:
+        q = q.filter((Note.tags.is_(None)) | (~Note.tags.like(f'%"{tag}"%')))
+    return q
 
 
 def list_folders(db: Session) -> list[dict]:
