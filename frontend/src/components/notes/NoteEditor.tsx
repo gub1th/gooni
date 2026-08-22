@@ -648,12 +648,6 @@ export function NoteEditor({
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [noteMemories, setNoteMemories] = useState<ApiMemory[]>([]);
   const [localIsPublic, setLocalIsPublic] = useState<boolean>(activeNote?.is_public ?? false);
-  // Local working copy of the note's tag set — patched through to the
-  // backend on each add/remove. Decoupled from activeNote.tags so we can
-  // show optimistic updates without waiting for the server round-trip.
-  const [localTags, setLocalTags] = useState<string[]>(activeNote?.tags ?? []);
-  const [newTagDraft, setNewTagDraft] = useState("");
-  const [tagInputOpen, setTagInputOpen] = useState(false);
   // Guard against Focus-spam — same shape as the old extract-spam guard:
   // disable the button while the create-session round trip is in flight so a
   // double click can't fire two sessions (the second would just end the
@@ -753,9 +747,6 @@ export function NoteEditor({
     setNoteMemories([]);
     setDeleteConfirm(false);
     setLocalIsPublic(activeNote?.is_public ?? false);
-    setLocalTags(activeNote?.tags ?? []);
-    setNewTagDraft("");
-    setTagInputOpen(false);
     hasChanges.current = false;
   }, [activeNoteId]);
 
@@ -1441,48 +1432,8 @@ export function NoteEditor({
   // Commit the local tag set to the server. Same optimistic pattern as
   // pin/draft toggles — patch the cached note in every space list so the
   // chips row stays in sync without a refetch.
-  async function commitTags(next: string[]) {
-    if (!activeNoteId || activeNoteId < 0) return;
-    setLocalTags(next);
-    try {
-      const updated = await apiPatchNote(activeNoteId, { tags: next });
-      // Server normalizes (lowercase / dedup / cap-60). Adopt its shape so
-      // a user typing "FROM-Claude" doesn't keep that casing client-side.
-      setLocalTags(updated.tags ?? next);
-      useNotesContentStore.setState((s) => {
-        const updatedNotes: Record<string, ApiNote[]> = {};
-        for (const [k, list] of Object.entries(s.notes)) {
-          updatedNotes[k] = list.map((n) =>
-            n.id === activeNoteId ? { ...n, tags: updated.tags ?? next } : n,
-          );
-        }
-        return { notes: updatedNotes };
-      });
-    } catch (e) {
-      console.error("commitTags failed", e);
-    }
-  }
 
-  function addTagFromDraft() {
-    const raw = newTagDraft.trim();
-    if (!raw) {
-      setTagInputOpen(false);
-      return;
-    }
-    const cleaned = raw.toLowerCase().slice(0, 60);
-    if (localTags.includes(cleaned)) {
-      setNewTagDraft("");
-      return;
-    }
-    const next = [...localTags, cleaned];
-    void commitTags(next);
-    setNewTagDraft("");
-  }
 
-  function removeTag(tag: string) {
-    const next = localTags.filter((t) => t !== tag);
-    void commitTags(next);
-  }
 
   async function handleTogglePin() {
     if (!activeNote || !activeNoteId || activeNoteId < 0) return;
@@ -2113,110 +2064,6 @@ export function NoteEditor({
                       textAlign: "left",
                     }}
                   />
-                </div>
-                {/* Tags row — date moved to right-island EditedChip. Lowercase
-                    #tag pills w/ subtle bg, hover reveals remove affordance.
-                    Tight to title above, breathing room below before body. */}
-                <div
-                  style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    alignItems: "center",
-                    gap: 6,
-                    marginBottom: 22,
-                    fontSize: 12,
-                    color: "var(--gooni-muted, #8E8E93)",
-                    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                    letterSpacing: 0.1,
-                  }}
-                >
-                  {localTags.map((tag) => (
-                    <button
-                      key={tag}
-                      onClick={() => removeTag(tag)}
-                      title={`Remove tag "${tag}"`}
-                      style={{
-                        fontSize: 11.5,
-                        fontWeight: 500,
-                        color: "var(--gooni-muted, #8E8E93)",
-                        background: ctok.hover,
-                        border: "none",
-                        padding: "2px 8px",
-                        borderRadius: 999,
-                        cursor: "pointer",
-                        transition: "background 0.12s, color 0.12s",
-                        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                      }}
-                      onMouseEnter={(e) => {
-                        (e.currentTarget as HTMLButtonElement).style.background = "rgba(239,68,68,0.10)";
-                        (e.currentTarget as HTMLButtonElement).style.color = "#B91C1C";
-                      }}
-                      onMouseLeave={(e) => {
-                        (e.currentTarget as HTMLButtonElement).style.background = ctok.hover;
-                        (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-muted, #8E8E93)";
-                      }}
-                    >
-                      #{tag}
-                    </button>
-                  ))}
-                  {tagInputOpen ? (
-                    <input
-                      autoFocus
-                      value={newTagDraft}
-                      onChange={(e) => setNewTagDraft(e.target.value)}
-                      onBlur={addTagFromDraft}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          addTagFromDraft();
-                        } else if (e.key === "Escape") {
-                          e.preventDefault();
-                          setNewTagDraft("");
-                          setTagInputOpen(false);
-                        }
-                      }}
-                      placeholder="tag"
-                      style={{
-                        fontSize: 11.5,
-                        fontWeight: 500,
-                        color: "var(--gooni-text, #1C1C1E)",
-                        background: ctok.hover,
-                        border: "none",
-                        outline: "none",
-                        padding: "2px 8px",
-                        borderRadius: 999,
-                        width: 90,
-                        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                      }}
-                    />
-                  ) : (
-                    <button
-                      onClick={() => setTagInputOpen(true)}
-                      title="Add tag"
-                      style={{
-                        fontSize: 11.5,
-                        fontWeight: 500,
-                        color: "rgba(142,142,147,0.55)",
-                        background: "transparent",
-                        border: "none",
-                        padding: "2px 6px",
-                        borderRadius: 999,
-                        cursor: "pointer",
-                        transition: "background 0.12s, color 0.12s",
-                        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                      }}
-                      onMouseEnter={(e) => {
-                        (e.currentTarget as HTMLButtonElement).style.background = ctok.hover;
-                        (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-muted, #8E8E93)";
-                      }}
-                      onMouseLeave={(e) => {
-                        (e.currentTarget as HTMLButtonElement).style.background = "transparent";
-                        (e.currentTarget as HTMLButtonElement).style.color = "rgba(142,142,147,0.55)";
-                      }}
-                    >
-                      + tag
-                    </button>
-                  )}
                 </div>
                 {(() => {
                   const sig = activeNote.classify_signals;

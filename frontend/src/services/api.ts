@@ -78,6 +78,7 @@ export interface ApiNote {
   last_opened_at: string | null;
   is_public: boolean;
   is_pinned: boolean;
+  topic_id?: number | null;
   // Archived = filed away, not deleted. An archived note is absent from every
   // note list, search and feed the app serves; it shows up only in the
   // Archived filter (`fetchArchivedNotes`) and still opens by id. Content,
@@ -2539,4 +2540,64 @@ export async function fetchProactiveObservation(): Promise<ProactiveObservation 
 export async function dismissProactiveObservation(id: number): Promise<void> {
   const res = await apiFetch(`${BASE}/proactive/${id}/dismiss`, { method: "POST" });
   if (!res.ok) throw new Error("Failed to dismiss observation");
+}
+
+
+// ── Folders (Topic rows wearing a notes-shaped API) ────────────────────────
+// A note is in exactly ONE folder — `topic_id` is a real FK, unlike tags.
+// Folders nest via `parent_id`; the tree is built client-side from the flat
+// list, so the server never has to serialize a recursive shape.
+
+export interface NoteFolder {
+  id: number;
+  name: string;
+  parent_id: number | null;
+  color: string | null;
+  note_count: number;
+}
+
+export async function fetchNoteFolders(): Promise<{ folders: NoteFolder[]; unfiled_count: number }> {
+  const res = await apiFetch(`${BASE}/notes/folders`);
+  if (!res.ok) throw new Error("Failed to load folders");
+  return res.json();
+}
+
+export async function createNoteFolder(name: string, parentId?: number | null): Promise<NoteFolder> {
+  const res = await apiFetch(`${BASE}/notes/folders`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, parent_id: parentId ?? null }),
+  });
+  if (!res.ok) throw new Error("Failed to create folder");
+  return res.json();
+}
+
+export async function updateNoteFolder(
+  id: number,
+  // `parent_id: null` moves it to the root, so PRESENCE of the key is the
+  // signal — not truthiness. Callers spread only what they mean to change.
+  patch: { name?: string; parent_id?: number | null },
+): Promise<NoteFolder> {
+  const res = await apiFetch(`${BASE}/notes/folders/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Failed to rename folder");
+  return res.json();
+}
+
+export async function deleteNoteFolder(id: number): Promise<{ notes_unfiled: number; children_lifted: number }> {
+  const res = await apiFetch(`${BASE}/notes/folders/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete folder");
+  return res.json();
+}
+
+// Notes in one folder, or the unfiled ones. Mutually exclusive views of the
+// same axis, which is why `unfiled` is its own flag rather than topic_id=null.
+export async function fetchFolderNotes(opts: { topicId?: number; unfiled?: boolean }): Promise<ApiNote[]> {
+  const qs = opts.unfiled ? "unfiled=true" : `topic_id=${opts.topicId}`;
+  const res = await apiFetch(`${BASE}/notes?${qs}`);
+  if (!res.ok) throw new Error("Failed to load folder notes");
+  return res.json();
 }

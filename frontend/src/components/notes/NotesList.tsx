@@ -6,6 +6,7 @@ import {
   fetchArchivedNotes,
   patchNote,
   type ApiNote,
+  fetchNoteFolders,
 } from "../../services/api";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { displayTitle, extractFirstImage } from "../../utils/notePreview";
@@ -15,15 +16,19 @@ import { frostInk as ctok, z } from "../../ui";
 import { parseServerDate } from "../../utils/date";
 
 // Tag-filter channel from the Sidebar. The event can fire BEFORE this
-// component mounts (tag click on the log view navigates to ?view=notes,
-// which mounts NotesList a tick later), so a module-scope listener stashes
-// the last tag and the component reads it on mount. The module is imported
+// component mounts (a folder click navigates to ?view=notes, which mounts
+// NotesList a tick later), so a module-scope listener stashes the last
+// selection and the component reads it on mount. The module is imported
 // eagerly by routes/index.tsx, so the listener is always attached first.
-let pendingTagFilter: string | null = null;
+//
+// `undefined` = no folder narrowing. `null` = UNFILED, which is a real place
+// and not the absence of a filter — collapsing the two would make "show me
+// what I never filed" unreachable.
+let pendingFolderFilter: number | null | undefined = undefined;
 if (typeof window !== "undefined") {
-  window.addEventListener("gooni:filter-tag", (e: Event) => {
-    const tag = (e as CustomEvent<{ tag?: string }>).detail?.tag;
-    pendingTagFilter = typeof tag === "string" && tag ? tag : null;
+  window.addEventListener("gooni:filter-folder", (e: Event) => {
+    const d = (e as CustomEvent<{ folderId?: number | null }>).detail;
+    pendingFolderFilter = d ? d.folderId : undefined;
   });
 }
 
@@ -311,10 +316,10 @@ export function NotesList() {
   // Bumped after every archive/unarchive so the archive list refetches while
   // it's on screen — unarchiving from inside it has to make the row leave.
   const [archiveVersion, setArchiveVersion] = useState(0);
-  // Tag filter — set by the Sidebar's Tags section via gooni:filter-tag.
-  // Seeded from the module-level stash so a tag click that mounted this
-  // component still applies (see pendingTagFilter above).
-  const [tagFilter, setTagFilter] = useState<string | null>(() => pendingTagFilter);
+  // Folder filter — set by the Sidebar's folder tree via gooni:filter-folder.
+  // Seeded from the module-level stash so a click that mounted this component
+  // still applies (see pendingFolderFilter above).
+  const [folderFilter, setFolderFilter] = useState<number | null | undefined>(() => pendingFolderFilter);
   const searchRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -322,14 +327,14 @@ export function NotesList() {
   const spaceId = selectedSpaceId ?? "general";
   const allNotes = notes[spaceId] ?? [];
 
-  // Follow subsequent tag clicks while mounted.
+  // Follow subsequent folder clicks while mounted.
   useEffect(() => {
-    function onFilterTag(e: Event) {
-      const tag = (e as CustomEvent<{ tag?: string }>).detail?.tag;
-      setTagFilter(typeof tag === "string" && tag ? tag : null);
+    function onFilterFolder(e: Event) {
+      const d = (e as CustomEvent<{ folderId?: number | null }>).detail;
+      setFolderFilter(d ? d.folderId : undefined);
     }
-    window.addEventListener("gooni:filter-tag", onFilterTag);
-    return () => window.removeEventListener("gooni:filter-tag", onFilterTag);
+    window.addEventListener("gooni:filter-folder", onFilterFolder);
+    return () => window.removeEventListener("gooni:filter-folder", onFilterFolder);
   }, []);
 
   // Load the archive only while the view is open. It's a recovery surface,
@@ -345,10 +350,22 @@ export function NotesList() {
     return () => { cancelled = true; };
   }, [archivedOnly, archiveVersion]);
 
-  function clearTagFilter() {
-    pendingTagFilter = null;
-    setTagFilter(null);
+  function clearFolderFilter() {
+    setFolderFilter(undefined);
   }
+
+  // Folder id -> name, for the filter chip. Its own small read rather than a
+  // prop from the Sidebar: NotesList also mounts on surfaces where the
+  // sidebar isn't rendered, and a chip that can't name its folder is worse
+  // than no chip.
+  const [folderNames, setFolderNames] = useState<Record<number, string>>({});
+  useEffect(() => {
+    if (folderFilter === undefined || folderFilter === null) return;
+    if (folderNames[folderFilter]) return;
+    fetchNoteFolders()
+      .then((r) => setFolderNames(Object.fromEntries(r.folders.map((f) => [f.id, f.name]))))
+      .catch(() => {});
+  }, [folderFilter, folderNames]);
 
   // Client-side title+excerpt search. Case-insensitive substring match.
   // List rows only carry `excerpt` (no full body) — full-content search
@@ -360,7 +377,11 @@ export function NotesList() {
   const statusFiltered = sourceNotes.filter((n) => {
     if (publicOnly && !n.is_public) return false;
     if (pinnedOnly && !n.is_pinned) return false;
-    if (tagFilter !== null && !(n.tags ?? []).includes(tagFilter)) return false;
+    // undefined = no narrowing; null = unfiled; a number = that folder.
+    if (folderFilter !== undefined) {
+      if (folderFilter === null) { if (n.topic_id != null) return false; }
+      else if (n.topic_id !== folderFilter) return false;
+    }
     return true;
   });
   const noteList = !searchTrimmed ? statusFiltered : statusFiltered.filter((n) => {
@@ -369,7 +390,7 @@ export function NotesList() {
     const plain = (n.excerpt ?? (n.content ? stripHtml(n.content) : "")).toLowerCase();
     return plain.includes(searchTrimmed);
   });
-  const anyFilterActive = publicOnly || pinnedOnly || archivedOnly || tagFilter !== null;
+  const anyFilterActive = publicOnly || pinnedOnly || archivedOnly || folderFilter !== undefined;
 
   const headerName = "All Notes";
 
@@ -546,13 +567,18 @@ export function NotesList() {
             active={archivedOnly}
             onClick={() => setArchivedOnly((v) => !v)}
           />
-          {/* Tag filter chip — set by the Sidebar's Tags section. Click ✕
-              (or the chip) to clear. */}
-          {tagFilter !== null && (
+          {/* Folder chip — set by the Sidebar's folder tree. Click to clear.
+              Named, because "filtered by a folder" is useless if it doesn't
+              say which; Unfiled says so by name for the same reason. */}
+          {folderFilter !== undefined && (
             <FilterPill
-              label={`filtered by #${tagFilter} ✕`}
+              label={
+                folderFilter === null
+                  ? "Unfiled ✕"
+                  : `${folderNames[folderFilter] ?? "folder"} ✕`
+              }
               active
-              onClick={clearTagFilter}
+              onClick={clearFolderFilter}
             />
           )}
           {anyFilterActive && (
@@ -561,7 +587,7 @@ export function NotesList() {
                 setPublicOnly(false);
                 setPinnedOnly(false);
                 setArchivedOnly(false);
-                clearTagFilter();
+                clearFolderFilter();
               }}
               title="Clear all filters"
               style={{

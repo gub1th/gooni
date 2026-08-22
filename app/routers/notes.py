@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from ..db.database import get_db
 from ..db.models import (
     Note,
+    Topic,
 )
 from ..llm.client import llm_client
 from ..services.memory_service import memory_service
@@ -20,6 +21,7 @@ from ..common import (
     _parse_iso_date,
 )
 from ..deps import note_or_404
+from ..services.note_service import folders as folder_service
 
 
 router = APIRouter()
@@ -60,7 +62,12 @@ def _hide_thought_leaves(q):
 
 
 @router.get("/notes")
-def list_notes(tag: str | None = None, db: Session = Depends(get_db)):
+def list_notes(
+    tag: str | None = None,
+    topic_id: int | None = None,
+    unfiled: bool = False,
+    db: Session = Depends(get_db),
+):
     """All notes, newest first (Slice 6: Spaces died — this replaces
     GET /spaces/{id}/notes; optional ?tag= filters server-side).
 
@@ -76,6 +83,13 @@ def list_notes(tag: str | None = None, db: Session = Depends(get_db)):
         q = q.filter(Note.tags.is_not(None), Note.tags.like(f'%"{tag.strip().lower()}"%'))
     else:
         q = _hide_thought_leaves(q)
+    # Folder narrowing. `topic_id` and `unfiled` are mutually exclusive views
+    # of the same axis — a note is in one folder or in none — so `unfiled`
+    # wins if both arrive rather than ANDing into a guaranteed empty list.
+    if unfiled:
+        q = q.filter(Note.topic_id.is_(None))
+    elif topic_id is not None:
+        q = q.filter(Note.topic_id == topic_id)
     notes = q.order_by(_notes_order()).all()
     return [_serialize_note_lite(n) for n in notes]
 
@@ -303,6 +317,18 @@ def update_note(
         elif not want_archived:
             note.archived_at = None
         note.is_archived = want_archived
+    if "topic_id" in body:
+        # Which folder the note lives in. Null = unfiled. Presence of the key
+        # is the signal, so clearing is `{"topic_id": null}`. Not an edit —
+        # filing a note doesn't bump updated_at, same as home_pos below.
+        raw_topic = body.get("topic_id")
+        if raw_topic is None:
+            note.topic_id = None
+        else:
+            tid = int(raw_topic)
+            if db.query(Topic).filter(Topic.id == tid).first() is None:
+                raise HTTPException(status_code=400, detail="folder not found")
+            note.topic_id = tid
     if "tags" in body:
         normalized = _normalize_tags(body["tags"])
         note.tags = json.dumps(normalized) if normalized else None
@@ -407,6 +433,72 @@ def get_note_children(note_id: int, db: Session = Depends(get_db)):
         .all()
     )
     return [_serialize_note_lite(n) for n in children]
+
+
+@router.get("/notes/folders")
+def list_note_folders(db: Session = Depends(get_db)):
+    """The sidebar's folder tree. Flat list + `parent_id`; the client nests it.
+
+    Declared before `/notes/{note_id}` or FastAPI parses "folders" as an id
+    and 422s — the same ordering trap `/notes/search` documents.
+    """
+    return {
+        "folders": folder_service.list_folders(db),
+        "unfiled_count": folder_service.unfiled_count(db),
+    }
+
+
+@router.post("/notes/folders")
+def create_note_folder(body: dict, db: Session = Depends(get_db)):
+    """Create a folder. Idempotent on name (returns the existing one), which
+    is `focus_service.create_topic`'s contract — reused rather than
+    reimplemented so a folder made here and a topic Claude creates through
+    MCP are the same row, with the same colour assignment."""
+    from ..services import focus_service
+
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name required")
+    parent_id = body.get("parent_id")
+    topic = focus_service.create_topic(db, name)
+    if parent_id is not None:
+        try:
+            folder_service.reparent_folder(db, topic, int(parent_id))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    db.commit()
+    db.refresh(topic)
+    return {"id": topic.id, "name": topic.name, "parent_id": topic.parent_id,
+            "color": topic.color, "note_count": 0}
+
+
+@router.patch("/notes/folders/{folder_id}")
+def update_note_folder(folder_id: int, body: dict, db: Session = Depends(get_db)):
+    """Rename and/or reparent. `parent_id: null` moves it to the root, so the
+    key's PRESENCE is what matters, not its truthiness."""
+    topic = db.query(Topic).filter(Topic.id == folder_id).first()
+    if not topic:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    try:
+        if "name" in body:
+            folder_service.rename_folder(db, topic, body["name"])
+        if "parent_id" in body:
+            raw = body["parent_id"]
+            folder_service.reparent_folder(db, topic, None if raw is None else int(raw))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"id": topic.id, "name": topic.name, "parent_id": topic.parent_id,
+            "color": topic.color}
+
+
+@router.delete("/notes/folders/{folder_id}")
+def delete_note_folder(folder_id: int, db: Session = Depends(get_db)):
+    """Delete the folder only. Its notes become unfiled and its child folders
+    are lifted to its parent — see folder_service.delete_folder."""
+    topic = db.query(Topic).filter(Topic.id == folder_id).first()
+    if not topic:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    return folder_service.delete_folder(db, topic)
 
 
 @router.get("/notes/pinned")

@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
-import { fetchPinnedNotes, fetchRecentNotes, fetchSpaceNotes, patchNote, type ApiNote } from "../../services/api";
+import { fetchPinnedNotes, fetchRecentNotes, patchNote, fetchNoteFolders, createNoteFolder, type ApiNote, type NoteFolder } from "../../services/api";
 import { displayTitle } from "../../utils/notePreview";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { useOrderingStore, applyOrder } from "../../stores/useOrderingStore";
 import { FileText,
-  ChevronDown, ChevronUp,
-  Pin as PinIcon, Tag as TagIcon,
+  Pin as PinIcon,
+  Folder as FolderIcon,
 } from "lucide-react";
 import { frostInk } from "../../ui";
 import { ink } from "../ambient/ambientInk";
@@ -17,18 +17,13 @@ const ICON_TINT = {
   pinned:   "#F59E0B",   // amber
   newChat:  "#10B981",   // emerald
   log:      "#0A84FF",   // accent blue — the glow surface
-  tags:     "#94A3B8",   // slate-soft — tags are navigation, muted on purpose
+  folders:  "#94A3B8",   // slate-soft — navigation chrome, muted on purpose
   memories: "#0EA5E9",  // sky
   chatAudit: "#0891B2",  // cyan
   settings: "#64748B",   // slate
 } as const;
 
-// Drafts / Tags lists are capped at this many rows before an expand toggle
-// appears — an uncapped list can run 20+ items deep.
-const CAPPED_LIST_SIZE = 5;
-const EXPANDED_LIST_MAX_HEIGHT = 220;
-
-// Sidebar = the NOTES BROWSER ONLY (pinned/recents/tags). Always
+// Sidebar = the NOTES BROWSER ONLY (pinned/recents/folders). Always
 // expanded when notes is the active view — no collapse toggle, no app-level
 // nav (IconRail owns that, always visible to its left).
 interface SidebarProps {
@@ -124,13 +119,17 @@ function GroupLabel({ label }: { label: string }) {
 // Small font, muted color, tight padding. `trailing` renders hover-only
 // on the right (used for the pinned-note unpin affordance).
 function SidebarChildRow({
-  label, icon, selected, onClick, trailing,
+  label, icon, selected, onClick, trailing, indent = 0,
 }: {
   label: string;
   icon?: React.ReactNode;
   selected?: boolean;
   onClick: () => void;
   trailing?: React.ReactNode;
+  // Nesting depth for folder rows. Adds to the existing 38px text inset
+  // rather than replacing it, so a depth-0 folder lines up exactly with
+  // every other child row in the sidebar.
+  indent?: number;
 }) {
   const [hovered, setHovered] = useState(false);
   return (
@@ -155,7 +154,7 @@ function SidebarChildRow({
         style={{
           display: "flex", alignItems: "center", gap: 6,
           flex: 1, minWidth: 0,
-          padding: "5px 4px 5px 38px",
+          padding: `5px 4px 5px ${38 + indent * 12}px`,
           background: "transparent",
           border: "none", borderRadius: 0,
           cursor: "pointer", textAlign: "left",
@@ -188,30 +187,6 @@ function SidebarChildRow({
 }
 
 // ExpandToggle — "Show all N" / "Show less" row under a capped list.
-function ExpandToggle({ expanded, hiddenCount, onClick }: { expanded: boolean; hiddenCount: number; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: "flex", alignItems: "center", gap: 4,
-        width: "calc(100% - 24px)", margin: "1px 0 2px 38px",
-        padding: "4px 6px",
-        background: "transparent", border: "none", borderRadius: 5,
-        cursor: "pointer", textAlign: "left",
-        fontSize: 11.5, fontWeight: 500,
-        color: "var(--gooni-muted, #8E8E93)",
-        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-        transition: "color 0.12s",
-      }}
-      onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-text, #1C1C1E)")}
-      onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-muted, #8E8E93)")}
-    >
-      {expanded ? <ChevronUp size={12} strokeWidth={2} /> : <ChevronDown size={12} strokeWidth={2} />}
-      {expanded ? "Show less" : `Show all (${hiddenCount} more)`}
-    </button>
-  );
-}
-
 export function Sidebar({ onAllNotes, onSelectNote }: SidebarProps) {
   const navigate = useNavigate();
   const { selectSpace, loadNotes, selectNote, activeNoteId } = useNotesContentStore();
@@ -220,9 +195,12 @@ export function Sidebar({ onAllNotes, onSelectNote }: SidebarProps) {
   const [recentNotes, setRecentNotes] = useState<ApiNote[]>([]);
   // Distinct tag set across the whole corpus — derived from the flat
   // GET /notes list (notes carry `tags: string[]`).
-  const [allTags, setAllTags] = useState<string[]>([]);
+  const [folders, setFolders] = useState<NoteFolder[]>([]);
+  const [unfiledCount, setUnfiledCount] = useState(0);
+  const [expandedFolders, setExpandedFolders] = useState<Set<number>>(new Set());
+  const [newFolderName, setNewFolderName] = useState<string | null>(null);
+  const [folderVersion, setFolderVersion] = useState(0);
 
-  const [tagsExpanded, setTagsExpanded] = useState(false);
 
   const pinnedVersion = usePinnedVersionStore((s) => s.version);
   useEffect(() => {
@@ -237,18 +215,19 @@ export function Sidebar({ onAllNotes, onSelectNote }: SidebarProps) {
   useEffect(() => {
     fetchRecentNotes(15).then(setRecentNotes).catch(() => {});
   }, [activeNoteId, pinnedVersion]);
-  // Tags: the whole corpus in one fetch. Cheap — list responses ship
-  // excerpts, not bodies. Same refetch triggers as recents (any note edit
-  // could add/remove a tag).
+  // Folders. One flat read; the tree is nested here from `parent_id` so the
+  // server never serializes a recursive shape. Same refetch triggers as
+  // recents — filing a note changes a count.
+  //
+  // This replaced the TAGS section. Tags still exist and still organize
+  // things, they are just no longer a thing Daniel maintains by hand: a note
+  // lives in exactly one folder (a real FK), and tags became machine
+  // metadata the extractor writes.
   useEffect(() => {
-    fetchSpaceNotes("general")
-      .then((notes) => {
-        const seen = new Set<string>();
-        for (const n of notes) for (const t of n.tags ?? []) seen.add(t);
-        setAllTags([...seen].sort());
-      })
+    fetchNoteFolders()
+      .then((r: { folders: NoteFolder[]; unfiled_count: number }) => { setFolders(r.folders); setUnfiledCount(r.unfiled_count); })
       .catch(() => {});
-  }, [activeNoteId, pinnedVersion]);
+  }, [activeNoteId, pinnedVersion, folderVersion]);
 
   // Pinned ordering — the drag UI died with the redesign, but the saved
   // per-device order still applies so previously-arranged pins keep their
@@ -293,16 +272,58 @@ export function Sidebar({ onAllNotes, onSelectNote }: SidebarProps) {
     onSelectNote(note.id);
   }
 
-  // Tag click → land on the notes view with a client-side tag filter.
-  // NotesList owns the filtering; the CustomEvent is the only channel
-  // (a URL param for a client-only filter is overkill).
-  function handleTagClick(tag: string) {
+  // Folder click → land on the notes view narrowed to that folder. `null`
+  // means Unfiled, which is a real place, not "no filter" — so it goes
+  // through the same channel rather than clearing the filter.
+  //
+  // Same CustomEvent channel the tag filter used: NotesList owns the
+  // filtering, and a URL param for a client-only narrowing is overkill.
+  function handleFolderClick(folderId: number | null) {
     selectSpace("general");
     loadNotes("general");
-    window.dispatchEvent(new CustomEvent("gooni:filter-tag", { detail: { tag } }));
+    window.dispatchEvent(new CustomEvent("gooni:filter-folder", { detail: { folderId } }));
     navigate({
       to: "/",
       search: { view: "notes", note: undefined, conv: undefined, audit: undefined, segment: undefined },
+    });
+  }
+
+  function bumpFolders() {
+    setFolderVersion((v) => v + 1);
+  }
+
+  // Nest the flat list at render time. Recursive, but the depth is a human
+  // filing hierarchy (single digits) and the guard against a pathological
+  // one is server-side: reparent refuses cycles, so this cannot loop.
+  function renderFolderTree(parentId: number | null, depth: number) {
+    const children = folders.filter((f) => f.parent_id === parentId);
+    if (children.length === 0) return null;
+    return children.map((f) => {
+      const kids = folders.some((c) => c.parent_id === f.id);
+      const open = expandedFolders.has(f.id);
+      return (
+        <div key={`folder-${f.id}`}>
+          <SidebarChildRow
+            label={`${kids ? (open ? "▾ " : "▸ ") : ""}${f.name}${f.note_count ? ` (${f.note_count})` : ""}`}
+            selected={false}
+            indent={depth}
+            onClick={() => {
+              // A folder with children toggles AND filters — one click does
+              // both, because a disclosure arrow that isn't also the row is
+              // a second tiny hit target for no benefit.
+              if (kids) {
+                setExpandedFolders((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(f.id)) next.delete(f.id); else next.add(f.id);
+                  return next;
+                });
+              }
+              handleFolderClick(f.id);
+            }}
+          />
+          {open && renderFolderTree(f.id, depth + 1)}
+        </div>
+      );
     });
   }
 
@@ -419,39 +440,60 @@ export function Sidebar({ onAllNotes, onSelectNote }: SidebarProps) {
             ))}
           </div>
 
-          {allTags.length > 0 && (
-            <>
-              <div style={{ height: 1, margin: "8px 14px", background: "rgb(var(--gooni-tint, 0 0 0) / 0.07)" }} />
+          <div style={{ height: 1, margin: "8px 14px", background: "rgb(var(--gooni-tint, 0 0 0) / 0.07)" }} />
 
-              {/* === Tags section ===
-                  Distinct labels across the whole corpus. Clicking one
-                  lands on the notes view filtered client-side by that tag
-                  (NotesList listens for gooni:filter-tag). */}
-              <SidebarSection
-                label="Tags"
-                Icon={TagIcon}
-                iconColor={ICON_TINT.tags}
-                onHeaderClick={() => { /* label-only header */ }}
-              >
-                <div style={tagsExpanded ? { maxHeight: EXPANDED_LIST_MAX_HEIGHT, overflowY: "auto" } : undefined}>
-                  {(tagsExpanded ? allTags : allTags.slice(0, CAPPED_LIST_SIZE)).map((tag) => (
-                    <SidebarChildRow
-                      key={`tag-${tag}`}
-                      label={`#${tag}`}
-                      onClick={() => handleTagClick(tag)}
-                    />
-                  ))}
-                </div>
-                {allTags.length > CAPPED_LIST_SIZE && (
-                  <ExpandToggle
-                    expanded={tagsExpanded}
-                    hiddenCount={allTags.length - CAPPED_LIST_SIZE}
-                    onClick={() => setTagsExpanded((v) => !v)}
-                  />
-                )}
-              </SidebarSection>
-            </>
-          )}
+          {/* === Folders ===
+              Topic rows. A note is in exactly ONE (topic_id is an FK), which
+              is what tags could never express — a note has many tags, so
+              "which folder is this in" had no answer and no tree could be
+              drawn. Nesting is free via Topic.parent_id.
+
+              Folders do NOT show salience. A Topic carries a decay curve so
+              the focus dashboard can shrink subjects you've stopped thinking
+              about; a folder that fades is a folder you lose things in. The
+              curve is untouched — this surface just never reads it. */}
+          <SidebarSection
+            label="Folders"
+            Icon={FolderIcon}
+            iconColor={ICON_TINT.folders}
+            onHeaderClick={() => setNewFolderName(newFolderName === null ? "" : null)}
+          >
+            {renderFolderTree(null, 0)}
+
+            {/* Unfiled is a real row, always shown even at zero. Notes that
+                were never filed must not be reachable only by scrolling the
+                whole list — that is how a folder tree loses things. */}
+            <SidebarChildRow
+              label={`Unfiled${unfiledCount ? ` (${unfiledCount})` : ""}`}
+              selected={false}
+              onClick={() => handleFolderClick(null)}
+            />
+
+            {newFolderName !== null && (
+              <input
+                autoFocus
+                value={newFolderName}
+                placeholder="folder name…"
+                onChange={(e) => setNewFolderName(e.target.value)}
+                onBlur={() => setNewFolderName(null)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") { setNewFolderName(null); return; }
+                  if (e.key !== "Enter") return;
+                  const name = newFolderName.trim();
+                  setNewFolderName(null);
+                  if (!name) return;
+                  createNoteFolder(name)
+                    .then(() => bumpFolders())
+                    .catch(() => {});
+                }}
+                style={{
+                  width: "calc(100% - 28px)", margin: "2px 14px",
+                  background: "transparent", border: "none", outline: "none",
+                  color: "var(--gooni-text, #0F172A)", fontSize: 12.5,
+                }}
+              />
+            )}
+          </SidebarSection>
 
           <div style={{ flex: 1, minHeight: 20 }} />
 
