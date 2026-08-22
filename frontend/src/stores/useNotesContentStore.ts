@@ -5,7 +5,7 @@ import {
   deleteNote as apiDeleteNote,
   fetchNote as apiFetchNote,
   type ApiNote,
-  updateNote as apiUpdateNote,
+  patchNote as apiPatchNote,
   fetchSpaceNotes,
 } from "../services/api";
 
@@ -154,7 +154,7 @@ export const useNotesContentStore = create<NotesContentState>()(
 
       updateNote: async (id: number, title: string, content: string) => {
         set({ isDirty: true });
-        const updated = await apiUpdateNote(id, title, content); // throws on failure
+        const updated = await apiPatchNote(id, { title, content }); // throws on failure
         set((s) => {
           const newNotes: Record<string, ApiNote[]> = {};
           for (const [key, list] of Object.entries(s.notes)) {

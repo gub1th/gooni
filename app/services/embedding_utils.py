@@ -6,9 +6,8 @@ share one embedding space.
 
 from __future__ import annotations
 
-import math
-
 from ..llm.client import llm_client
+from ..utils.embeddings import cosine_similarity
 
 
 def embed_text(raw: str) -> list[float] | None:
@@ -24,12 +23,7 @@ def embed_text(raw: str) -> list[float] | None:
         return None
 
 
-def cosine(a: list[float], b: list[float]) -> float:
-    if not a or not b or len(a) != len(b):
-        return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
-    na = math.sqrt(sum(x * x for x in a))
-    nb = math.sqrt(sum(y * y for y in b))
-    if na == 0.0 or nb == 0.0:
-        return 0.0
-    return dot / (na * nb)
+# Re-export so every existing caller keeps `from .embedding_utils import cosine`.
+# The implementation moved to app/utils/embeddings — it is pure math and had
+# grown three copies (see that module's docstring).
+cosine = cosine_similarity

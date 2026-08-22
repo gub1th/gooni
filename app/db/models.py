@@ -181,6 +181,17 @@ class Note(Base):
     # snapshot, the meaning hasn't shifted enough to warrant another pass.
     # Deferred — only ever read inside `classify_note`'s dedup check.
     classified_embedding = deferred(Column(Text, nullable=True))
+    # When `embedding` was last regenerated. THE sweeper's gate: a note is due
+    # for re-embedding when this is null or older than `updated_at`. A bare
+    # `embedding IS NOT NULL` can't answer that — it says a vector was made
+    # once, never that it matches the current text.
+    #
+    # Deliberately separate from `classified_embedding`, which gates the
+    # EXPENSIVE half. This is an exact staleness check on one embedding call;
+    # that is a fuzzy cosine check on a gpt-5.4-mini extraction plus its
+    # writes. Collapsing them into one timestamp would make every typo fix
+    # pay for a full re-extraction.
+    embedded_at = Column(DateTime, nullable=True, index=True)
     # JSON snapshot of what classify_note routed for this note's most recent
     # save. Mirrors the chat-side `signals` payload so the editor can render
     # the same "Routed:" disclosure as MessageBubble. Shape:

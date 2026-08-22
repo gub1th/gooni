@@ -32,7 +32,7 @@ import { useNoteCardStyles } from "./noteCardStyles";
 import { splitTitleAndBody } from "./quickNote";
 import { FocusLineDecoration } from "./FocusLineExtension";
 import { SendButton } from "../chat/SendButton";
-import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, autoTitleNote as apiAutoTitleNote, uploadImage as apiUploadImage, uploadAttachment as apiUploadAttachment, fetchOgMetadata, saveLocalNoteDraft, readLocalNoteDraft, clearLocalNoteDraft, type ApiNote, type ApiMemory, type NoteClassifySignals } from "../../services/api";
+import { createNote as apiCreateNote, touchNote as apiTouchNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, autoTitleNote as apiAutoTitleNote, uploadImage as apiUploadImage, uploadAttachment as apiUploadAttachment, fetchOgMetadata, saveLocalNoteDraft, readLocalNoteDraft, clearLocalNoteDraft, type ApiNote, type ApiMemory } from "../../services/api";
 import { NoteMemoriesPanel } from "./NoteMemoriesPanel";
 import { DOMSerializer } from "@tiptap/pm/model";
 import { Archive as ArchiveIcon, ArchiveRestore as ArchiveRestoreIcon, CornerUpRight } from "lucide-react";
@@ -636,14 +636,6 @@ export function NoteEditor({
   const activeNoteId = ambient ? null : storeActiveNoteId;
   const navigate = useNavigate();
   const [signalsExpanded, setSignalsExpanded] = useState(false);
-  // Surface for the embedded composer — the last submitted note's classify
-  // result. Embedded variant doesn't render the title/disclosure block, so
-  // we shadow a small pill underneath the composer. Cleared on next submit.
-  const [embeddedToast, setEmbeddedToast] = useState<{ noteId: number; signals: NoteClassifySignals } | null>(null);
-  // Drives the slide-in / slide-out transform on the toast pill. Decoupled
-  // from `embeddedToast` so we can render the pill, animate it in, hold,
-  // animate it out, then unmount — without flashing on initial mount.
-  const [embeddedToastVisible, setEmbeddedToastVisible] = useState(false);
   // Embedded composer focus state — drives the expand-on-focus layout
   // (taller editor surface + parent dim of TakeTabs / focuses row).
   const [embeddedFocused, setEmbeddedFocused] = useState(false);
@@ -815,7 +807,7 @@ export function NoteEditor({
   // Lazy-fetch full body when opening a list-shape row. Space-list / recent /
   // pinned / drafts endpoints ship `content: null` (only excerpt + thumb_src)
   // to keep the column-2 payload small. Without this, the editor mounts empty
-  // on first open and stays empty until some other path (autosave, memorize)
+  // on first open and stays empty until some other path (autosave, classify)
   // repopulates content in the store.
   useEffect(() => {
     if (!activeNoteId || activeNoteId < 0) return;
@@ -824,22 +816,23 @@ export function NoteEditor({
     refetchNote(activeNoteId).catch(() => {});
   }, [activeNoteId, activeNote?.content, refetchNote]);
 
-  // Memorize previous note on leave; touch new note on enter — catches ALL
-  // navigation paths. Embed + memorize are gated on isDirty so a pure open
-  // (click → look → close) doesn't burn an OpenAI call or bump updated_at.
-  // Touch is unconditional because last_opened_at is the whole point of the
-  // open event and doesn't affect list ordering.
+  // Touch the new note on enter — catches ALL navigation paths.
+  //
+  // Leaving a note used to ALSO fire embed + classify. It doesn't any more:
+  // the backend sweeper picks a note up an hour after it goes quiet
+  // (note_service.sweep_stale_notes). Leaving is not a signal that a thought
+  // is finished — it's a signal you looked away — and paying for an embedding
+  // and a gpt-5.4-mini extraction on every glance away was the point of the
+  // move. isDirty is still cleared here so the store's meaning is unchanged.
+  //
+  // Touch stays unconditional: last_opened_at is the whole point of the open
+  // event and doesn't affect list ordering.
   useEffect(() => {
     const prev = prevActiveNoteId.current;
     prevActiveNoteId.current = activeNoteId;
     if (prev === activeNoteId) return; // initial mount, no change
 
     if (prev && prev > 0) {
-      const wasDirty = useNotesContentStore.getState().isDirty;
-      if (wasDirty) {
-        embedAndCheck(prev);
-        apiMemorizeNote(prev).catch(() => {});
-      }
       useNotesContentStore.setState({ isDirty: false });
     }
     if (activeNoteId && activeNoteId > 0) {
@@ -854,19 +847,17 @@ export function NoteEditor({
     }
   }, [activeNoteId]);
 
-  // Flush pending save on tab close (keepalive: true in api.ts ensures the request survives).
-  // Same hasChanges/bodyRef race as save-on-leave — read from editor directly and don't gate
-  // on hasChanges. Worst case is one extra PATCH on tab close; backend's empty-overwrite
-  // guard makes that safe.
+  // Flush pending save on tab close. Same hasChanges/bodyRef race as
+  // save-on-leave — read from editor directly and don't gate on hasChanges.
+  // Worst case is one extra PATCH on tab close; the backend's empty-overwrite
+  // guard makes that safe. Best-effort only: patchNote deliberately does NOT
+  // set `keepalive` (see api.ts), so a tab genuinely closing may drop this.
   useEffect(() => {
     function onBeforeUnload() {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
       if (activeNoteId && activeNoteId > 0) {
         const currentBody = editorRef.current?.getHTML() ?? bodyRef.current;
-        apiUpdateNote(activeNoteId, titleRef.current, currentBody);
-        if (useNotesContentStore.getState().isDirty) {
-          apiMemorizeNote(activeNoteId);
-        }
+        apiPatchNote(activeNoteId, { title: titleRef.current, content: currentBody });
       }
     }
     window.addEventListener("beforeunload", onBeforeUnload);
@@ -973,7 +964,6 @@ export function NoteEditor({
           return;
         }
         await save();
-        embedAndCheck(activeNoteId);
       },
     },
     [activeNoteId]
@@ -1260,51 +1250,15 @@ export function NoteEditor({
       editor.commands.clearContent();
     }
 
-    // Fire embed → classify → signals pipeline on submit too. Without this
-    // the dashboard quick-note + plan paths never trigger classification —
-    // embed only ran via the editor's onBlur, which submit doesn't go through.
-    if (savedNote?.id) {
-      const submittedId = savedNote.id;
-      embedAndCheck(submittedId);
-      // Embedded composer surfaces a transient toast since the disclosure
-      // block lives in the full-variant render path. Clear any prior toast
-      // and start a poll for the classify_signals payload.
-      //
-      // NOT on the ambient surface: it closes on submit, so the pill would
-      // render 3.5s later inside a panel nobody can see, and the poll would be
-      // a fetch for a screen that is gone. The home flashes its own confirmation.
-      if (embedded && !ambient) {
-        // Cancel any in-flight pill before starting a new one.
-        setEmbeddedToastVisible(false);
-        setEmbeddedToast(null);
-        setTimeout(async () => {
-          try {
-            const fresh = await apiFetchNote(submittedId);
-            const sig = fresh.classify_signals;
-            if (sig && (sig.feature_requests?.length || sig.memory_count > 0)) {
-              setEmbeddedToast({ noteId: submittedId, signals: sig });
-              // Two ticks before flipping visible so the initial transform="translateY"
-              // has applied — otherwise the slide-in is skipped and the pill
-              // simply pops in. requestAnimationFrame x2 = "after browser has
-              // committed the mount frame".
-              requestAnimationFrame(() => {
-                requestAnimationFrame(() => setEmbeddedToastVisible(true));
-              });
-              // Visible window: 6s. Then slide out (320ms transition), then unmount.
-              setTimeout(() => {
-                setEmbeddedToastVisible(false);
-                setTimeout(() => {
-                  setEmbeddedToast((curr) => (curr?.noteId === submittedId ? null : curr));
-                }, 360);
-              }, 6000);
-            }
-          } catch {
-            // note may have been deleted — ignore
-          }
-        }, 3500);
-      }
-    }
-
+    // Submit does NOT classify. The backend sweeper picks the note up an
+    // hour after it goes quiet (note_service.sweep_stale_notes), so the
+    // "Routed:" disclosure in the full variant now renders from the note's
+    // stored classify_signals whenever you next open it — rather than from a
+    // 3.5s poll that had to guess when a daemon thread had finished.
+    //
+    // The embedded composer's transient toast went with that poll: it existed
+    // only to surface signals in the seconds after submit, and there are none
+    // to surface in that window any more.
     onSubmitted?.(savedNote, buttonRect);
   }
 
@@ -1369,7 +1323,7 @@ export function NoteEditor({
         // would flip hasChanges + schedule an autosave). The save-on-leave
         // guard relied on hasChanges to skip clean opens, but onUpdate fired
         // on every programmatic load — so every note touch turned into an
-        // /embed + /memorize cascade on the next switch. Pass false here +
+        // /classify cascade on the next switch. Pass false here +
         // the explicit `hasChanges.current = true` below covers the genuine
         // restore-from-local-draft case.
         editor.commands.setContent(desired, { emitUpdate: false });
@@ -1468,20 +1422,6 @@ export function NoteEditor({
       // Network / LLM hiccup — let the next save retry by clearing the guard.
       autoTitledRef.current.delete(noteId);
     });
-  }
-
-  async function embedAndCheck(noteId: number | null) {
-    if (!noteId || noteId < 0) return;
-    try {
-      await apiEmbedNote(noteId);
-    } catch {
-      // note may have been deleted — ignore
-    }
-    // classify_note runs in a daemon thread on the backend — by the time the
-    // /embed POST returns, classification hasn't finished. Schedule a refetch
-    // ~3s out so the editor picks up the new `classify_signals` payload and
-    // renders the "Routed:" disclosure.
-    setTimeout(() => { refetchNote(noteId).catch(() => {}); }, 3000);
   }
 
   function handleTitleChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -2151,62 +2091,6 @@ export function NoteEditor({
               />
             </div>
         </div>
-        {embeddedToast && (() => {
-          const sig = embeddedToast.signals;
-          const fr = sig.feature_requests || [];
-          const memCount = sig.memory_count || 0;
-          const parts: string[] = [];
-          if (fr.length) parts.push(`backlog (${fr.length})`);
-          if (memCount) parts.push(`memory (${memCount})`);
-          const summary = parts.join(" · ");
-          const openNote = () => {
-            navigate({ to: "/", search: { note: embeddedToast.noteId, conv: undefined, audit: undefined, segment: undefined, view: undefined } });
-          };
-          return (
-            <div
-              style={{
-                marginTop: 8,
-                display: "flex",
-                alignItems: "center",
-                // Slide up from below the composer + fade. Auto-dismiss after
-                // 6s; no manual close affordance per the cleaner aesthetic.
-                opacity: embeddedToastVisible ? 1 : 0,
-                transform: embeddedToastVisible ? "translateY(0)" : "translateY(8px)",
-                transition: "opacity 320ms ease, transform 320ms ease",
-                pointerEvents: embeddedToastVisible ? "auto" : "none",
-              }}
-            >
-              <button
-                onClick={openNote}
-                style={{
-                  display: "inline-flex", alignItems: "center", gap: 7,
-                  padding: "4px 11px", borderRadius: 999,
-                  border: `1px solid ${ctok.border}`,
-                  background: "var(--gooni-surface, rgba(0,0,0,0.03))",
-                  color: "var(--gooni-text, #1C1C1E)",
-                  fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                  fontSize: 11.5, fontWeight: 500, letterSpacing: 0.1,
-                  cursor: "pointer",
-                  transition: "background 0.12s, border-color 0.12s",
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.background = ctok.hover;
-                  (e.currentTarget as HTMLButtonElement).style.borderColor = ctok.border;
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.background = "var(--gooni-surface, rgba(0,0,0,0.03))";
-                  (e.currentTarget as HTMLButtonElement).style.borderColor = ctok.border;
-                }}
-              >
-                <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#16A34A" }} />
-                <span style={{ color: "var(--gooni-muted, #8E8E93)" }}>Routed</span>
-                <span>{summary}</span>
-                {fr[0] ? <span style={{ color: "var(--gooni-muted, #8E8E93)" }}>· {fr[0].title}</span> : null}
-                <span style={{ marginLeft: 2, color: "var(--gooni-muted, #8E8E93)" }}>↗</span>
-              </button>
-            </div>
-          );
-        })()}
         </>
       ) : (
         <div

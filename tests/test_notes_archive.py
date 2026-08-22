@@ -55,6 +55,7 @@ from app.db.models import Base, Note, Settings  # noqa: E402
 from app.routers import notes as notes_router  # noqa: E402
 from app.routers import public as public_router  # noqa: E402
 from app.services import activity_service, note_service  # noqa: E402
+from app.services.note_service import service as note_service_impl  # noqa: E402
 
 Base.metadata.create_all(bind=engine)
 
@@ -360,12 +361,12 @@ def test_traps(db, made) -> None:
 
     # (c) Semantic search: archived notes leave the RESULTS and keep their
     # EMBEDDING, so unarchiving is instant and costs no recompute.
-    real_embed = note_service.llm_client.generate_embedding
-    note_service.llm_client.generate_embedding = lambda *_a, **_k: ([1.0, 0.0, 0.0], 0)
+    real_embed = note_service_impl.llm_client.generate_embedding
+    note_service_impl.llm_client.generate_embedding = lambda *_a, **_k: ([1.0, 0.0, 0.0], 0)
     try:
         hits = {n.id for n in note_service.note_service.search_by_query("vector note", 10, db)}
     finally:
-        note_service.llm_client.generate_embedding = real_embed
+        note_service_impl.llm_client.generate_embedding = real_embed
     check_true("semantic search keeps the live embedded note", made["emb"].id in hits)
     check("semantic search drops the archived one", made["emb_arch"].id in hits, False)
 
@@ -374,11 +375,11 @@ def test_traps(db, made) -> None:
     fts_live = _note(db, title="quokka manifesto", content="<p>quokka</p>")
     fts_arch = _note(db, title="quokka archived manifesto", content="<p>quokka</p>", is_archived=True)
     db.commit()
-    note_service.llm_client.generate_embedding = lambda *_a, **_k: ([], 0)
+    note_service_impl.llm_client.generate_embedding = lambda *_a, **_k: ([], 0)
     try:
         fts_hits = {n.id for n in note_service.note_service.search_by_query("quokka", 10, db)}
     finally:
-        note_service.llm_client.generate_embedding = real_embed
+        note_service_impl.llm_client.generate_embedding = real_embed
     check_true("FTS search keeps the live note", fts_live.id in fts_hits)
     check("FTS search drops the archived one", fts_arch.id in fts_hits, False)
     kept = db.query(Note).filter(Note.id == made["emb_arch"].id).first()

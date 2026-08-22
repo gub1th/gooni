@@ -164,29 +164,9 @@ export async function createNote(
   return res.json();
 }
 
-export async function updateNote(id: number, title: string, content: string): Promise<ApiNote> {
-  // `keepalive` would let this request survive a tab close, but the browser
-  // caps keepalive bodies at 64 KiB — a single base64-inlined image blows
-  // past that and `fetch` throws "TypeError: Failed to fetch" before the
-  // request leaves the page. Drop the flag; on tab-close we lose the
-  // in-flight save, but the next edit re-saves the full body anyway.
-  const res = await apiFetch(`${BASE}/notes/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title, content }),
-  });
-  if (!res.ok) throw new Error("Failed to update note");
-  return res.json();
-}
-
 export async function touchNote(id: number): Promise<void> {
   // Fire-and-forget — updates last_opened_at for relevancy sorting
   await apiFetch(`${BASE}/notes/${id}/touch`, { method: "POST" });
-}
-
-export async function memorizeNote(id: number): Promise<void> {
-  // Fire-and-forget — called when leaving a note to extract a memory episode
-  await apiFetch(`${BASE}/notes/${id}/memorize`, { method: "POST" });
 }
 
 export async function autoTitleNote(id: number): Promise<{ title: string; generated: boolean }> {
@@ -212,11 +192,13 @@ export async function extractToChildNote(
 }
 
 
-export async function embedNote(id: number): Promise<void> {
+export async function classifyNote(id: number): Promise<void> {
+  // Embeds the note and kicks the classifier (which mints memories +
+  // feature-request notes off-thread). Named for the half that writes.
   try {
-    await apiFetch(`${BASE}/notes/${id}/embed`, { method: "POST" });
+    await apiFetch(`${BASE}/notes/${id}/classify`, { method: "POST" });
   } catch {
-    // embed is a fire-and-forget side effect; failures are non-fatal
+    // fire-and-forget side effect; failures are non-fatal
   }
 }
 
@@ -519,6 +501,14 @@ export async function cleanupEmptyNotes(): Promise<{ deleted: number; ids: numbe
 }
 
 export async function patchNote(
+  // THE note mutation call — body saves and flag/tag patches both ride here.
+  // `updateNote(id, title, content)` used to be a second fetcher hitting this
+  // exact route with a fixed {title, content} body; it was folded in.
+  //
+  // No `keepalive`: it would let a save survive a tab close, but browsers cap
+  // keepalive bodies at 64 KiB and a single base64-inlined image blows past
+  // that, making `fetch` throw before the request leaves the page. On tab
+  // close we lose the in-flight save; the next edit re-saves the full body.
   id: number,
   patch: { is_public?: boolean; is_pinned?: boolean; is_public_pinned?: boolean; is_draft?: boolean; is_archived?: boolean; title?: string; content?: string; tags?: string[]; icon?: string | null },
 ): Promise<ApiNote> {
