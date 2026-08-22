@@ -1,13 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
-import { fetchPinnedNotes, fetchDraftNotes, fetchRecentNotes, fetchSpaceNotes, patchNote, type ApiNote } from "../../services/api";
+import { fetchPinnedNotes, fetchRecentNotes, fetchSpaceNotes, patchNote, type ApiNote } from "../../services/api";
 import { displayTitle } from "../../utils/notePreview";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
-import { useDraftVersionStore } from "../../stores/useDraftVersionStore";
 import { useOrderingStore, applyOrder } from "../../stores/useOrderingStore";
-import {
-  PenLine, FileText,
+import { FileText,
   ChevronDown, ChevronUp,
   Pin as PinIcon, Tag as TagIcon,
 } from "lucide-react";
@@ -17,7 +15,6 @@ import { ink } from "../ambient/ambientInk";
 const ICON_TINT = {
   allNotes: "#6366F1",   // indigo
   pinned:   "#F59E0B",   // amber
-  draft:    "#8B5CF6",   // violet — distinct from amber pinned + sky memories
   newChat:  "#10B981",   // emerald
   log:      "#0A84FF",   // accent blue — the glow surface
   tags:     "#94A3B8",   // slate-soft — tags are navigation, muted on purpose
@@ -27,18 +24,18 @@ const ICON_TINT = {
 } as const;
 
 // Drafts / Tags lists are capped at this many rows before an expand toggle
-// appears — an uncapped drafts list can run 20+ items deep.
+// appears — an uncapped list can run 20+ items deep.
 const CAPPED_LIST_SIZE = 5;
 const EXPANDED_LIST_MAX_HEIGHT = 220;
 
-// Sidebar = the NOTES BROWSER ONLY (pinned/drafts/recents/tags). Always
+// Sidebar = the NOTES BROWSER ONLY (pinned/recents/tags). Always
 // expanded when notes is the active view — no collapse toggle, no app-level
 // nav (IconRail owns that, always visible to its left).
 interface SidebarProps {
   // All-Notes row click. Sidebar mutates the store (selectSpace "general"),
   // AppShell does the URL nav to ?view=notes.
   onAllNotes: () => void;
-  // Note-row click (pinned / draft / recent). Drives the URL to ?note=<id>
+  // Note-row click (pinned / recent). Drives the URL to ?note=<id>
   // so the index route's search.note effect picks it up.
   onSelectNote: (id: number) => void;
 }
@@ -107,7 +104,7 @@ function SidebarSection({
 }
 
 // GroupLabel — tiny small-caps divider inside the Notes section so the
-// pinned / drafts / recent groups read as one surface but stay scannable.
+// pinned / recent groups read as one surface but stay scannable.
 function GroupLabel({ label }: { label: string }) {
   return (
     <div style={{
@@ -220,30 +217,26 @@ export function Sidebar({ onAllNotes, onSelectNote }: SidebarProps) {
   const { selectSpace, loadNotes, selectNote, activeNoteId } = useNotesContentStore();
 
   const [pinnedNotes, setPinnedNotes] = useState<ApiNote[]>([]);
-  const [draftNotes, setDraftNotes] = useState<ApiNote[]>([]);
   const [recentNotes, setRecentNotes] = useState<ApiNote[]>([]);
   // Distinct tag set across the whole corpus — derived from the flat
   // GET /notes list (notes carry `tags: string[]`).
   const [allTags, setAllTags] = useState<string[]>([]);
 
-  const [draftsExpanded, setDraftsExpanded] = useState(false);
   const [tagsExpanded, setTagsExpanded] = useState(false);
 
   const pinnedVersion = usePinnedVersionStore((s) => s.version);
-  const draftVersion = useDraftVersionStore((s) => s.version);
   useEffect(() => {
     fetchPinnedNotes().then(setPinnedNotes).catch(() => {});
   }, [activeNoteId, pinnedVersion]);
   useEffect(() => {
-    fetchDraftNotes().then(setDraftNotes).catch(() => {});
-  }, [activeNoteId, draftVersion]);
+  }, [activeNoteId]);
   // Recent: refetch on any state change that could shift order — note edits
-  // (activeNoteId proxies opens/edits via the store), pin toggles, draft
-  // toggles. We dedupe in the render path against pinned + draft ids so
+  // (activeNoteId proxies opens/edits via the store) and pin toggles. We
+  // dedupe in the render path against pinned ids so
   // the same note never shows twice.
   useEffect(() => {
     fetchRecentNotes(15).then(setRecentNotes).catch(() => {});
-  }, [activeNoteId, pinnedVersion, draftVersion]);
+  }, [activeNoteId, pinnedVersion]);
   // Tags: the whole corpus in one fetch. Cheap — list responses ship
   // excerpts, not bodies. Same refetch triggers as recents (any note edit
   // could add/remove a tag).
@@ -255,7 +248,7 @@ export function Sidebar({ onAllNotes, onSelectNote }: SidebarProps) {
         setAllTags([...seen].sort());
       })
       .catch(() => {});
-  }, [activeNoteId, pinnedVersion, draftVersion]);
+  }, [activeNoteId, pinnedVersion]);
 
   // Pinned ordering — the drag UI died with the redesign, but the saved
   // per-device order still applies so previously-arranged pins keep their
@@ -279,14 +272,13 @@ export function Sidebar({ onAllNotes, onSelectNote }: SidebarProps) {
     usePinnedVersionStore.getState().bump();
   }
 
-  // Top recent notes, excluding any already shown in the PINNED or DRAFTS
+  // Top recent notes, excluding any already shown in the PINNED
   // groups above so the same note doesn't appear twice in the sidebar.
   const recentTop = useMemo(() => {
     const skip = new Set<number>();
     pinnedNotes.forEach((n) => skip.add(n.id));
-    draftNotes.forEach((n) => skip.add(n.id));
     return recentNotes.filter((n) => !skip.has(n.id)).slice(0, 5);
-  }, [recentNotes, pinnedNotes, draftNotes]);
+  }, [recentNotes, pinnedNotes]);
 
   function handleAllNotes() {
     selectSpace("general");
@@ -372,7 +364,7 @@ export function Sidebar({ onAllNotes, onSelectNote }: SidebarProps) {
               always-expanded and notes-only now (no collapse toggle, no
               app-level nav to distinguish itself from), so the green "Notes"
               banner this used to be was announcing something nobody needed
-              announced — the GroupLabel rows below (PINNED/RECENT/DRAFTS)
+              announced — the GroupLabel rows below (PINNED/RECENT)
               already give the list its structure. */}
           <button
             onClick={handleAllNotes}
@@ -425,27 +417,6 @@ export function Sidebar({ onAllNotes, onSelectNote }: SidebarProps) {
                 onClick={() => handleSelectNote(note)}
               />
             ))}
-            {draftNotes.length > 0 && <GroupLabel label="Drafts" />}
-            {draftNotes.length > 0 && (
-              <div style={draftsExpanded ? { maxHeight: EXPANDED_LIST_MAX_HEIGHT, overflowY: "auto" } : undefined}>
-                {(draftsExpanded ? draftNotes : draftNotes.slice(0, CAPPED_LIST_SIZE)).map((note) => (
-                  <SidebarChildRow
-                    key={`draft-${note.id}`}
-                    label={displayTitle(note)}
-                    icon={<PenLine size={11} strokeWidth={2} color={ICON_TINT.draft} />}
-                    selected={activeNoteId === note.id}
-                    onClick={() => handleSelectNote(note)}
-                  />
-                ))}
-              </div>
-            )}
-            {draftNotes.length > CAPPED_LIST_SIZE && (
-              <ExpandToggle
-                expanded={draftsExpanded}
-                hiddenCount={draftNotes.length - CAPPED_LIST_SIZE}
-                onClick={() => setDraftsExpanded((v) => !v)}
-              />
-            )}
           </div>
 
           {allTags.length > 0 && (

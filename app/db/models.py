@@ -150,20 +150,13 @@ class Note(Base):
     # /public page as a hero card. Independent of is_pinned so a note can
     # be a public-page hero without crowding the owner's working sidebar.
     is_public_pinned = Column(Boolean, default=False, nullable=False)
-    # User-marked "I intend to publish this" flag. Surfaces in the sidebar's
-    # DRAFTS section so in-progress posts have a fast path back; independent
-    # of is_pinned (a draft can also be pinned). Auto-clears when the note
-    # flips to public — once it ships, it's no longer a draft.
-    is_draft = Column(Boolean, default=False, nullable=False)
     # "Stop showing me this, but don't destroy it." The non-destructive twin
     # of DELETE: an archived note drops out of every browsing, search and
     # feed surface (see `_not_archived` in serializers.py — the ONE predicate
     # they all share) while staying fetchable by id and fully restorable.
     #
-    # Deliberately its own flag rather than a reuse of is_draft: a draft is a
-    # note on its way OUT (intent to publish) and an archive is a note on its
-    # way to REST. Every other flag (pinned, public, tags) is preserved
-    # verbatim across archive/unarchive so restoring is a single bit flip.
+    # Every other flag (pinned, public, tags) is preserved verbatim across
+    # archive/unarchive, so restoring is a single bit flip.
     is_archived = Column(Boolean, default=False, nullable=False)
     # When it was archived — null for a live note. Kept because a list of
     # archived notes immediately raises "when did I put this away", and it is

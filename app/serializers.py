@@ -180,7 +180,6 @@ def _serialize_note(n: Note) -> dict:
         "is_public": bool(n.is_public),
         "is_pinned": bool(n.is_pinned),
         "is_public_pinned": bool(getattr(n, "is_public_pinned", False)),
-        "is_draft": bool(getattr(n, "is_draft", False)),
         "is_archived": bool(getattr(n, "is_archived", False)),
         "archived_at": getattr(n, "archived_at", None),
         # Snapshot of what classify_note routed for this note's most recent
@@ -215,7 +214,6 @@ def _serialize_note_lite(n: Note) -> dict:
         "is_public": bool(n.is_public),
         "is_pinned": bool(n.is_pinned),
         "is_public_pinned": bool(getattr(n, "is_public_pinned", False)),
-        "is_draft": bool(getattr(n, "is_draft", False)),
         "is_archived": bool(getattr(n, "is_archived", False)),
         "archived_at": getattr(n, "archived_at", None),
         "classify_signals": None,
