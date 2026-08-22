@@ -32,9 +32,10 @@ import { useNoteCardStyles } from "./noteCardStyles";
 import { splitTitleAndBody } from "./quickNote";
 import { FocusLineDecoration } from "./FocusLineExtension";
 import { SendButton } from "../chat/SendButton";
-import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, autoTitleNote as apiAutoTitleNote, uploadImage as apiUploadImage, uploadAttachment as apiUploadAttachment, fetchOgMetadata, saveLocalNoteDraft, readLocalNoteDraft, clearLocalNoteDraft, type ApiNote, type ApiMemory, type NoteClassifySignals } from "../../services/api";
+import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, autoTitleNote as apiAutoTitleNote, uploadImage as apiUploadImage, uploadAttachment as apiUploadAttachment, fetchOgMetadata, saveLocalNoteDraft, readLocalNoteDraft, clearLocalNoteDraft, type ApiNote, type ApiMemory, type NoteClassifySignals } from "../../services/api";
 import { NoteMemoriesPanel } from "./NoteMemoriesPanel";
-import { Archive as ArchiveIcon, ArchiveRestore as ArchiveRestoreIcon } from "lucide-react";
+import { DOMSerializer } from "@tiptap/pm/model";
+import { Archive as ArchiveIcon, ArchiveRestore as ArchiveRestoreIcon, CornerUpRight } from "lucide-react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { useDraftVersionStore } from "../../stores/useDraftVersionStore";
@@ -674,6 +675,12 @@ export function NoteEditor({
   // editor instance has fresh plugin state, so any tracked id from the
   // previous note is meaningless here).
   const focusLineSessionIdRef = useRef<number | null>(null);
+  // Guard against extract-spam — Daniel clicked Extract 6× during a
+  // network stall and got 4 dupe children (PR #244 postmortem). Backend
+  // also dedups within 30s, but the UI lock prevents the cascade of
+  // dependent fetches (notes / pinned / drafts / children) that the
+  // duplicate clicks triggered.
+  const [extractInFlight, setExtractInFlight] = useState(false);
   // Parent note title cache — populated when the active note has a
   // parent_note_id so the back-pill can render the actual title instead
   // of "↑ from #42". Keyed by parent id so switching notes doesn't show
@@ -1075,8 +1082,69 @@ export function NoteEditor({
   }, [editor]);
 
   /**
-   * BubbleMenu "Focus" handler — the selection popup's one remaining action.
-   * Starts a real server-side focus session titled with the selected text
+   * BubbleMenu "↗ Extract" handler — carve the current selection out of the
+   * parent note into a new child note and replace the selection with a
+   * NoteLink chip. POSTing the selected HTML before mutating the parent
+   * editor avoids a race where the user keeps typing during the network
+   * round-trip and the autosave clobbers the chip insert.
+   *
+   * After the chip is in, we save the parent synchronously and jump the
+   * editor to the new child — Daniel's mental model is "extract = pop a
+   * draft out into its own note and continue writing there." Leaving the
+   * user on the parent with just a chip felt like it half-shipped.
+   */
+  async function handleExtractToChildNote() {
+    if (!editor || editor.isDestroyed) return;
+    if (!activeNoteId || activeNoteId <= 0) return;
+    if (extractInFlight) return; // ignore re-clicks while the network call is pending
+    const parentId = activeNoteId;
+    const { from, to } = editor.state.selection;
+    if (from === to) return;
+    const slice = editor.state.doc.slice(from, to);
+    const fragment = DOMSerializer.fromSchema(editor.state.schema).serializeFragment(slice.content);
+    const tmp = document.createElement("div");
+    tmp.appendChild(fragment);
+    const selectedHtml = tmp.innerHTML.trim();
+    if (!selectedHtml) return;
+    setExtractInFlight(true);
+    let child: ApiNote | null = null;
+    try {
+      child = await apiExtractToChildNote(parentId, selectedHtml);
+    } catch {
+      setExtractInFlight(false);
+      return; // silent — selection stays intact
+    }
+    if (!child) {
+      setExtractInFlight(false);
+      return;
+    }
+    const labelSource = (child.excerpt_anchor || child.title || tmp.textContent || "note").trim();
+    const label = labelSource.length > 40 ? labelSource.slice(0, 40) + "…" : labelSource;
+    editor
+      .chain()
+      .focus()
+      .deleteRange({ from, to })
+      .insertContent({ type: "noteLink", attrs: { noteId: child.id, label } })
+      .run();
+    bodyRef.current = editor.getHTML();
+    hasChanges.current = true;
+    // Persist parent's chip insertion BEFORE swapping notes — otherwise the
+    // pending debounced save fires after activeNoteId flips and writes the
+    // parent's content to the wrong row. await save() here is the only way
+    // to guarantee the chip lands on the parent row.
+    await save();
+    // Make sure the freshly-created child is in the store before selectNote
+    // reaches for it (otherwise the editor briefly renders an empty note).
+    await refetchNote(child.id).catch(() => {});
+    selectNote(child.id);
+    navigate({ to: "/", search: { note: child.id, conv: undefined, audit: undefined, segment: undefined, view: undefined } });
+    setExtractInFlight(false);
+  }
+
+  /**
+   * BubbleMenu "Focus" handler — the first of the selection popup's two
+   * remaining actions (Focus, then Extract). Starts a real server-side
+   * focus session titled with the selected text
    * (collapsed to one line, capped — see FOCUS_TITLE_MAX_CHARS) and NO
    * promise link: a session started from a note selection is simply a
    * promise-less session, the exact shape Claude already starts one with
@@ -2446,11 +2514,10 @@ export function NoteEditor({
                         "0 8px 22px rgb(var(--gooni-tint, 0 0 0) / 0.14), 0 1px 3px rgb(var(--gooni-tint, 0 0 0) / 0.10), inset 0 0 0 0.5px rgb(var(--gooni-tint, 0 0 0) / 0.06)",
                     }}
                   >
-                    {/* The selection popup is a SINGLE action now: start a
-                        focus session titled with the selection. Formatting
-                        (H1/H2, bold/italic/strike/code), Card + its
-                        done/color controls, and Extract all lived here and
-                        are now unreachable from the UI — a deliberate,
+                    {/* The selection popup is down to TWO actions — Focus,
+                        then Extract. Formatting (H1/H2, bold/italic/strike/
+                        code) and Card + its done/color controls lived here
+                        and are unreachable from the UI now — a deliberate,
                         captain-approved trade, not an oversight. No overflow
                         menu, no "…" — the popup says what it does. */}
                     <button
@@ -2504,6 +2571,62 @@ export function NoteEditor({
                       )}
                       Focus
                     </button>
+                    {activeNoteId && activeNoteId > 0 && (
+                      <>
+                        <span style={{ width: 1, height: 18, background: ctok.border, margin: "0 4px" }} />
+                        <button
+                          title={extractInFlight ? "Extracting…" : "Extract to new linked note"}
+                          disabled={extractInFlight}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            if (extractInFlight) return;
+                            void handleExtractToChildNote();
+                          }}
+                          style={{
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            gap: 4,
+                            height: 30,
+                            padding: "0 10px",
+                            borderRadius: 8,
+                            border: "none",
+                            background: "transparent",
+                            color: extractInFlight ? ctok.disabled : ctok.muted,
+                            cursor: extractInFlight ? "wait" : "pointer",
+                            fontSize: 12,
+                            fontWeight: 500,
+                            transition: "background 0.12s, color 0.12s",
+                            opacity: extractInFlight ? 0.7 : 1,
+                          }}
+                          onMouseEnter={(e) => {
+                            if (extractInFlight) return;
+                            e.currentTarget.style.background = ctok.hover;
+                            e.currentTarget.style.color = ctok.text;
+                          }}
+                          onMouseLeave={(e) => {
+                            if (extractInFlight) return;
+                            e.currentTarget.style.background = "transparent";
+                            e.currentTarget.style.color = ctok.muted;
+                          }}
+                        >
+                          {extractInFlight ? (
+                            // CSS-only spinner — matches the rest of the editor
+                            // chrome's no-extra-deps rule. Border-top animates
+                            // around a transparent rest of the ring.
+                            <span
+                              style={{
+                                width: 12, height: 12, borderRadius: "50%",
+                                border: "1.5px solid rgb(var(--gooni-tint, 0 0 0) / 0.15)",
+                                borderTopColor: "rgb(var(--gooni-tint, 0 0 0) / 0.55)",
+                                animation: "gooni-spin 0.7s linear infinite",
+                              }}
+                            />
+                          ) : (
+                            <CornerUpRight size={13} strokeWidth={1.9} />
+                          )}
+                          {extractInFlight ? "Extracting…" : "Extract"}
+                        </button>
+                      </>
+                    )}
                   </BubbleMenu>
                 )}
 
