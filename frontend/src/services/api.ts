@@ -78,7 +78,6 @@ export interface ApiNote {
   last_opened_at: string | null;
   is_public: boolean;
   is_pinned: boolean;
-  is_draft: boolean;
   // Archived = filed away, not deleted. An archived note is absent from every
   // note list, search and feed the app serves; it shows up only in the
   // Archived filter (`fetchArchivedNotes`) and still opens by id. Content,
@@ -222,12 +221,6 @@ export async function fetchNoteMemories(id: number): Promise<ApiMemory[]> {
 export async function fetchPinnedNotes(): Promise<ApiNote[]> {
   const res = await apiFetch(`${BASE}/notes/pinned`);
   if (!res.ok) throw new Error("Failed to fetch pinned notes");
-  return res.json();
-}
-
-export async function fetchDraftNotes(): Promise<ApiNote[]> {
-  const res = await apiFetch(`${BASE}/notes/drafts`);
-  if (!res.ok) throw new Error("Failed to fetch draft notes");
   return res.json();
 }
 
@@ -510,7 +503,7 @@ export async function patchNote(
   // that, making `fetch` throw before the request leaves the page. On tab
   // close we lose the in-flight save; the next edit re-saves the full body.
   id: number,
-  patch: { is_public?: boolean; is_pinned?: boolean; is_public_pinned?: boolean; is_draft?: boolean; is_archived?: boolean; title?: string; content?: string; tags?: string[]; icon?: string | null },
+  patch: { is_public?: boolean; is_pinned?: boolean; is_public_pinned?: boolean; is_archived?: boolean; title?: string; content?: string; tags?: string[]; icon?: string | null },
 ): Promise<ApiNote> {
   const res = await apiFetch(`${BASE}/notes/${id}`, {
     method: "PATCH",
@@ -998,7 +991,7 @@ export async function createStickyNote(
   const res = await apiFetch(`${BASE}/notes`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content, tags: ["sticky"], home_pos: pos, is_draft: false }),
+    body: JSON.stringify({ content, tags: ["sticky"], home_pos: pos }),
   });
   if (!res.ok) throw new Error("Failed to create sticky note");
   return res.json();

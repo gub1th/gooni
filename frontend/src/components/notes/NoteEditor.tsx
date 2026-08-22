@@ -11,7 +11,7 @@ import { BubbleMenu } from "@tiptap/react/menus";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import {
-  Trash2, Pin as PinIcon, Pencil as PencilIcon,
+  Trash2, Pin as PinIcon,
   ArrowLeftToLine, ArrowRightToLine, ArrowUpToLine, ArrowDownToLine,
   Columns3, Rows3, Heading as HeadingIcon, Trash,
   AlarmClock,
@@ -38,7 +38,6 @@ import { DOMSerializer } from "@tiptap/pm/model";
 import { Archive as ArchiveIcon, ArchiveRestore as ArchiveRestoreIcon, CornerUpRight } from "lucide-react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
-import { useDraftVersionStore } from "../../stores/useDraftVersionStore";
 import { useFocusSessionStore, isAccruingFocus } from "../../stores/useFocusSessionStore";
 import { Tooltip } from "../Tooltip";
 import { frostInk as ctok } from "../../ui";
@@ -1504,24 +1503,6 @@ export function NoteEditor({
     }
   }
 
-  async function handleToggleDraft() {
-    if (!activeNote || !activeNoteId || activeNoteId < 0) return;
-    const newDraft = !activeNote.is_draft;
-    try {
-      await apiPatchNote(activeNoteId, { is_draft: newDraft });
-      useNotesContentStore.setState((s) => {
-        const updated: Record<string, ApiNote[]> = {};
-        for (const [k, list] of Object.entries(s.notes)) {
-          updated[k] = list.map((n) => (n.id === activeNoteId ? { ...n, is_draft: newDraft } : n));
-        }
-        return { notes: updated };
-      });
-      useDraftVersionStore.getState().bump();
-    } catch (e) {
-      console.error("draft toggle failed", e);
-    }
-  }
-
   async function handleToggleArchive() {
     if (!activeNote || !activeNoteId || activeNoteId < 0) return;
     const newArchived = !activeNote.is_archived;
@@ -1541,10 +1522,9 @@ export function NoteEditor({
         }
         return { notes: updated };
       });
-      // Pinned + Drafts are separate sidebar reads with their own endpoints,
-      // and an archived note has to leave both.
+      // Pinned is a separate sidebar read with its own endpoint, and an
+      // archived note has to leave it.
       usePinnedVersionStore.getState().bump();
-      useDraftVersionStore.getState().bump();
       void useNotesContentStore.getState().loadNotes(
         useNotesContentStore.getState().selectedSpaceId ?? "general",
         { force: true },
@@ -1554,45 +1534,22 @@ export function NoteEditor({
     }
   }
 
-  async function handlePublishPublic() {
+  async function handlePublish() {
     if (!activeNote || !activeNoteId || activeNoteId < 0) return;
-    const wasDraft = activeNote.is_draft;
     useNotesContentStore.setState((s) => {
       const updated: Record<string, ApiNote[]> = {};
       for (const [k, list] of Object.entries(s.notes)) {
         updated[k] = list.map((n) =>
-          n.id === activeNoteId ? { ...n, is_public: true, is_draft: false } : n,
+          n.id === activeNoteId ? { ...n, is_public: true } : n,
         );
       }
       return { notes: updated };
     });
     setLocalIsPublic(true);
-    if (wasDraft) useDraftVersionStore.getState().bump();
     try {
-      await apiPatchNote(activeNoteId, { is_public: true, is_draft: false });
+      await apiPatchNote(activeNoteId, { is_public: true });
     } catch (e) {
-      console.error("publish public failed", e);
-    }
-  }
-
-  async function handlePublishPrivate() {
-    if (!activeNote || !activeNoteId || activeNoteId < 0) return;
-    const wasDraft = activeNote.is_draft;
-    useNotesContentStore.setState((s) => {
-      const updated: Record<string, ApiNote[]> = {};
-      for (const [k, list] of Object.entries(s.notes)) {
-        updated[k] = list.map((n) =>
-          n.id === activeNoteId ? { ...n, is_public: false, is_draft: false } : n,
-        );
-      }
-      return { notes: updated };
-    });
-    setLocalIsPublic(false);
-    if (wasDraft) useDraftVersionStore.getState().bump();
-    try {
-      await apiPatchNote(activeNoteId, { is_public: false, is_draft: false });
-    } catch (e) {
-      console.error("publish private failed", e);
+      console.error("publish failed", e);
     }
   }
 
@@ -1602,15 +1559,14 @@ export function NoteEditor({
       const updated: Record<string, ApiNote[]> = {};
       for (const [k, list] of Object.entries(s.notes)) {
         updated[k] = list.map((n) =>
-          n.id === activeNoteId ? { ...n, is_public: false, is_draft: true } : n,
+          n.id === activeNoteId ? { ...n, is_public: false } : n,
         );
       }
       return { notes: updated };
     });
     setLocalIsPublic(false);
-    useDraftVersionStore.getState().bump();
     try {
-      await apiPatchNote(activeNoteId, { is_public: false, is_draft: true });
+      await apiPatchNote(activeNoteId, { is_public: false });
     } catch (e) {
       console.error("unpublish failed", e);
     }
@@ -1667,15 +1623,8 @@ export function NoteEditor({
             createdAt={activeNote.created_at}
           />
           <PublishButton
-            visibility={
-              activeNote.is_public
-                ? "public"
-                : activeNote.is_draft
-                  ? "draft"
-                  : "private"
-            }
-            onPublishPublic={handlePublishPublic}
-            onPublishPrivate={handlePublishPrivate}
+            isPublic={!!activeNote.is_public}
+            onPublish={handlePublish}
             onUnpublish={handleUnpublish}
           />
         </div>
@@ -1842,35 +1791,6 @@ export function NoteEditor({
                 strokeWidth={1.7}
                 color={activeNote.is_pinned ? "#F59E0B" : ctok.muted}
                 fill={activeNote.is_pinned ? "#F59E0B" : "none"}
-              />
-            </button>
-          </Tooltip>
-        )}
-
-        {/* Draft toggle — marks the note as "intent to publish, in progress."
-            Surfaces in the sidebar's DRAFTS section. Independent of pin/public:
-            a draft can also be pinned. Auto-clears on the backend the moment
-            the user flips Public on (it shipped → no longer a draft). */}
-        {activeNote && activeNoteId && activeNoteId > 0 && (
-          <Tooltip label={activeNote.is_draft ? "Remove draft mark" : "Mark as draft (intent to publish)"}>
-            <button
-              onClick={handleToggleDraft}
-              style={{
-                width: 30, height: 30, borderRadius: 8,
-                border: "none",
-                background: activeNote.is_draft ? "rgba(139,92,246,0.16)" : "transparent",
-                cursor: "pointer",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                padding: 0, flexShrink: 0,
-                transition: "background 0.12s",
-              }}
-              onMouseEnter={(e) => { if (!activeNote.is_draft) (e.currentTarget as HTMLButtonElement).style.background = ctok.hover; }}
-              onMouseLeave={(e) => { if (!activeNote.is_draft) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-            >
-              <PencilIcon
-                size={15}
-                strokeWidth={1.7}
-                color={activeNote.is_draft ? "#8B5CF6" : ctok.muted}
               />
             </button>
           </Tooltip>

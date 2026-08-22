@@ -19,7 +19,6 @@ const note: ApiNote = {
   last_opened_at: null,
   is_public: false,
   is_pinned: false,
-  is_draft: false,
   tags: [],
 };
 

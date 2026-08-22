@@ -43,7 +43,7 @@ class Gateway:
         raise NotImplementedError(f"{type(self).__name__}.{name}")
 
     # ── notes ────────────────────────────────────────────────────────────────
-    def create_note(self, *, title, content, tags, is_draft, is_pinned) -> dict: self._todo("create_note")
+    def create_note(self, *, title, content, tags, is_pinned) -> dict: self._todo("create_note")
     def log_thought(self, *, content, topic, new_batch, label, at) -> dict: self._todo("log_thought")
     def search_notes_semantic(self, *, q, limit) -> list[dict]: self._todo("search_notes_semantic")
     def list_notes(self, *, tag, limit) -> list[dict]: self._todo("list_notes")
@@ -119,7 +119,7 @@ class DirectGateway(Gateway):
             db.close()
 
     # ── notes ────────────────────────────────────────────────────────────────
-    def create_note(self, *, title, content, tags, is_draft, is_pinned) -> dict:
+    def create_note(self, *, title, content, tags, is_pinned) -> dict:
         from ..db.models import Note
         from ..serializers import _excerpt_from_html, _normalize_tags
 
@@ -129,7 +129,6 @@ class DirectGateway(Gateway):
                 content=content or "",
                 excerpt=_excerpt_from_html(content or ""),
                 tags=json.dumps(_normalize_tags(tags or [])),
-                is_draft=bool(is_draft),
                 is_pinned=bool(is_pinned),
             )
             db.add(note)
@@ -138,7 +137,6 @@ class DirectGateway(Gateway):
                 "id": note.id,
                 "title": note.title,
                 "tags": json.loads(note.tags or "[]"),
-                "is_draft": bool(note.is_draft),
                 "is_pinned": bool(note.is_pinned),
             }
 
@@ -238,8 +236,6 @@ class DirectGateway(Gateway):
             if "content" in patch:
                 note.content = patch["content"]
                 note.excerpt = _excerpt_from_html(patch["content"] or "")
-            if "is_draft" in patch:
-                note.is_draft = bool(patch["is_draft"])
             if "is_pinned" in patch:
                 note.is_pinned = bool(patch["is_pinned"])
             if "is_archived" in patch:
@@ -576,15 +572,15 @@ class HttpGateway(Gateway):
         return r.json() if r.content else {}
 
     # ── notes ────────────────────────────────────────────────────────────────
-    def create_note(self, *, title, content, tags, is_draft, is_pinned) -> dict:
+    def create_note(self, *, title, content, tags, is_pinned) -> dict:
         payload = {
             "title": title, "content": content, "tags": tags or [],
-            "is_draft": bool(is_draft), "is_pinned": bool(is_pinned),
+            "is_pinned": bool(is_pinned),
         }
         n = self._post("/notes", payload)
         return {
             "id": n["id"], "title": n.get("title"), "tags": n.get("tags") or [],
-            "is_draft": bool(n.get("is_draft")), "is_pinned": bool(n.get("is_pinned")),
+            "is_pinned": bool(n.get("is_pinned")),
         }
 
     def log_thought(self, *, content, topic, new_batch, label, at) -> dict:

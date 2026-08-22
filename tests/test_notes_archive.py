@@ -125,8 +125,6 @@ def seed(db) -> dict[str, Note]:
     made["pinned"] = _note(db, title="pinned live", is_pinned=True)
     made["pinned_arch"] = _note(db, title="pinned archived", is_pinned=True, is_archived=True)
 
-    made["draft"] = _note(db, title="draft live", is_draft=True)
-    made["draft_arch"] = _note(db, title="draft archived", is_draft=True, is_archived=True)
 
     made["public"] = _note(db, title="public live", content="<p>p</p>", is_public=True)
     made["public_arch"] = _note(db, title="public archived", content="<p>p</p>", is_public=True, is_archived=True)
@@ -214,10 +212,6 @@ def test_listing_reads(db, made) -> None:
     check_true("GET /notes/pinned keeps live", made["pinned"].id in pinned)
     check("GET /notes/pinned drops archived (archive beats pin)", made["pinned_arch"].id in pinned, False)
 
-    drafts = _ids(notes_router.get_draft_notes(db=db))
-    check_true("GET /notes/drafts keeps live", made["draft"].id in drafts)
-    check("GET /notes/drafts drops archived", made["draft_arch"].id in drafts, False)
-
     sticky = _ids(notes_router.list_sticky_notes(db=db))
     check_true("GET /notes/sticky keeps live", made["sticky"].id in sticky)
     check("GET /notes/sticky drops archived", made["sticky_arch"].id in sticky, False)
@@ -288,7 +282,7 @@ def test_unarchive_restores(db, made) -> None:
 
     n = _note(
         db, title="restore me", content="<p>body</p>", excerpt="body",
-        is_pinned=True, is_draft=True, is_public=True,
+        is_pinned=True, is_public=True,
         tags=json.dumps(["alpha", "beta"]), icon="📦",
         embedding=json.dumps([0.0, 1.0, 0.0]),
     )
@@ -302,7 +296,7 @@ def test_unarchive_restores(db, made) -> None:
     notes_router.update_note(n.id, {"is_archived": False}, db=db)
     after = notes_router.get_note(n.id, db=db)
 
-    for field in ("title", "content", "excerpt", "is_pinned", "is_draft", "is_public", "tags", "icon"):
+    for field in ("title", "content", "excerpt", "is_pinned", "is_public", "tags", "icon"):
         check(f"unarchive preserves {field}", after[field], before[field])
     check_true("unarchive preserves the embedding", db.query(Note).filter(Note.id == n.id).first().embedding is not None)
     check_true("restored note is back in /notes", n.id in _ids(notes_router.list_notes(db=db)))
@@ -420,6 +414,9 @@ def test_migration() -> None:
     con = sqlite3.connect(path)
     con.execute(
         "INSERT INTO notes (id, title, content, created_at, updated_at, "
+        # is_draft is still a NOT NULL column at THIS revision — the drop
+        # (7f3a1c9e04b2) lands later in the chain. The insert has to satisfy
+        # the schema as it existed when the archive migration ran.
         "is_public, is_pinned, is_public_pinned, is_draft) "
         "VALUES (1, 'pre-existing', '<p>x</p>', '2026-01-01 00:00:00', "
         "'2026-01-01 00:00:00', 0, 0, 0, 0)"
