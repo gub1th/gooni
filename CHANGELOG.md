@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.256.0 — 2026-08-22 (minor)
+
+- feat(notes): archive — the non-destructive hide (#535)
+
 ## 0.255.3 — 2026-08-17 (patch)
 
 - fix(ultrahuman): drop email param from API calls (#533)
