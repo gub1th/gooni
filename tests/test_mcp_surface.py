@@ -117,13 +117,9 @@ with SessionLocal() as db:
     check("caller tag kept", tagged(row, "design"))
     check("NOT tagged thought", not tagged(row, "thought"))
 
-# is_draft actually works now (the old add_note's flag was inert: POST /notes
-# defaults is_draft=True, so passing False changed nothing).
-published = tools.log_note(content="<p>x</p>", kind="note", title="published",
-                           is_draft=False)
+published = tools.log_note(content="<p>x</p>", kind="note", title="published")
 with SessionLocal() as db:
     row = db.query(Note).filter(Note.id == published["id"]).first()
-    check("is_draft=False is honoured", row.is_draft is False)
 
 try:
     tools.log_note(content="orphan", kind="thought")

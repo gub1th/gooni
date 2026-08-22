@@ -238,7 +238,6 @@ def log_note(
     new_batch: bool = False,
     label: str | None = None,
     at: str | None = None,
-    is_draft: bool = True,
     is_pinned: bool = False,
 ) -> dict:
     """Write something down. THE DEFAULT ACTION whenever Daniel shares something
@@ -275,11 +274,6 @@ def log_note(
     Use it when recording something from earlier in the day: a 1am study session
     logged at noon should read 1am.
 
-    `is_draft` (notes only) defaults TRUE, which is what every note written
-    through this surface has always actually been — the create endpoint defaults
-    it on, so the old tool's `is_draft=False` never took effect. Pass False for a
-    note that should NOT sit in the Drafts sidebar.
-
     Returns, for a thought, {thought:{id,content,timestamp}, batch:{...},
     topic:{...decayed salience...}} — use `thought.id` as `from_thought` if the
     same message also creates a promise. For a note, {id,title,tags,kind,...}.
@@ -305,7 +299,7 @@ def log_note(
     merged = ["from-claude", "claude-code", *(tags or [])]
     note = gw.create_note(
         title=title or "", content=content, tags=merged,
-        is_draft=bool(is_draft), is_pinned=bool(is_pinned),
+        is_pinned=bool(is_pinned),
     )
     # Deep link back into the SPA, so a created note is one click away — carried
     # over from add_note's return string. Host from GOONI_FRONTEND_URL.
@@ -447,13 +441,12 @@ def edit_note(
     note_id: int,
     title: str | None = None,
     content: str | None = None,
-    is_draft: bool | None = None,
     is_pinned: bool | None = None,
     is_archived: bool | None = None,
     tags: list[str] | None = None,
 ) -> str:
     """Edit an existing note — update a progress note or evolving doc, or flip
-    the draft/pinned/archived flags. This is also how you edit a note's
+    the pinned/archived flags. This is also how you edit a note's
     checklist: read it with `read_note`, then write the updated body back
     through `content`.
 
@@ -461,7 +454,6 @@ def edit_note(
         note_id: numeric id of the note to edit
         title: new title (omit to keep current)
         content: new body, plain text or HTML (omit to keep current)
-        is_draft: set/clear the Drafts-sidebar flag (omit to leave unchanged)
         is_pinned: set/clear the pinned flag (omit to leave unchanged)
         is_archived: True files the note away — it disappears from every note
             list, search and feed WITHOUT being deleted, and keeps its content,
@@ -477,8 +469,6 @@ def edit_note(
         patch["title"] = title
     if content is not None:
         patch["content"] = content
-    if is_draft is not None:
-        patch["is_draft"] = bool(is_draft)
     if is_pinned is not None:
         patch["is_pinned"] = bool(is_pinned)
     if is_archived is not None:
@@ -491,8 +481,6 @@ def edit_note(
     if note is None:
         return f"(note #{note_id} not found)"
     flags = []
-    if is_draft is not None:
-        flags.append(f"draft={bool(is_draft)}")
     if is_pinned is not None:
         flags.append(f"pinned={bool(is_pinned)}")
     if is_archived is not None:

@@ -83,8 +83,7 @@ def list_notes(tag: str | None = None, db: Session = Depends(get_db)):
 @router.post("/notes")
 def create_note(body: dict, db: Session = Depends(get_db)):
     """Create a note (Slice 6: replaces POST /spaces/{id}/notes — no
-    space bucket; tags own organization). New notes enter as drafts
-    unless is_draft=False (publish ceremony unchanged)."""
+    space bucket; tags own organization)."""
     from datetime import datetime
 
     initial_content = body.get("content") or ""
@@ -93,7 +92,6 @@ def create_note(body: dict, db: Session = Depends(get_db)):
         title=body.get("title") or "",
         content=initial_content,
         excerpt=_excerpt_from_html(initial_content),
-        is_draft=bool(body.get("is_draft", True)),
         is_pinned=bool(body.get("is_pinned", False)),
         tags=json.dumps(initial_tags) if initial_tags else None,
         # Sticky notes come in with a home_pos; log-day notes with a log_date.
@@ -178,7 +176,6 @@ def upsert_daily_note(date: str, body: dict, db: Session = Depends(get_db)):
     """Upsert the daily-log note for `date` (YYYY-MM-DD). Body {content}.
     Empty content deletes the note (cell-clear semantics, mirrors trackables).
     One note per date via the log_date key, carried by the `daily` tag;
-    is_draft=False so daily logs don't crowd the Drafts sidebar.
 
     Archived rows are invisible to this lookup on purpose. `GET /notes/daily`
     drops them, so the cell renders empty — and if the upsert still ADOPTED
@@ -209,7 +206,6 @@ def upsert_daily_note(date: str, body: dict, db: Session = Depends(get_db)):
             excerpt=_excerpt_from_html(content),
             log_date=d,
             tags=json.dumps(["daily"]),
-            is_draft=False,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
         )
@@ -221,43 +217,6 @@ def upsert_daily_note(date: str, body: dict, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(existing)
     return _serialize_note(existing)
-
-
-@router.post("/notes/{note_id}/publish")
-def publish_note(note_id: int, body: dict, db: Session = Depends(get_db)):
-    """Promote a draft to published. Body: { visibility: "public"|"private" }.
-    Confluence-style ceremony — replaces the old globe-icon instant flip
-    that was too easy to misclick. Idempotent on already-published notes
-    (the visibility flag still applies).
-    """
-    from datetime import datetime
-    note = note_or_404(note_id, db)
-    visibility = (body.get("visibility") or "private").lower()
-    if visibility not in ("public", "private"):
-        raise HTTPException(
-            status_code=400, detail="visibility must be 'public' or 'private'"
-        )
-    note.is_draft = False
-    note.is_public = visibility == "public"
-    note.updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(note)
-    return _serialize_note(note)
-
-
-@router.post("/notes/{note_id}/unpublish")
-def unpublish_note(note_id: int, db: Session = Depends(get_db)):
-    """Revert a published note back to draft state. Pulls it off the
-    public site (if it was public) AND flags it as a draft again.
-    """
-    from datetime import datetime
-    note = note_or_404(note_id, db)
-    note.is_draft = True
-    note.is_public = False
-    note.updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(note)
-    return _serialize_note(note)
 
 
 @router.patch("/notes/{note_id}")
@@ -323,17 +282,10 @@ def update_note(
     if "is_public" in body:
         new_public = bool(body["is_public"])
         note.is_public = new_public
-        # Publishing graduates the note out of draft state — once it ships,
-        # the "intent to publish" flag is satisfied. User can re-mark it draft
-        # explicitly if they pull it back for edits.
-        if new_public:
-            note.is_draft = False
     if "is_pinned" in body:
         note.is_pinned = bool(body["is_pinned"])
     if "is_public_pinned" in body:
         note.is_public_pinned = bool(body["is_public_pinned"])
-    if "is_draft" in body:
-        note.is_draft = bool(body["is_draft"])
     if "is_archived" in body:
         # Archive / unarchive. Deliberately touches NOTHING but the two
         # archive columns: no content, no tags, no pins, no children, no
@@ -471,25 +423,12 @@ def get_pinned_notes(db: Session = Depends(get_db)):
     return [_serialize_note_lite(n) for n in notes]
 
 
-@router.get("/notes/drafts")
-def get_draft_notes(db: Session = Depends(get_db)):
-    """Archived drafts excluded — an abandoned draft is the single most likely
-    thing to be archived, so leaving them here would gut the feature."""
-    notes = (
-        _not_archived(db.query(Note))
-        .filter(Note.is_draft == True)  # noqa: E712
-        .order_by(_notes_order())
-        .all()
-    )
-    return [_serialize_note_lite(n) for n in notes]
-
-
 @router.get("/notes/archived")
 def get_archived_notes(db: Session = Depends(get_db)):
     """The recovery read — the ONE surface that shows archived notes.
 
-    Shape mirrors `GET /notes/drafts` (lite rows, no bodies) because it is the
-    same kind of thing: a filtered sidebar list you click into. Ordered by when
+    Lite rows, no bodies — it is a filtered sidebar list you click into.
+    Ordered by when
     they were archived rather than when they were last edited — see
     `_archived_order`. Unarchive is `PATCH /notes/{id} {is_archived: false}`."""
     notes = (
@@ -592,7 +531,7 @@ def cleanup_empty_notes(dry_run: bool = False, db: Session = Depends(get_db)):
     """Delete only truly empty notes. "Real content" = ANY non-whitespace
     plaintext after stripping HTML (however short — "gym" is a real note),
     OR any embedded media (img/video/iframe), OR a real title. Pinned notes
-    are always preserved (explicit user intent). Empty untitled drafts are
+    are always preserved (explicit user intent). Empty untitled notes are
     NOT preserved.
 
     The old >= 6-char plaintext threshold swept real few-word notes (a

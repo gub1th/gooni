@@ -90,7 +90,7 @@ interface NoteRowProps {
 }
 
 // Status filter pill — used in the row under the search bar to toggle
-// Public / Draft / Pinned + show the active Space narrowing. Active vs
+// Public / Pinned + show the active Space narrowing. Active vs
 // inactive must read at a glance: active uses a tinted bg + accent text,
 // inactive uses a muted outlined chip. Same height for keyboard rhythm.
 function FilterPill({
@@ -206,25 +206,8 @@ function NoteRow({ note, active, onSelect, onContextMenu, onTogglePin }: NoteRow
           {title}
         </div>
         {/* Status badges — tiny chips just before the timestamp.
-            🌐 = public, ✏️ = draft, 📌 stays on the existing pin button
-            below. Renders nothing for the default state. */}
-        {note.is_draft && (
-          <span
-            title="Draft"
-            style={{
-              fontSize: 9,
-              padding: "1px 5px",
-              borderRadius: 4,
-              background: "rgba(255,149,0,0.14)",
-              color: "#B86E00",
-              fontWeight: 600,
-              letterSpacing: 0.3,
-              flexShrink: 0,
-              textTransform: "uppercase",
-              fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-            }}
-          >draft</span>
-        )}
+            🌐 = public, 📌 stays on the existing pin button below.
+            Renders nothing for the default state. */}
         {note.is_public && (
           <span
             title="Public"
@@ -314,10 +297,9 @@ export function NotesList() {
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [cleanConfirm, setCleanConfirm] = useState(false);
   const [search, setSearch] = useState("");
-  // Status filters — public / draft / pinned. Stack as AND: enabling
+  // Status filters — public / pinned. Stack as AND: enabling
   // multiple means rows must match all of them.
   const [publicOnly, setPublicOnly] = useState(false);
-  const [draftOnly, setDraftOnly] = useState(false);
   const [pinnedOnly, setPinnedOnly] = useState(false);
   // The Archived view. Deliberately NOT another AND-stacked status filter
   // like the three above: archived notes are absent from the store's list
@@ -377,7 +359,6 @@ export function NotesList() {
   const sourceNotes = archivedOnly ? archivedNotes : allNotes;
   const statusFiltered = sourceNotes.filter((n) => {
     if (publicOnly && !n.is_public) return false;
-    if (draftOnly && !n.is_draft) return false;
     if (pinnedOnly && !n.is_pinned) return false;
     if (tagFilter !== null && !(n.tags ?? []).includes(tagFilter)) return false;
     return true;
@@ -388,7 +369,7 @@ export function NotesList() {
     const plain = (n.excerpt ?? (n.content ? stripHtml(n.content) : "")).toLowerCase();
     return plain.includes(searchTrimmed);
   });
-  const anyFilterActive = publicOnly || draftOnly || pinnedOnly || archivedOnly || tagFilter !== null;
+  const anyFilterActive = publicOnly || pinnedOnly || archivedOnly || tagFilter !== null;
 
   const headerName = "All Notes";
 
@@ -554,12 +535,6 @@ export function NotesList() {
             onClick={() => setPublicOnly((v) => !v)}
           />
           <FilterPill
-            label="Draft"
-            icon="✏️"
-            active={draftOnly}
-            onClick={() => setDraftOnly((v) => !v)}
-          />
-          <FilterPill
             label="Pinned"
             icon="📌"
             active={pinnedOnly}
@@ -584,7 +559,6 @@ export function NotesList() {
             <button
               onClick={() => {
                 setPublicOnly(false);
-                setDraftOnly(false);
                 setPinnedOnly(false);
                 setArchivedOnly(false);
                 clearTagFilter();

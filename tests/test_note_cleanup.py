@@ -38,8 +38,8 @@ from app.routers.notes import cleanup_empty_notes  # noqa: E402
 Base.metadata.create_all(bind=engine)
 
 
-def _note(db, title="", content="", is_pinned=False, is_draft=True):
-    n = Note(title=title, content=content, is_pinned=is_pinned, is_draft=is_draft)
+def _note(db, title="", content="", is_pinned=False):
+    n = Note(title=title, content=content, is_pinned=is_pinned)
     db.add(n)
     db.commit()
     db.refresh(n)
