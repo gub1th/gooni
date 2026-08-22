@@ -11,12 +11,10 @@ import { BubbleMenu } from "@tiptap/react/menus";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import {
-  Bold as BoldIcon, Italic as ItalicIcon, Strikethrough, Code as CodeIcon,
-  Heading1, Heading2,
   Trash2, Pin as PinIcon, Pencil as PencilIcon,
-  StickyNote, CheckCircle2, Droplet,
   ArrowLeftToLine, ArrowRightToLine, ArrowUpToLine, ArrowDownToLine,
   Columns3, Rows3, Heading as HeadingIcon, Trash,
+  AlarmClock,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
@@ -29,17 +27,18 @@ import { ToggleBlock } from "./ToggleBlockExtension";
 import { OutlinePanel } from "./OutlinePanel";
 import { NoteCard } from "./NoteCardExtension";
 import { NoteMention } from "./note-mention";
-import { TextColor, TEXT_COLOR_PALETTE } from "./TextColorExtension";
+import { TextColor } from "./TextColorExtension";
 import { useNoteCardStyles } from "./noteCardStyles";
 import { splitTitleAndBody } from "./quickNote";
+import { FocusLineDecoration } from "./FocusLineExtension";
 import { SendButton } from "../chat/SendButton";
-import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, autoTitleNote as apiAutoTitleNote, uploadImage as apiUploadImage, uploadAttachment as apiUploadAttachment, fetchOgMetadata, saveLocalNoteDraft, readLocalNoteDraft, clearLocalNoteDraft, type ApiNote, type ApiMemory, type NoteClassifySignals } from "../../services/api";
+import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, autoTitleNote as apiAutoTitleNote, uploadImage as apiUploadImage, uploadAttachment as apiUploadAttachment, fetchOgMetadata, saveLocalNoteDraft, readLocalNoteDraft, clearLocalNoteDraft, type ApiNote, type ApiMemory, type NoteClassifySignals } from "../../services/api";
 import { NoteMemoriesPanel } from "./NoteMemoriesPanel";
-import { DOMSerializer } from "@tiptap/pm/model";
-import { Archive as ArchiveIcon, ArchiveRestore as ArchiveRestoreIcon, CornerUpRight } from "lucide-react";
+import { Archive as ArchiveIcon, ArchiveRestore as ArchiveRestoreIcon } from "lucide-react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { useDraftVersionStore } from "../../stores/useDraftVersionStore";
+import { useFocusSessionStore, isAccruingFocus } from "../../stores/useFocusSessionStore";
 import { Tooltip } from "../Tooltip";
 import { frostInk as ctok } from "../../ui";
 
@@ -64,6 +63,24 @@ type Variant = "full" | "embedded" | "ambient";
 // composer takes the key.
 function suggestionPopupOpen(): boolean {
   return !!document.querySelector('[data-tippy-root] [data-state="visible"]');
+}
+
+// A focus session's title is a row in the `focus_sessions` table AND a
+// dashboard header — capped well short of a paragraph so it reads as a task
+// name everywhere it appears. 100 chars ≈ a long sentence; long enough that
+// an ordinary selection is never visibly cut, short enough that pasting three
+// paragraphs of selected prose doesn't become the title.
+const FOCUS_TITLE_MAX_CHARS = 100;
+
+/** Selected text → a single-line focus-session title: collapse whitespace/
+ * newlines, trim, cap. `null` when the selection has no real text (only
+ * whitespace, or an image/figure with no textual content). */
+function collapseFocusTitle(raw: string): string | null {
+  const collapsed = raw.replace(/\s+/g, " ").trim();
+  if (!collapsed) return null;
+  return collapsed.length > FOCUS_TITLE_MAX_CHARS
+    ? collapsed.slice(0, FOCUS_TITLE_MAX_CHARS).trimEnd() + "…"
+    : collapsed;
 }
 
 // Block image insertion helper. Always trails the image with an empty
@@ -419,6 +436,29 @@ function useEditorStyles() {
       /* (Hover glow removed — the warm-yellow pointer-tracking light on the
          embedded quick-note input was too busy. Class stays on the element
          for layout-ordering purposes but has no visual effect now.) */
+      /* Running-focus-session line decoration (FocusLineExtension). Inline
+         so it sits IN the text flow — icon first, timer last, same font/
+         spacing as the surrounding line, nothing else about the line
+         changes. On a list item this lands after the browser's own
+         ::marker without any special-casing: the marker is a pseudo-
+         element on the <li>, entirely outside whatever is first inside
+         the paragraph it wraps. */
+      .gooni-focus-line-icon,
+      .gooni-focus-line-timer {
+        display: inline-flex;
+        align-items: center;
+        vertical-align: -1px;
+        color: var(--gooni-fi-accent, #4ADE80);
+        user-select: none;
+      }
+      .gooni-focus-line-icon { margin-right: 6px; }
+      .gooni-focus-line-timer {
+        margin-left: 8px;
+        font-variant-numeric: tabular-nums;
+        font-size: 0.85em;
+        font-weight: 600;
+        letter-spacing: 0.2px;
+      }
     `;
   }, []);
 }
@@ -622,12 +662,18 @@ export function NoteEditor({
   const [localTags, setLocalTags] = useState<string[]>(activeNote?.tags ?? []);
   const [newTagDraft, setNewTagDraft] = useState("");
   const [tagInputOpen, setTagInputOpen] = useState(false);
-  // Guard against extract-spam — Daniel clicked Extract 6× during a
-  // network stall and got 4 dupe children (PR #244 postmortem). Backend
-  // also dedups within 30s, but the UI lock prevents the cascade of
-  // dependent fetches (notes / pinned / drafts / children) that the
-  // duplicate clicks triggered.
-  const [extractInFlight, setExtractInFlight] = useState(false);
+  // Guard against Focus-spam — same shape as the old extract-spam guard:
+  // disable the button while the create-session round trip is in flight so a
+  // double click can't fire two sessions (the second would just end the
+  // first per the server's own lifecycle rule, but there's no reason to make
+  // two network calls to get there).
+  const [focusStarting, setFocusStarting] = useState(false);
+  // Which server session id the inline decoration is currently anchored to.
+  // `null` means nothing is tracked — the subscribe effect below no-ops
+  // until this is set, and it's reset whenever the note switches (a fresh
+  // editor instance has fresh plugin state, so any tracked id from the
+  // previous note is meaningless here).
+  const focusLineSessionIdRef = useRef<number | null>(null);
   // Parent note title cache — populated when the active note has a
   // parent_note_id so the back-pill can render the actual title instead
   // of "↑ from #42". Keyed by parent id so switching notes doesn't show
@@ -824,7 +870,9 @@ export function NoteEditor({
     {
       extensions: [
         // Limit heading levels to 1 + 2 — note bodies don't need a 6-level
-        // outline depth and the bubble-menu surface only exposes these two.
+        // outline depth. Reachable via the slash command menu; the
+        // selection BubbleMenu no longer offers formatting at all (see its
+        // comment below — it's a single Focus action now).
         StarterKit.configure({ heading: { levels: [1, 2] } }),
         Figure,
         Attachment,
@@ -841,6 +889,7 @@ export function NoteEditor({
         NoteCard,
         TextColor,
         ToggleBlock,
+        FocusLineDecoration,
       ],
       content: ambient ? (initialContent ?? "") : (activeNote?.content ?? ""),
       // Embedded variant intentionally does NOT autofocus — focus
@@ -975,8 +1024,7 @@ export function NoteEditor({
       const id = Number(chip.getAttribute("data-note-id") || "");
       if (!id) return;
       // Persist any pending edits before yanking the active note out from
-      // under us — same pattern handleExtractToChildNote uses (line 672).
-      // The prior `void save()` was fire-and-forget: if the user typed
+      // under us. The prior `void save()` was fire-and-forget: if the user typed
       // something into this note and then clicked a chip, the navigate
       // raced the PATCH and the error pill (if save failed) would land
       // on the destination note's editor instead of this one.
@@ -1027,64 +1075,72 @@ export function NoteEditor({
   }, [editor]);
 
   /**
-   * BubbleMenu "↗ Extract" handler — carve the current selection out of the
-   * parent note into a new child note and replace the selection with a
-   * NoteLink chip. POSTing the selected HTML before mutating the parent
-   * editor avoids a race where the user keeps typing during the network
-   * round-trip and the autosave clobbers the chip insert.
+   * BubbleMenu "Focus" handler — the selection popup's one remaining action.
+   * Starts a real server-side focus session titled with the selected text
+   * (collapsed to one line, capped — see FOCUS_TITLE_MAX_CHARS) and NO
+   * promise link: a session started from a note selection is simply a
+   * promise-less session, the exact shape Claude already starts one with
+   * over MCP (`start_focus_session`). `POST /focus/sessions` ends whatever
+   * ran before it server-side, in the same call — nothing to orchestrate
+   * here for that part.
    *
-   * After the chip is in, we save the parent synchronously and jump the
-   * editor to the new child — Daniel's mental model is "extract = pop a
-   * draft out into its own note and continue writing there." Leaving the
-   * user on the parent with just a chip felt like it half-shipped.
+   * The anchor for the inline decoration is captured BEFORE the network
+   * round-trip (selection can move/collapse while awaiting), and is always
+   * the START of the enclosing textblock's content — see FocusLineExtension
+   * for why that one position works for a plain paragraph and a list item
+   * alike.
    */
-  async function handleExtractToChildNote() {
+  async function handleStartFocusFromSelection() {
     if (!editor || editor.isDestroyed) return;
-    if (!activeNoteId || activeNoteId <= 0) return;
-    if (extractInFlight) return; // ignore re-clicks while the network call is pending
-    const parentId = activeNoteId;
-    const { from, to } = editor.state.selection;
+    if (focusStarting) return;
+    const { from, to, $from } = editor.state.selection;
     if (from === to) return;
-    const slice = editor.state.doc.slice(from, to);
-    const fragment = DOMSerializer.fromSchema(editor.state.schema).serializeFragment(slice.content);
-    const tmp = document.createElement("div");
-    tmp.appendChild(fragment);
-    const selectedHtml = tmp.innerHTML.trim();
-    if (!selectedHtml) return;
-    setExtractInFlight(true);
-    let child: ApiNote | null = null;
+    const title = collapseFocusTitle(editor.state.doc.textBetween(from, to, " ", " "));
+    if (!title) return;
+    let depth = $from.depth;
+    while (depth > 0 && !$from.node(depth).isTextblock) depth--;
+    if (!$from.node(depth).isTextblock) return;
+    const anchorPos = $from.start(depth);
+
+    setFocusStarting(true);
     try {
-      child = await apiExtractToChildNote(parentId, selectedHtml);
+      const session = await useFocusSessionStore.getState().start(null, title);
+      if (session && editorRef.current && !editorRef.current.isDestroyed) {
+        focusLineSessionIdRef.current = session.id;
+        editorRef.current.commands.setFocusLineAt(anchorPos, session.startedAt);
+      }
     } catch {
-      setExtractInFlight(false);
-      return; // silent — selection stays intact
+      // Session failed to start — no decoration to show, nothing to undo.
+    } finally {
+      setFocusStarting(false);
     }
-    if (!child) {
-      setExtractInFlight(false);
-      return;
-    }
-    const labelSource = (child.excerpt_anchor || child.title || tmp.textContent || "note").trim();
-    const label = labelSource.length > 40 ? labelSource.slice(0, 40) + "…" : labelSource;
-    editor
-      .chain()
-      .focus()
-      .deleteRange({ from, to })
-      .insertContent({ type: "noteLink", attrs: { noteId: child.id, label } })
-      .run();
-    bodyRef.current = editor.getHTML();
-    hasChanges.current = true;
-    // Persist parent's chip insertion BEFORE swapping notes — otherwise the
-    // pending debounced save fires after activeNoteId flips and writes the
-    // parent's content to the wrong row. await save() here is the only way
-    // to guarantee the chip lands on the parent row.
-    await save();
-    // Make sure the freshly-created child is in the store before selectNote
-    // reaches for it (otherwise the editor briefly renders an empty note).
-    await refetchNote(child.id).catch(() => {});
-    selectNote(child.id);
-    navigate({ to: "/", search: { note: child.id, conv: undefined, audit: undefined, segment: undefined, view: undefined } });
-    setExtractInFlight(false);
   }
+
+  // The inline decoration tracks ONE session by id. Whenever the store's live
+  // session stops being that session — it ended, paused, or a DIFFERENT
+  // session took over (started elsewhere, e.g. `/focus` or Claude over MCP)
+  // — drop it. This is the "never leave a stale timer ticking" rule: the
+  // store is kept in sync by the app-wide poll (`useFocusSessionSync`), so a
+  // session ended from `/focus` reaches this editor without it polling
+  // anything itself.
+  useEffect(() => {
+    return useFocusSessionStore.subscribe((state) => {
+      const trackedId = focusLineSessionIdRef.current;
+      if (trackedId == null) return;
+      const s = state.session;
+      if (!isAccruingFocus(s) || s?.id !== trackedId) {
+        focusLineSessionIdRef.current = null;
+        editorRef.current?.commands.clearFocusLine();
+      }
+    });
+  }, []);
+
+  // A fresh editor instance (note switch) has fresh plugin state — nothing to
+  // track from the previous note. Reset so the subscribe effect above can't
+  // act on a stale id against the new editor.
+  useEffect(() => {
+    focusLineSessionIdRef.current = null;
+  }, [activeNoteId]);
 
   async function handleSubmit() {
     if (!editor || editor.isEmpty) return;
@@ -2390,189 +2446,64 @@ export function NoteEditor({
                         "0 8px 22px rgb(var(--gooni-tint, 0 0 0) / 0.14), 0 1px 3px rgb(var(--gooni-tint, 0 0 0) / 0.10), inset 0 0 0 0.5px rgb(var(--gooni-tint, 0 0 0) / 0.06)",
                     }}
                   >
-                    {/* H1/H2 leading the menu so highlighted text can be
-                        promoted to a heading without remembering the slash
-                        command. Followed by inline marks. Heading levels are
-                        capped at [1, 2] in the StarterKit config above. */}
-                    {([
-                      { Icon: Heading1,      title: "Heading 1",   action: () => editor.chain().focus().toggleHeading({ level: 1 }).run(), active: editor.isActive("heading", { level: 1 }) },
-                      { Icon: Heading2,      title: "Heading 2",   action: () => editor.chain().focus().toggleHeading({ level: 2 }).run(), active: editor.isActive("heading", { level: 2 }) },
-                      { Icon: BoldIcon,      title: "Bold",        action: () => editor.chain().focus().toggleBold().run(),    active: editor.isActive("bold") },
-                      { Icon: ItalicIcon,    title: "Italic",      action: () => editor.chain().focus().toggleItalic().run(),  active: editor.isActive("italic") },
-                      { Icon: Strikethrough, title: "Strike",      action: () => editor.chain().focus().toggleStrike().run(),  active: editor.isActive("strike") },
-                      { Icon: CodeIcon,      title: "Inline code", action: () => editor.chain().focus().toggleCode().run(),    active: editor.isActive("code") },
-                      // Card block — wraps the selected paragraphs in one
-                      // full-width pastel panel. Clicking again lifts them
-                      // back out. CheckCircle2 toggles checked; Droplet cycles
-                      // color (cmd+click on the card body also toggles check).
-                      {
-                        Icon: StickyNote,
-                        title: editor.isActive("noteCard") ? "Remove card" : "Card",
-                        action: () => editor.chain().focus().toggleNoteCard().run(),
-                        active: editor.isActive("noteCard"),
-                      },
-                      {
-                        Icon: CheckCircle2,
-                        title: editor.isActive("noteCard", { checked: true })
-                          ? "Mark card undone"
-                          : "Mark card done",
-                        action: () =>
-                          editor
-                            .chain()
-                            .focus()
-                            .setNoteCardChecked(!editor.isActive("noteCard", { checked: true }))
-                            .run(),
-                        active: editor.isActive("noteCard", { checked: true }),
-                        // Only meaningful when cursor is inside an existing card.
-                        hidden: !editor.isActive("noteCard"),
-                      },
-                      {
-                        // Cycle card color blue ↔ pink. Only shown inside a card.
-                        Icon: Droplet,
-                        title: "Cycle card color",
-                        action: () => editor.chain().focus().cycleNoteCardColor().run(),
-                        active: false,
-                        hidden: !editor.isActive("noteCard"),
-                      },
-                    ] as const).filter((item) => !("hidden" in item && item.hidden)).map((item) => (
-                      <button
-                        key={item.title}
-                        title={item.title}
-                        onMouseDown={(e) => { e.preventDefault(); item.action(); }}
-                        style={{
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          width: 30, height: 30,
-                          padding: 0,
-                          borderRadius: 8,
-                          border: "none",
-                          background: item.active ? ctok.hover : "transparent",
-                          color: item.active ? "var(--gooni-text, #0F172A)" : "var(--gooni-muted, #475569)",
-                          cursor: "pointer",
-                          transition: "background 0.12s, color 0.12s",
-                        }}
-                        onMouseEnter={(e) => {
-                          if (!item.active) (e.currentTarget as HTMLButtonElement).style.background = ctok.hover;
-                        }}
-                        onMouseLeave={(e) => {
-                          if (!item.active) (e.currentTarget as HTMLButtonElement).style.background = "transparent";
-                        }}
-                      >
-                        <item.Icon size={15} strokeWidth={1.9} />
-                      </button>
-                    ))}
-                    {/* Text-color swatches. Minimal: a row of small filled
-                        circles + a reset dot. Click applies via the TextColor
-                        mark. Active color shows a ring. Always visible —
-                        Daniel didn't want a popover, wants the picker flat
-                        in the toolbar. */}
-                    <span style={{ width: 1, height: 18, background: ctok.border, margin: "0 4px" }} />
-                    {TEXT_COLOR_PALETTE.map((sw) => {
-                      const isActive = sw.value == null
-                        ? !editor.isActive("textColor")
-                        : editor.isActive("textColor", { color: sw.value });
-                      return (
-                        <button
-                          key={sw.name}
-                          title={sw.label}
-                          onMouseDown={(e) => {
-                            e.preventDefault();
-                            editor.chain().focus().setTextColor(sw.value).run();
-                          }}
+                    {/* The selection popup is a SINGLE action now: start a
+                        focus session titled with the selection. Formatting
+                        (H1/H2, bold/italic/strike/code), Card + its
+                        done/color controls, and Extract all lived here and
+                        are now unreachable from the UI — a deliberate,
+                        captain-approved trade, not an oversight. No overflow
+                        menu, no "…" — the popup says what it does. */}
+                    <button
+                      title={focusStarting ? "Starting…" : "Focus on this"}
+                      disabled={focusStarting}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        if (focusStarting) return;
+                        void handleStartFocusFromSelection();
+                      }}
+                      style={{
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        gap: 6,
+                        height: 30,
+                        padding: "0 12px",
+                        borderRadius: 8,
+                        border: "none",
+                        background: "transparent",
+                        color: focusStarting ? ctok.disabled : ctok.muted,
+                        cursor: focusStarting ? "wait" : "pointer",
+                        fontSize: 12.5,
+                        fontWeight: 500,
+                        transition: "background 0.12s, color 0.12s",
+                        opacity: focusStarting ? 0.7 : 1,
+                      }}
+                      onMouseEnter={(e) => {
+                        if (focusStarting) return;
+                        e.currentTarget.style.background = ctok.hover;
+                        e.currentTarget.style.color = ctok.text;
+                      }}
+                      onMouseLeave={(e) => {
+                        if (focusStarting) return;
+                        e.currentTarget.style.background = "transparent";
+                        e.currentTarget.style.color = ctok.muted;
+                      }}
+                    >
+                      {focusStarting ? (
+                        // CSS-only spinner — matches the rest of the editor
+                        // chrome's no-extra-deps rule. Border-top animates
+                        // around a transparent rest of the ring.
+                        <span
                           style={{
-                            display: "inline-flex", alignItems: "center", justifyContent: "center",
-                            width: 22, height: 22,
-                            padding: 0,
-                            borderRadius: "50%",
-                            border: "none",
-                            background: "transparent",
-                            cursor: "pointer",
+                            width: 12, height: 12, borderRadius: "50%",
+                            border: "1.5px solid rgb(var(--gooni-tint, 0 0 0) / 0.15)",
+                            borderTopColor: "rgb(var(--gooni-tint, 0 0 0) / 0.55)",
+                            animation: "gooni-spin 0.7s linear infinite",
                           }}
-                        >
-                          <span
-                            style={{
-                              display: "inline-block",
-                              width: 14, height: 14, borderRadius: "50%",
-                              background: sw.value ?? "transparent",
-                              border: sw.value
-                                ? (isActive ? `2px solid ${ctok.text}` : `0.5px solid ${ctok.border}`)
-                                : `1.5px solid ${ctok.muted}`,
-                              boxSizing: "border-box",
-                              // Diagonal slash on the "default" (null) swatch so
-                              // it reads as "clear" not "white".
-                              position: "relative",
-                            }}
-                          >
-                            {sw.value == null && (
-                              <span
-                                style={{
-                                  position: "absolute", left: "50%", top: "50%",
-                                  transform: "translate(-50%, -50%) rotate(-45deg)",
-                                  width: 12, height: 1.5, background: ctok.muted,
-                                }}
-                              />
-                            )}
-                          </span>
-                        </button>
-                      );
-                    })}
-                    {/* Vertical separator before the structural action — keeps
-                        the formatting marks visually grouped. */}
-                    {activeNoteId && activeNoteId > 0 && (
-                      <>
-                        <span style={{ width: 1, height: 18, background: ctok.border, margin: "0 4px" }} />
-                        <button
-                          title={extractInFlight ? "Extracting…" : "Extract to new linked note"}
-                          disabled={extractInFlight}
-                          onMouseDown={(e) => {
-                            e.preventDefault();
-                            if (extractInFlight) return;
-                            void handleExtractToChildNote();
-                          }}
-                          style={{
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            gap: 4,
-                            height: 30,
-                            padding: "0 10px",
-                            borderRadius: 8,
-                            border: "none",
-                            background: "transparent",
-                            color: extractInFlight ? ctok.disabled : ctok.muted,
-                            cursor: extractInFlight ? "wait" : "pointer",
-                            fontSize: 12,
-                            fontWeight: 500,
-                            transition: "background 0.12s, color 0.12s",
-                            opacity: extractInFlight ? 0.7 : 1,
-                          }}
-                          onMouseEnter={(e) => {
-                            if (extractInFlight) return;
-                            e.currentTarget.style.background = ctok.hover;
-                            e.currentTarget.style.color = ctok.text;
-                          }}
-                          onMouseLeave={(e) => {
-                            if (extractInFlight) return;
-                            e.currentTarget.style.background = "transparent";
-                            e.currentTarget.style.color = ctok.muted;
-                          }}
-                        >
-                          {extractInFlight ? (
-                            // CSS-only spinner — matches the rest of the editor
-                            // chrome's no-extra-deps rule. Border-top animates
-                            // around a transparent rest of the ring.
-                            <span
-                              style={{
-                                width: 12, height: 12, borderRadius: "50%",
-                                border: "1.5px solid rgb(var(--gooni-tint, 0 0 0) / 0.15)",
-                                borderTopColor: "rgb(var(--gooni-tint, 0 0 0) / 0.55)",
-                                animation: "gooni-spin 0.7s linear infinite",
-                              }}
-                            />
-                          ) : (
-                            <CornerUpRight size={13} strokeWidth={1.9} />
-                          )}
-                          {extractInFlight ? "Extracting…" : "Extract"}
-                        </button>
-                      </>
-                    )}
+                        />
+                      ) : (
+                        <AlarmClock size={15} strokeWidth={1.9} />
+                      )}
+                      Focus
+                    </button>
                   </BubbleMenu>
                 )}
 
