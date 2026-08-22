@@ -83,9 +83,13 @@ def get_active_focus_session(db: Session = Depends(get_db)):
 
 
 @router.get("/focus/sessions")
-def list_focus_sessions(limit: int = 20, db: Session = Depends(get_db)):
+def list_focus_sessions(limit: int = 20, activity: bool = False, db: Session = Depends(get_db)):
+    """Recent sessions, newest first. `?activity=1` folds the sensor
+    breakdown into every row — the recent-sessions list on `/focus` needs
+    each row's focus score, and asking per-row after the fact would be N
+    extra requests for a list that's already bounded by `limit`."""
     rows = focus_session_service.recent(db, limit=limit)
-    return {"sessions": [focus_session_service.serialize(db, s) for s in rows]}
+    return {"sessions": [_payload(db, s, with_activity=activity) for s in rows]}
 
 
 @router.get("/focus/sessions/{session_id}")
@@ -109,9 +113,9 @@ def get_focus_session_activity(session_id: int, db: Session = Depends(get_db)):
 
 @router.patch("/focus/sessions/{session_id}")
 def patch_focus_session(session_id: int, body: dict, db: Session = Depends(get_db)):
-    """Style / target / kept. Deliberately NOT the lifecycle — a state change
-    goes through its own verb so "pause" can never arrive as a field write that
-    skips closing the open run."""
+    """Style / target / kept / title. Deliberately NOT the lifecycle — a state
+    change goes through its own verb so "pause" can never arrive as a field
+    write that skips closing the open run."""
     s = _require(db, session_id)
     try:
         if "style" in body or "target_ms" in body:
@@ -120,6 +124,8 @@ def patch_focus_session(session_id: int, body: dict, db: Session = Depends(get_d
             )
         if "kept" in body:
             s = focus_session_service.set_kept(db, s, bool(body.get("kept")))
+        if "title" in body:
+            s = focus_session_service.set_title(db, s, body.get("title") or "")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return _payload(db, s)

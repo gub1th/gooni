@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { FONT } from "../../ui";
 import { FOCUS_PALETTES } from "./focusPalette";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
@@ -54,6 +54,9 @@ export interface RecapTimelineSegment {
 }
 
 export interface SessionRecapData {
+  /** The session's own row id — what a rename PATCHes and what re-addresses
+   *  this exact dashboard after a reload (see `useFocusRecapStore`). */
+  id: number;
   title: string;
   totalMinutes: number;
   /** wall-clock length of the whole sitting, focus + pauses */
@@ -183,12 +186,37 @@ function Row({
 interface Props {
   recap: SessionRecapData;
   onClose: () => void;
+  /** Persist a rename. Omitted entirely (rather than a no-op) disables the
+   *  edit affordance — there is no case today where the title should be
+   *  read-only, but a future embed (a share view, say) can opt out by simply
+   *  not passing it, rather than the component guessing from context. */
+  onRename?: (title: string) => void;
 }
 
-export function FocusSessionRecap({ recap, onClose }: Props) {
+export function FocusSessionRecap({ recap, onClose, onRename }: Props) {
   const theme = useGooniThemeStore((s) => s.theme);
   const pal = FOCUS_PALETTES[theme];
   const [enlarged, setEnlarged] = useState<SessionEvidence | null>(null);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(recap.title);
+
+  // Re-sync the draft whenever the session underneath changes (switching
+  // between two past sessions while the dashboard stays mounted, or the
+  // parent applying an optimistic/reverted rename) — but not while the
+  // person is mid-edit, which would blow away an unsent keystroke.
+  useEffect(() => {
+    if (!editingTitle) setTitleDraft(recap.title);
+  }, [recap.id, recap.title, editingTitle]);
+
+  function commitTitle() {
+    const next = titleDraft.trim();
+    setEditingTitle(false);
+    if (!next || next === recap.title) {
+      setTitleDraft(recap.title);
+      return;
+    }
+    onRename?.(next);
+  }
 
   const focusedMs = recap.totalMinutes * 60_000;
   const pausedMinutes = Math.max(0, (recap.spanMs - focusedMs) / 60_000);
@@ -257,7 +285,38 @@ export function FocusSessionRecap({ recap, onClose }: Props) {
             <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.14em", color: pal.ink3 }}>
               SESSION ENDED
             </div>
-            <div style={{ fontSize: 24, fontWeight: 500, marginTop: 4 }}>{recap.title}</div>
+            {editingTitle ? (
+              <input
+                autoFocus
+                value={titleDraft}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                onBlur={commitTitle}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                  else if (e.key === "Escape") {
+                    setTitleDraft(recap.title);
+                    setEditingTitle(false);
+                  }
+                }}
+                style={{
+                  fontSize: 24, fontWeight: 500, marginTop: 4, width: "100%",
+                  fontFamily: FONT, color: pal.ink, background: "transparent",
+                  border: "none", borderBottom: `1px solid ${pal.rule}`, padding: 0,
+                  outline: "none",
+                }}
+              />
+            ) : (
+              <div
+                onClick={onRename ? () => setEditingTitle(true) : undefined}
+                title={onRename ? "click to rename" : undefined}
+                style={{
+                  fontSize: 24, fontWeight: 500, marginTop: 4,
+                  cursor: onRename ? "text" : undefined,
+                }}
+              >
+                {recap.title}
+              </div>
+            )}
             <div style={{ fontSize: 14, color: pal.ink2, marginTop: 2 }}>
               {/* Deliberately NOT a focus percentage — that's the share of the
                   sitting the clock was running, a fact about the timer. The

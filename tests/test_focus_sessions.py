@@ -37,6 +37,11 @@ The load-bearing assertions:
      did.
  10. NO NEW TRACKABLE. The lifecycle mints the one `focus` rollup and the
      camera's own walled-off rows; the activity read writes nothing at all.
+ 11. A MANUAL RENAME WINS. `serialize()` normally prefers the linked
+     Promise's live text over the session's own snapshot; a human rename must
+     override that, survive a pause/resume/stop cycle, and never touch the
+     Promise's own text — all without a new column or a migration (the flag
+     rides in the same free-form `segments` Text the run list already uses).
 
 Usage:
   source venv/bin/activate
@@ -484,7 +489,57 @@ def test_no_new_storage(db):
     check("focus" in after, "the one `focus` rollup exists")
 
 
-# ── 9. pure helpers ──────────────────────────────────────────────────────────
+# ── 9. rename wins over the linked promise's live text ──────────────────────
+
+
+def test_rename_wins_over_promise(db):
+    print("\na manual rename wins over the linked commitment's live text")
+    reset(db)
+    p = make_promise(db, "prep interview")
+    s = focus_session_service.start(db, title="prep interview", promise_id=p.id, now=at(DAY, 9, 0))
+
+    # Before any rename, `serialize()` still prefers the live Promise text —
+    # this is the behaviour the rename must override, not remove.
+    check(
+        focus_session_service.serialize(db, s)["title"] == "prep interview",
+        "unrenamed: the session shows the promise's current text",
+    )
+
+    renamed = focus_session_service.set_title(db, s, "mock interview — round 2")
+    check(renamed.title == "mock interview — round 2", "the row's own title is updated")
+    check(
+        focus_session_service.serialize(db, renamed)["title_is_manual"] is True,
+        "serialize reports the rename as manual",
+    )
+
+    # The commitment's text changes AFTER the rename — the whole point of the
+    # captain's call: the session must not silently revert to it.
+    p.summary = "prep interview — take 2"
+    db.commit()
+    check(
+        focus_session_service.serialize(db, renamed)["title"] == "mock interview — round 2",
+        "the manual rename still wins after the promise text changes",
+    )
+
+    # The flag survives a pause/resume/stop cycle — those overwrite `segments`
+    # with a fresh run list and must not silently drop it along the way.
+    focus_session_service.pause(db, renamed, now=at(DAY, 9, 10))
+    check(
+        focus_session_service.serialize(db, renamed)["title"] == "mock interview — round 2",
+        "the rename survives a pause",
+    )
+    focus_session_service.resume(db, renamed, now=at(DAY, 9, 12))
+    focus_session_service.stop(db, renamed, now=at(DAY, 9, 20))
+    check(
+        focus_session_service.serialize(db, renamed)["title"] == "mock interview — round 2",
+        "the rename survives stop",
+    )
+
+    # Renaming the SESSION must never touch the underlying commitment.
+    check(p.summary == "prep interview — take 2", "the promise's own text is untouched")
+
+
+# ── 10. pure helpers ─────────────────────────────────────────────────────────
 
 
 def test_pure_classify():
@@ -542,6 +597,7 @@ def main():
     test_window_only_read_is_unchanged(db)
     test_no_classifier(db)
     test_no_new_storage(db)
+    test_rename_wins_over_promise(db)
 
     db.close()
     print()
