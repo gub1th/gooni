@@ -27,13 +27,20 @@ ENTRY_SUMMARIZE_THRESHOLD = 2000
 # The build helper drops any entry whose tool isn't actually registered
 # so stale entries don't bloat the prompt.
 _CREATE_TOOL_KINDS: dict[str, str] = {
-    "save_memory": "Memory",
     "add_note": "Note",
-    "request_feature": "Note",
     "create_calendar_event": "CalendarEvent",
     "log_trackable_entry": "TrackableEntry",  # explicit log tool (fitness auto-writer cut)
 }
-_ROUTER_CREATED_KINDS: tuple[str, ...] = ("Promise",)
+# Kinds the EXTRACTOR creates, not a tool. `Memory` moved here when
+# `save_memory` was un-registered from the chat loop: the router still writes
+# memories (reconciled off-thread), so deriving the list from the tool
+# registry alone would have told the model it cannot create a Memory while
+# the pipeline kept creating them — the exact kind of prompt/reality gap this
+# block exists to close.
+#
+# `Note` is not listed here even though the features handler writes one:
+# `add_note` already puts Note in the list, and a duplicate entry is dropped.
+_ROUTER_CREATED_KINDS: tuple[str, ...] = ("Promise", "Memory")
 
 
 def _build_object_kinds_block() -> str:

@@ -6,7 +6,7 @@ import {
   fetchNote as apiFetchNote,
   type ApiNote,
   patchNote as apiPatchNote,
-  fetchSpaceNotes,
+  fetchAllNotes,
 } from "../services/api";
 
 // One-shot cleanup of the v2 persist key. v2 persisted full note bodies
@@ -45,25 +45,25 @@ function isEmptyNote(note: ApiNote): boolean {
 // within a minute. Callers that need fresh-on-demand pass `{ force: true }`.
 const NOTES_TTL_MS = 60_000;
 
+// The `spaceId` dimension is GONE. Spaces died in the v2 nuke; every call
+// site had been passing the literal "general" ever since, so `notes` was a
+// dictionary with exactly one key threaded through ~15 signatures. Folders
+// replaced Spaces as the grouping (a real FK on the note, see
+// services/note_service/folders.py) and they narrow the list at the SERVER,
+// not by bucketing the store.
 interface NotesContentState {
-  // Space selection (replaces notesStore)
-  selectedSpaceId: string | null;
-  selectSpace: (id: string | null) => void;
-
-  // Notes per space
-  notes: Record<string, ApiNote[]>;       // keyed by spaceId string
-  // Per-space wall-clock ms of the last successful fetch. Used to gate
-  // loadNotes against the TTL so we don't slam the API on every space
-  // switch. NOT persisted — restoring with stale timestamps would let a
-  // ten-minute-old reload skip the next refetch.
-  lastLoaded: Record<string, number>;
+  notes: ApiNote[];
+  // Wall-clock ms of the last successful fetch. Gates loadNotes against the
+  // TTL so we don't slam the API. NOT persisted — restoring with a stale
+  // timestamp would let a ten-minute-old reload skip the next refetch.
+  lastLoaded: number | null;
   activeNoteId: number | null;
-  isDirty: boolean;                        // true if active note has unsaved/unmemorized changes
-  loadNotes: (spaceId: string, opts?: { force?: boolean }) => Promise<void>;
-  createNote: (spaceId: string) => Promise<ApiNote | null>;
+  isDirty: boolean;                        // true if active note has unsaved changes
+  loadNotes: (opts?: { force?: boolean }) => Promise<void>;
+  createNote: () => Promise<ApiNote | null>;
   updateNote: (id: number, title: string, content: string) => Promise<void>;
   refetchNote: (id: number) => Promise<void>;
-  deleteNote: (id: number, spaceId: string) => Promise<void>;
+  deleteNote: (id: number) => Promise<void>;
   selectNote: (id: number | null) => void;
   markDirty: () => void;
 }
@@ -71,42 +71,27 @@ interface NotesContentState {
 export const useNotesContentStore = create<NotesContentState>()(
   persist(
     (set, get) => ({
-      selectedSpaceId: null,
-      notes: {},
-      lastLoaded: {},
+      notes: [],
+      lastLoaded: null,
       activeNoteId: null,
       isDirty: false,
 
-      selectSpace: (id: string | null) => {
-        // Route through selectNote(null) first so the empty-note cleanup runs
-        // when the user navigates spaces with a blank note open.
-        get().selectNote(null);
-        set({ selectedSpaceId: id });
-      },
-
-      loadNotes: async (spaceId: string, opts?: { force?: boolean }) => {
+      loadNotes: async (opts?: { force?: boolean }) => {
         const state = get();
-        const cached = state.notes[spaceId];
-        const stamp = state.lastLoaded[spaceId];
-        const fresh = stamp != null && Date.now() - stamp < NOTES_TTL_MS;
-        // Cache hit AND not stale AND caller didn't force a refresh —
-        // skip the round-trip entirely. The persisted cache makes this
-        // win across reloads too (notes show up before any fetch fires).
-        if (cached && fresh && !opts?.force) return;
+        const fresh = state.lastLoaded != null && Date.now() - state.lastLoaded < NOTES_TTL_MS;
+        // Cache hit AND not stale AND caller didn't force — skip the round
+        // trip. The persisted cache wins across reloads too (notes show up
+        // before any fetch fires).
+        if (state.notes.length && fresh && !opts?.force) return;
         try {
-          const fetched = await fetchSpaceNotes(
-            spaceId === "general" ? "general" : parseInt(spaceId)
-          );
-          set((s) => ({
-            notes: { ...s.notes, [spaceId]: fetched },
-            lastLoaded: { ...s.lastLoaded, [spaceId]: Date.now() },
-          }));
+          const fetched = await fetchAllNotes();
+          set({ notes: fetched, lastLoaded: Date.now() });
         } catch (e) {
           console.error("loadNotes error:", e);
         }
       },
 
-      createNote: async (spaceId: string) => {
+      createNote: async () => {
         const tempId = -Date.now();
         const now = new Date().toISOString();
         const optimistic: ApiNote = {
@@ -122,29 +107,22 @@ export const useNotesContentStore = create<NotesContentState>()(
         };
         // Go through selectNote so the prev note gets memorized if dirty
         get().selectNote(tempId);
-        set((s) => ({
-          notes: { ...s.notes, [spaceId]: [optimistic, ...(s.notes[spaceId] ?? [])] },
-        }));
+        set((s) => ({ notes: [optimistic, ...s.notes] }));
         try {
-          const real = await apiCreateNote(
-            spaceId === "general" ? "general" : parseInt(spaceId)
-          );
-          set((s) => {
-            const existing = s.notes[spaceId] ?? [];
-            // If a concurrent loadNotes cleared the optimistic entry, still add the real note
-            const list = existing.some((n) => n.id === tempId)
-              ? existing.map((n) => n.id === tempId ? real : n)
-              : [real, ...existing];
-            return { notes: { ...s.notes, [spaceId]: list }, activeNoteId: real.id };
-          });
+          const real = await apiCreateNote("general");
+          set((s) => ({
+            // If a concurrent loadNotes cleared the optimistic entry, still
+            // add the real note rather than dropping it.
+            notes: s.notes.some((n) => n.id === tempId)
+              ? s.notes.map((n) => (n.id === tempId ? real : n))
+              : [real, ...s.notes],
+            activeNoteId: real.id,
+          }));
           return real;
         } catch (e) {
           console.error("createNote error:", e);
           set((s) => ({
-            notes: {
-              ...s.notes,
-              [spaceId]: (s.notes[spaceId] ?? []).filter((n) => n.id !== tempId),
-            },
+            notes: s.notes.filter((n) => n.id !== tempId),
             activeNoteId: null,
           }));
           return null;
@@ -154,13 +132,7 @@ export const useNotesContentStore = create<NotesContentState>()(
       updateNote: async (id: number, title: string, content: string) => {
         set({ isDirty: true });
         const updated = await apiPatchNote(id, { title, content }); // throws on failure
-        set((s) => {
-          const newNotes: Record<string, ApiNote[]> = {};
-          for (const [key, list] of Object.entries(s.notes)) {
-            newNotes[key] = list.map((n) => (n.id === id ? updated : n));
-          }
-          return { notes: newNotes };
-        });
+        set((s) => ({ notes: s.notes.map((n) => (n.id === id ? updated : n)) }));
       },
 
       refetchNote: async (id: number) => {
@@ -177,42 +149,28 @@ export const useNotesContentStore = create<NotesContentState>()(
             // refetch of one note, whether or not it was showing that note.
             // Compounded by the save path firing several store writes per
             // edit (patch → resolve → post-classify refetch).
-            let changed = false;
-            const newNotes: Record<string, ApiNote[]> = {};
-            for (const [key, list] of Object.entries(s.notes)) {
-              const i = list.findIndex((n) => n.id === id);
-              if (i === -1 || list[i] === fresh) {
-                newNotes[key] = list;          // same identity — no re-render
-                continue;
-              }
-              const next = list.slice();
-              next[i] = fresh;
-              newNotes[key] = next;
-              changed = true;
-            }
-            // No bucket held it: return the SAME object so zustand's identity
-            // check short-circuits instead of notifying every subscriber.
-            return changed ? { notes: newNotes } : s;
+            const i = s.notes.findIndex((n) => n.id === id);
+            // Not present, or already this exact object: return the SAME
+            // state so zustand's identity check short-circuits instead of
+            // notifying every subscriber.
+            if (i === -1 || s.notes[i] === fresh) return s;
+            const next = s.notes.slice();
+            next[i] = fresh;
+            return { notes: next };
           });
         } catch {
           // note may have been deleted — ignore
         }
       },
 
-      deleteNote: async (id: number, spaceId: string) => {
-        // Snapshot for rollback. Optimistic: clear from EVERY cached space
-        // (a note deleted from All Notes also belongs to its real space's
-        // cache, and vice versa — leaving it in either causes ghost rows).
+      deleteNote: async (id: number) => {
+        // Snapshot for rollback, then drop it optimistically.
         const snapshot = get().notes;
         const prevActive = get().activeNoteId;
-        set((s) => {
-          const next: Record<string, ApiNote[]> = {};
-          for (const [key, list] of Object.entries(s.notes)) {
-            next[key] = list.filter((n) => n.id !== id);
-          }
-          const activeNoteId = s.activeNoteId === id ? null : s.activeNoteId;
-          return { notes: next, activeNoteId };
-        });
+        set((s) => ({
+          notes: s.notes.filter((n) => n.id !== id),
+          activeNoteId: s.activeNoteId === id ? null : s.activeNoteId,
+        }));
         try {
           await apiDeleteNote(id);
         } catch (e) {
@@ -222,7 +180,6 @@ export const useNotesContentStore = create<NotesContentState>()(
           set({ notes: snapshot, activeNoteId: prevActive });
           throw e;
         }
-        void spaceId; // kept on signature for callers; cache scrub is global now
       },
 
       selectNote: (id: number | null) => {
@@ -231,20 +188,10 @@ export const useNotesContentStore = create<NotesContentState>()(
         // wrote into, drop it instead of leaving an "Untitled" stub on disk.
         // Skip negative ids (optimistic temp note still being created).
         if (prevId != null && prevId !== id && prevId > 0) {
-          const state = get();
-          let prev: ApiNote | undefined;
-          let prevSpaceKey: string | null = null;
-          for (const [key, list] of Object.entries(state.notes)) {
-            const found = list.find((n) => n.id === prevId);
-            if (found) { prev = found; prevSpaceKey = key; break; }
-          }
-          if (prev && prevSpaceKey != null && isEmptyNote(prev)) {
-            const spaceKey = prevSpaceKey;
+          const prev = get().notes.find((n) => n.id === prevId);
+          if (prev && isEmptyNote(prev)) {
             apiDeleteNote(prevId).catch(() => {});
-            set((s) => {
-              const list = (s.notes[spaceKey] ?? []).filter((n) => n.id !== prevId);
-              return { notes: { ...s.notes, [spaceKey]: list } };
-            });
+            set((s) => ({ notes: s.notes.filter((n) => n.id !== prevId) }));
           }
         }
         set({ activeNoteId: id });
@@ -260,9 +207,10 @@ export const useNotesContentStore = create<NotesContentState>()(
       // until list endpoints get cheap enough to fetch every reload.
       // Bumping the key clears stale `gooni-notes-v2` entries on reload.
       name: "gooni-notes-v3",
-      partialize: (s) => ({
-        selectedSpaceId: s.selectedSpaceId,
-      }),
+      // Nothing is persisted any more. `selectedSpaceId` was the last field
+      // here and it only ever held "general". `notes` is deliberately not
+      // persisted (see above), and everything else is per-session.
+      partialize: () => ({}),
     }
   )
 );

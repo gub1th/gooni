@@ -194,7 +194,6 @@ export function Sidebar({ onAllNotes, onSelectNote }: SidebarProps) {
   // consumer — and the save path fires several writes per edit. Zustand's
   // actions are stable identities defined once in the creator, so selecting
   // them individually never triggers a render on its own.
-  const selectSpace = useNotesContentStore((s) => s.selectSpace);
   const loadNotes = useNotesContentStore((s) => s.loadNotes);
   const selectNote = useNotesContentStore((s) => s.selectNote);
   const activeNoteId = useNotesContentStore((s) => s.activeNoteId);
@@ -268,15 +267,13 @@ export function Sidebar({ onAllNotes, onSelectNote }: SidebarProps) {
   }, [recentNotes, pinnedNotes]);
 
   function handleAllNotes() {
-    selectSpace("general");
-    loadNotes("general");
+    loadNotes();
     onAllNotes();
   }
 
   function handleSelectNote(note: ApiNote) {
-    selectSpace("general");
     selectNote(note.id);
-    loadNotes("general");
+    loadNotes();
     onSelectNote(note.id);
   }
 
@@ -287,8 +284,7 @@ export function Sidebar({ onAllNotes, onSelectNote }: SidebarProps) {
   // Same CustomEvent channel the tag filter used: NotesList owns the
   // filtering, and a URL param for a client-only narrowing is overkill.
   function handleFolderClick(folderId: number | null) {
-    selectSpace("general");
-    loadNotes("general");
+    loadNotes();
     window.dispatchEvent(new CustomEvent("gooni:filter-folder", { detail: { folderId } }));
     navigate({
       to: "/",

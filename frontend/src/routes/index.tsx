@@ -122,18 +122,13 @@ function LogPage() {
     if (!search.note) return;
     fetchNote(search.note).then((note) => {
       useNotesContentStore.setState((s) => {
-        const existing = s.notes["general"] ?? [];
-        const idx = existing.findIndex((n) => n.id === note.id);
-        const nextList = idx >= 0
-          ? existing.slice().map((n, i) => (i === idx ? note : n))
-          : [note, ...existing];
-        return {
-          notes: { ...s.notes, general: nextList },
-          selectedSpaceId: "general",
-          activeNoteId: note.id,
-        };
+        const idx = s.notes.findIndex((n) => n.id === note.id);
+        const next = idx >= 0
+          ? s.notes.map((n, i) => (i === idx ? note : n))
+          : [note, ...s.notes];
+        return { notes: next, activeNoteId: note.id };
       });
-      loadNotes("general");
+      loadNotes();
     }).catch(() => {
       navigate({ search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: undefined, trackables: undefined }, replace: true });
     });
@@ -142,8 +137,7 @@ function LogPage() {
 
   useEffect(() => {
     if (view === "notes") {
-      useNotesContentStore.setState({ selectedSpaceId: "general" });
-      loadNotes("general");
+      loadNotes();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
@@ -162,7 +156,7 @@ function LogPage() {
   }, [view]);
 
   function handleCompose() {
-    createNote("general");
+    createNote();
     // ?view=notes parks us in the notes shell while the optimistic
     // negative-id createNote resolves; the activeNoteId effect below
     // replaces it with ?note=<id> once the real id lands.

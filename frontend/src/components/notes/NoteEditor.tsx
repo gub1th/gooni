@@ -632,7 +632,6 @@ export function NoteEditor({
   // consumer — and the save path fires several writes per edit. Zustand's
   // actions are stable identities defined once in the creator, so selecting
   // them individually never triggers a render on its own.
-  const selectedSpaceId = useNotesContentStore((s) => s.selectedSpaceId);
   const notes = useNotesContentStore((s) => s.notes);
   const storeActiveNoteId = useNotesContentStore((s) => s.activeNoteId);
   const updateNote = useNotesContentStore((s) => s.updateNote);
@@ -649,9 +648,7 @@ export function NoteEditor({
   // Embedded composer focus state — drives the expand-on-focus layout
   // (taller editor surface + parent dim of TakeTabs / focuses row).
   const [embeddedFocused, setEmbeddedFocused] = useState(false);
-
-  const spaceId = selectedSpaceId ?? "general";
-  const activeNote = (notes[spaceId] ?? []).find((n) => n.id === activeNoteId) ?? null;
+  const activeNote = notes.find((n) => n.id === activeNoteId) ?? null;
 
   const [localTitle, setLocalTitle] = useState(activeNote?.title ?? "");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
@@ -1264,10 +1261,8 @@ export function NoteEditor({
       try {
         await updateNote(activeNoteId, titleRef.current, contentToSave);
         hasChanges.current = false;
-        for (const list of Object.values(useNotesContentStore.getState().notes)) {
-          const n = list.find((x) => x.id === activeNoteId);
-          if (n) { savedNote = n; break; }
-        }
+        savedNote = useNotesContentStore.getState().notes
+          .find((x) => x.id === activeNoteId) ?? savedNote;
       } catch {
         // swallow
       }
@@ -1477,13 +1472,11 @@ export function NoteEditor({
     try {
       await apiPatchNote(activeNoteId, { is_pinned: newPinned });
       // Optimistically update the note in every cached space list so activeNote.is_pinned flips immediately
-      useNotesContentStore.setState((s) => {
-        const updated: Record<string, ApiNote[]> = {};
-        for (const [k, list] of Object.entries(s.notes)) {
-          updated[k] = list.map((n) => (n.id === activeNoteId ? { ...n, is_pinned: newPinned } : n));
-        }
-        return { notes: updated };
-      });
+      useNotesContentStore.setState((s) => ({
+        notes: s.notes.map((n) =>
+          (n.id === activeNoteId ? { ...n, is_pinned: newPinned } : n),
+        ),
+      }));
       usePinnedVersionStore.getState().bump();
     } catch (e) {
       console.error("pin toggle failed", e);
@@ -1500,22 +1493,15 @@ export function NoteEditor({
       // longer contains it. Dropping it optimistically here means the sidebar
       // reacts on the click; the forced reload below is what brings it back on
       // an unarchive (the row isn't in any cached list to restore).
-      useNotesContentStore.setState((s) => {
-        const updated: Record<string, ApiNote[]> = {};
-        for (const [k, list] of Object.entries(s.notes)) {
-          updated[k] = newArchived
-            ? list.filter((n) => n.id !== activeNoteId)
-            : list.map((n) => (n.id === activeNoteId ? { ...n, is_archived: false } : n));
-        }
-        return { notes: updated };
-      });
+      useNotesContentStore.setState((s) => ({
+        notes: newArchived
+          ? s.notes.filter((n) => n.id !== activeNoteId)
+          : s.notes.map((n) => (n.id === activeNoteId ? { ...n, is_archived: false } : n)),
+      }));
       // Pinned is a separate sidebar read with its own endpoint, and an
       // archived note has to leave it.
       usePinnedVersionStore.getState().bump();
-      void useNotesContentStore.getState().loadNotes(
-        useNotesContentStore.getState().selectedSpaceId ?? "general",
-        { force: true },
-      );
+      void useNotesContentStore.getState().loadNotes({ force: true });
     } catch (e) {
       console.error("archive toggle failed", e);
     }
@@ -1523,15 +1509,11 @@ export function NoteEditor({
 
   async function handlePublish() {
     if (!activeNote || !activeNoteId || activeNoteId < 0) return;
-    useNotesContentStore.setState((s) => {
-      const updated: Record<string, ApiNote[]> = {};
-      for (const [k, list] of Object.entries(s.notes)) {
-        updated[k] = list.map((n) =>
+    useNotesContentStore.setState((s) => ({
+        notes: s.notes.map((n) =>
           n.id === activeNoteId ? { ...n, is_public: true } : n,
-        );
-      }
-      return { notes: updated };
-    });
+        ),
+      }));
     setLocalIsPublic(true);
     try {
       await apiPatchNote(activeNoteId, { is_public: true });
@@ -1542,15 +1524,11 @@ export function NoteEditor({
 
   async function handleUnpublish() {
     if (!activeNote || !activeNoteId || activeNoteId < 0) return;
-    useNotesContentStore.setState((s) => {
-      const updated: Record<string, ApiNote[]> = {};
-      for (const [k, list] of Object.entries(s.notes)) {
-        updated[k] = list.map((n) =>
+    useNotesContentStore.setState((s) => ({
+        notes: s.notes.map((n) =>
           n.id === activeNoteId ? { ...n, is_public: false } : n,
-        );
-      }
-      return { notes: updated };
-    });
+        ),
+      }));
     setLocalIsPublic(false);
     try {
       await apiPatchNote(activeNoteId, { is_public: false });
@@ -1714,13 +1692,11 @@ export function NoteEditor({
                     onClick={async () => {
                       // Pick the neighbor BEFORE delete so the route doesn't
                       // briefly fall back to All Notes. Prefer the next note
-                      // in the same space's list; if the deleted note was
-                      // last, fall back to the previous one. If the space is
-                      // empty after the delete, activeNoteId will go null
-                      // and the editor will show the empty state — same as
-                      // before.
-                      const space = selectedSpaceId ?? "general";
-                      const list = useNotesContentStore.getState().notes[space] ?? [];
+                      // in the list; if the deleted note was last, fall back
+                      // to the previous one. If the list is empty after the
+                      // delete, activeNoteId goes null and the editor shows
+                      // the empty state — same as before.
+                      const list = useNotesContentStore.getState().notes;
                       const idx = list.findIndex((n) => n.id === activeNote.id);
                       const neighbor = idx >= 0
                         ? (list[idx + 1] ?? list[idx - 1] ?? null)
@@ -1730,7 +1706,7 @@ export function NoteEditor({
                       // server). Clearing hasChanges makes the leave-effect's
                       // gate skip the PATCH.
                       hasChanges.current = false;
-                      await deleteNote(activeNote.id, space);
+                      await deleteNote(activeNote.id);
                       setDeleteConfirm(false);
                       if (neighbor) {
                         selectNote(neighbor.id);

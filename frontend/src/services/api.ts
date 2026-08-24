@@ -121,7 +121,10 @@ export type StickyPos = { x: number; y: number; w?: number; h?: number };
 // Slice 6: Spaces died — the flat GET /notes list IS the corpus. The
 // spaceId param survives for call-site compatibility ("general" = all)
 // but is ignored server-side; optional tag filtering happens in the UI.
-export async function fetchSpaceNotes(_spaceId: number | "general"): Promise<ApiNote[]> {
+// All live notes, newest first. Was `fetchSpaceNotes(spaceId)` — a legacy
+// signature whose argument had been ignored since Spaces died in the v2 nuke;
+// every caller passed the literal "general".
+export async function fetchAllNotes(): Promise<ApiNote[]> {
   const res = await apiFetch(`${BASE}/notes`);
   if (!res.ok) throw new Error("Failed to fetch notes");
   return res.json();
