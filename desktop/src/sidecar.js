@@ -23,9 +23,19 @@
  *     past MAX_FAST_CRASHES, flip the state to `crashlooping` — still retrying
  *     (a transient cause deserves recovery) but no longer claiming health.
  *  3. **Stop means stopped.** SIGTERM, then SIGKILL after a grace period, to the
- *     process GROUP — Python daemons spawn helpers, and a supervisor that leaves
- *     a camera-holding orphan behind after quit is worse than no supervisor,
- *     because the privacy light stays on with nothing owning it.
+ *     child AND every process under it — Python daemons spawn helpers, and a
+ *     supervisor that leaves a camera-holding orphan behind after quit is worse
+ *     than no supervisor, because the privacy light stays on with nothing
+ *     owning it.
+ *
+ *     This used to be one signal to the child's own process group, which meant
+ *     spawning it DETACHED. That turned out to cost the camera outright: a
+ *     detached child is its own responsible process as far as macOS is
+ *     concerned, and Homebrew's ad-hoc-signed Python cannot hold a camera
+ *     grant, so TCC killed it on the first frame — no prompt, no entry in
+ *     System Settings, nothing to grant. Attached, the app is responsible and
+ *     the permission is asked for and remembered as Gooni. The tree is now
+ *     walked explicitly instead; see `_signal`.
  *
  * `spawnImpl`, timers and clock are injected so all of that is testable without
  * launching real processes.
@@ -52,6 +62,57 @@ const STATES = Object.freeze({
   STOPPED: "stopped",
   FAILED: "failed",
 });
+
+/** Deepest a descendant walk will follow before giving up. */
+const MAX_TREE_DEPTH = 8;
+
+/**
+ * Every process descended from `pid`, parents before children.
+ *
+ * Replaces the process-group kill we lost by spawning attached (see
+ * `_signal`). `pgrep -P` rather than a dependency: this runs a handful of times
+ * over an app's whole lifetime, always during a stop.
+ *
+ * Failure is silence, never a throw — `pgrep` exits 1 with no output when a pid
+ * simply has no children, which is the ordinary case, and is indistinguishable
+ * here from `pgrep` being absent. Both mean "no helpers found", and the caller
+ * still signals the child itself.
+ */
+function defaultDescendants(pid, { exec = null, maxDepth = MAX_TREE_DEPTH } = {}) {
+  const run =
+    exec ||
+    ((p) =>
+      require("child_process").execFileSync("pgrep", ["-P", String(p)], {
+        encoding: "utf8",
+        timeout: 2_000,
+        stdio: ["ignore", "pipe", "ignore"],
+      }));
+
+  const found = [];
+  const seen = new Set([pid]);
+
+  const walk = (parent, depth) => {
+    if (depth >= maxDepth) return;
+    let out;
+    try {
+      out = run(parent);
+    } catch {
+      return;
+    }
+    const kids = String(out || "")
+      .split("\n")
+      .map((line) => Number.parseInt(line.trim(), 10))
+      .filter((n) => Number.isInteger(n) && n > 1 && !seen.has(n));
+    for (const kid of kids) {
+      seen.add(kid);
+      found.push(kid);
+      walk(kid, depth + 1);
+    }
+  };
+
+  walk(pid, 0);
+  return found;
+}
 
 /** Exponential, capped. Pure so the ladder is asserted rather than eyeballed. */
 function backoffDelay(consecutiveFailures, { base = BASE_BACKOFF_MS, max = MAX_BACKOFF_MS } = {}) {
@@ -100,6 +161,9 @@ class SidecarSupervisor {
    * @param {Function} [opts.onEvent]        (status) => void, on every transition
    * @param {Function} [opts.onLine]         ({at,stream,text}) => void
    * @param {Function} [opts.killImpl]       (pid, signal) => void
+   * @param {Function} [opts.descendantsImpl] (pid) => number[]; the child's
+   *   process tree. Injected so the sweep that replaced the process-group kill
+   *   is testable without forking real helpers.
    */
   constructor({
     spawnImpl,
@@ -107,6 +171,7 @@ class SidecarSupervisor {
     onEvent = () => {},
     onLine = null,
     killImpl = null,
+    descendantsImpl = null,
     now = Date.now,
     setTimer = setTimeout,
     clearTimer = clearTimeout,
@@ -118,6 +183,7 @@ class SidecarSupervisor {
     this.canExecute = canExecute;
     this.onEvent = onEvent;
     this.killImpl = killImpl || ((pid, signal) => process.kill(pid, signal));
+    this.descendantsImpl = descendantsImpl || defaultDescendants;
     this.now = now;
     this.setTimer = setTimer;
     this.clearTimer = clearTimer;
@@ -208,10 +274,13 @@ class SidecarSupervisor {
         cwd: cfg.cwd || undefined,
         env: { ...process.env, ...(cfg.env || {}) },
         stdio: ["ignore", "pipe", "pipe"],
-        // Its own process group, so stop() can take the whole tree down. A
-        // Python daemon that forks helpers would otherwise leave them holding
-        // the camera after the app quits.
-        detached: true,
+        // ATTACHED on purpose — see rule 3 in the class header. Detaching it
+        // (its own session) is what made macOS treat the sidecar as its own
+        // responsible process, and an ad-hoc-signed Python cannot hold a camera
+        // grant, so TCC killed it on first frame with no prompt and no way to
+        // grant one. As a child, the app is the responsible process, so the
+        // permission is asked for and remembered as Gooni.
+        detached: false,
       });
     } catch (e) {
       this._set(STATES.FAILED, { error: `spawn failed: ${e.message}` });
@@ -293,25 +362,56 @@ class SidecarSupervisor {
   }
 
   /**
-   * Signal the whole process group, falling back to the bare pid.
+   * Signal the child and every process under it.
    *
-   * The group kill is the point (see the class header), but a child that
-   * already exited, or a platform that refuses the negative pid, must not throw
-   * out of a quit handler — a supervisor that crashes while shutting down is
-   * how orphans are made.
+   * This used to be one `kill(-pid)` against the child's own process group,
+   * which is no longer available: the sidecar is spawned ATTACHED so it can
+   * inherit our camera permission, which puts it in OUR group — signalling that
+   * group would signal the app itself. So the tree is walked explicitly.
+   *
+   * Two ordering rules carry the guarantee the group kill used to:
+   *
+   *  - The tree is collected BEFORE anything is signalled. Kill the parent
+   *    first and its children are reparented to init, at which point nothing
+   *    left connects them to us and a camera-holding helper survives silently —
+   *    which is the exact orphan this whole method exists to prevent.
+   *  - Descendants are signalled deepest-first, so a supervising helper cannot
+   *    fork a replacement while we are still working down the list.
+   *
+   * Nothing here throws. A child that already exited, a `pgrep` that isn't
+   * there, a pid that raced away between the walk and the signal — none of that
+   * may escape a quit handler, because a supervisor that crashes while shutting
+   * down is how orphans are made.
    */
   _signal(pid, sig) {
+    if (!Number.isInteger(pid) || pid <= 1) return false;
+
+    let tree = [];
     try {
-      this.killImpl(-pid, sig);
-      return true;
+      tree = this.descendantsImpl(pid) || [];
     } catch {
+      // A failed walk costs us the helpers, not the child. Still signal the
+      // child: a partial stop beats no stop.
+      tree = [];
+    }
+
+    let signalled = false;
+    for (const p of [...tree].reverse()) {
+      if (!Number.isInteger(p) || p <= 1 || p === process.pid) continue;
       try {
-        this.killImpl(pid, sig);
-        return true;
+        this.killImpl(p, sig);
+        signalled = true;
       } catch {
-        return false;
+        // Already gone. Expected — the parent's death takes most of them.
       }
     }
+    try {
+      this.killImpl(pid, sig);
+      signalled = true;
+    } catch {
+      // Raced with a natural exit.
+    }
+    return signalled;
   }
 
   /**
@@ -363,4 +463,6 @@ module.exports = {
   MAX_BACKOFF_MS,
   MAX_FAST_CRASHES,
   STOP_GRACE_MS,
+  MAX_TREE_DEPTH,
+  defaultDescendants,
 };

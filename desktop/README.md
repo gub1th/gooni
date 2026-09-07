@@ -120,7 +120,7 @@ Behaviour, and why:
 | It stays up ≥30s then dies | Treated as *one* death: the ladder resets. |
 | It dies fast, 5× in a row | State becomes **`crashlooping`**. Still retrying (the cause may be transient — an unplugged camera, a machine that just woke) but it stops claiming health, because restarting every second forever is a broken sidecar wearing a healthy badge. |
 | You quit | SIGTERM to the process **group**, SIGKILL after 5s, and quit **waits** for it. Python daemons spawn helpers; leaving a camera-holding orphan behind is worse than no supervisor, because the privacy light stays on with nothing owning it. |
-| `killall` / logout / Ctrl-C | Same path — SIGINT/SIGTERM/SIGHUP are routed into the normal quit. The child is spawned detached (that's what makes the group kill possible), so it does *not* die with the parent on its own. |
+| `killall` / logout / Ctrl-C | Same path — SIGINT/SIGTERM/SIGHUP are routed into the normal quit. The child is spawned **attached** (so it inherits our camera permission), and `stop()` sweeps its whole process tree explicitly rather than signalling a group. |
 
 Output goes to `~/Library/Logs/gooni-desktop/sidecar.log` (tray ▸ Focus cam ▸
 **Open log…**), plus a 500-line in-memory tail. Supervisor commentary is prefixed
