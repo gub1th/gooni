@@ -110,6 +110,18 @@ class WhatsAppChannel(MessagingChannel):
     def format_outbound(self, text: str) -> str:
         return _markdown_to_whatsapp(text)
 
+    @property
+    def default_recipient(self) -> str | None:
+        """The one handle Gooni sends unprompted messages to.
+
+        Public because three callers needed it and all three read `_allowed`
+        directly — one of them via `getattr(channel, "_allowed", None)`, which
+        silently returned None (and so sent nothing) if the attribute were ever
+        renamed. Single-tenant: more than one handle would need per-conversation
+        handle tracking, not a bigger set.
+        """
+        return next(iter(self._allowed), None)
+
     def is_allowed(self, sender_handle: str) -> bool:
         if not sender_handle:
             return False

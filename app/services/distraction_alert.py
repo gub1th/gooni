@@ -95,7 +95,7 @@ def maybe_alert(db: Session, *, subject: str, observed_at: datetime | None = Non
     try:
         from .interval_ingest import parse_dt
         from . import focus_cam_service, promise_service
-        from .messaging.whatsapp import whatsapp_channel
+        from .messaging import outbound
 
         blob = focus_cam_service.get_blob(db)
         if blob.get("control") != "running":
@@ -119,19 +119,13 @@ def maybe_alert(db: Session, *, subject: str, observed_at: datetime | None = Non
         promise = promise_service.get(db, target_id)
         task_title = (promise.summary or promise.utterance) if promise else "your focus task"
 
-        target = next(iter(getattr(whatsapp_channel, "_allowed", None) or set()), None)
-        if not target:
-            return
-
         text = f"yo you just opened {subject}. you're on \"{task_title}\"."
-        delivered = whatsapp_channel.send(target, whatsapp_channel.format_outbound(text))
-        if not delivered:
+        # Send + record are `outbound.notify`'s job now — this used to reach
+        # into the channel's private `_allowed` and re-implement the transcript
+        # write. The dedup marker is set only on a DELIVERED message, so a
+        # refused send stays owed rather than being silently spent.
+        if not outbound.notify(db, text):
             return
         sent.add(subject)
-
-        from .conversation_service import conversation_service
-
-        conv = conversation_service.find_or_create_session("whatsapp", db)
-        conversation_service.add_message(conv.id, "assistant", text, db)
     except Exception as e:  # pragma: no cover — defensive
         print(f"[distraction_alert] alert failed: {e}")

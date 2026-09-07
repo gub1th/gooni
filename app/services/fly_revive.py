@@ -63,16 +63,11 @@ def catch_up_orphaned_messages(db: Session) -> int:
 
     # Imported lazily to dodge import-cycle (messaging imports orchestrator
     # which imports services).
-    from .messaging.whatsapp import whatsapp_channel
+    from .messaging import outbound
 
-    if not whatsapp_channel._allowed:
-        # No allowlisted handles configured — nothing to send to.
+    if not outbound.recipient():
+        # No allowlisted handle configured — nothing to send to.
         return 0
-
-    # Single-tenant: pick any allowlisted handle as the recipient. If
-    # multiple were configured we'd need per-conv handle tracking, but
-    # Daniel's the only one.
-    target_handle = next(iter(whatsapp_channel._allowed))
 
     convs = (
         db.query(Conversation)
@@ -94,11 +89,16 @@ def catch_up_orphaned_messages(db: Session) -> int:
             continue
 
         apology = _pick_apology()
-        try:
-            formatted = whatsapp_channel.format_outbound(apology)
-            whatsapp_channel.send(target_handle, formatted)
-        except Exception as e:
-            print(f"[fly-revive] send failed for conv {conv.id}: {e}")
+        # `record=False`: the row belongs on THIS orphaned conversation, not on
+        # the default WhatsApp thread `notify` would write to. Everything else
+        # (resolve, send, check that Meta accepted) is shared.
+        #
+        # The return value is now honoured. It used to be discarded, so a send
+        # Meta REFUSED still counted toward `sent` and still wrote an assistant
+        # row — the conversation then looked answered, and the orphan check
+        # would never revisit it.
+        if not outbound.notify(db, apology, record=False):
+            print(f"[fly-revive] apology not delivered for conv {conv.id}; still owed")
             continue
 
         # Record as assistant message so the conversation log shows the

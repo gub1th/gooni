@@ -567,7 +567,61 @@ def stop(db: Session, s: FocusSession, *, now: datetime | None = None) -> FocusS
     db.commit()
     db.refresh(s)
     _reconcile_camera(db, None)
+    if s.kept:
+        _congratulate(db, s, runs)
     return s
+
+
+#: Said on WhatsApp when a focus session ends on a task that got FINISHED.
+#: Deterministic, and indexed by session id rather than chosen at random — the
+#: same session must read the same way if this is ever recomputed, and a random
+#: pick makes a repeat impossible to reason about.
+_CONGRATS = (
+    'done — "{task}", {mins}. nice one, sir.',
+    'that\'s "{task}" closed out. {mins} on it.',
+    '"{task}" is done, sir. {mins} well spent.',
+    'kept it — "{task}", {mins}.',
+)
+
+
+def _congratulate(db: Session, s: FocusSession, runs: list[dict]) -> None:
+    """Say well done on WhatsApp when a focus task is actually FINISHED.
+
+    Gated on `kept`, not on the stop, and that is the whole design. Sessions end
+    for every reason — switching tasks, going to lunch, giving up — and a
+    congratulation on each one is a congratulation on none of them. `kept` is
+    set when the commitment itself is completed, which is the event worth
+    marking.
+
+    Best-effort to the point of paranoia: this runs at the tail of `stop`, after
+    the minutes are already written and the row is already stopped, so ANY
+    failure here must leave a correctly-stopped session behind. A session that
+    couldn't be bragged about is not a session that failed.
+
+    No 24h-window check. Unlike the reach-out, which must not burn its
+    once-a-day marker on a send Meta will refuse, this has nothing to spend: if
+    the window is shut the send simply fails and returns False.
+    """
+    try:
+        from .messaging import outbound
+
+        total_sec = 0.0
+        for r in runs:
+            start, end = r.get("start"), r.get("end")
+            if start is None or end is None:
+                continue
+            total_sec += max(0.0, (end - start).total_seconds())
+        mins = int(round(total_sec / 60))
+        # Under a minute is a mis-click or the 1.4-second session that came out
+        # of the notch race, not a sitting. Say it finished, don't claim a
+        # duration that rounds to nothing.
+        phrase = f"{mins}m" if mins >= 1 else "a quick one"
+
+        task = (s.title or "").strip() or "that"
+        text = _CONGRATS[s.id % len(_CONGRATS)].format(task=task, mins=phrase)
+        outbound.notify(db, text)
+    except Exception as e:
+        print(f"[focus] congratulation failed (session {s.id}): {e}")
 
 
 def set_style(
