@@ -824,11 +824,15 @@ def _reach_out_text(local_hour: int) -> str:
 
 
 def _wa_target(channel) -> str | None:
-    """The one allowlisted handle to text. Single-tenant, same assumption
-    `fly_revive` makes — multiple handles would need per-conversation handle
-    tracking, and Daniel is the only recipient."""
-    allowed = getattr(channel, "_allowed", None) or set()
-    return next(iter(allowed), None)
+    """The one allowlisted handle to text.
+
+    Kept as a thin alias because the reach-out checks for a recipient BEFORE it
+    spends the day's once-only marker; the resolution itself lives in
+    `outbound.recipient` now, so nothing reads the channel's private set.
+    """
+    from .messaging import outbound
+
+    return outbound.recipient(channel)
 
 
 def wa_window_open(db: Session, *, now: datetime) -> bool:
@@ -940,12 +944,10 @@ def _reach_out(db: Session, ctx: dict, *, channel=None, now: datetime) -> dict:
         )
         return {"status": "skipped_wa_window_closed", "observation": None}
 
+    from .messaging import outbound
+
     text = _reach_out_text(local.hour)
-    try:
-        delivered = channel.send(target, channel.format_outbound(text))
-    except Exception as e:
-        print(f"[proactive] reach-out send raised: {e}")
-        delivered = False
+    delivered = outbound.notify(db, text, channel=channel)
 
     if not delivered:
         # No row. The once-per-day marker IS the row, so writing one here would
@@ -953,15 +955,9 @@ def _reach_out(db: Session, ctx: dict, *, channel=None, now: datetime) -> dict:
         print("[proactive] reach-out not delivered; the day's send is still owed")
         return {"status": "reach_out_failed", "observation": None}
 
-    # Record it as a real assistant turn on the WhatsApp thread, so the message
-    # log shows what Gooni said and a reply lands in the right conversation.
-    try:
-        from .conversation_service import conversation_service
-
-        conv = conversation_service.find_or_create_session(CHANNEL_WHATSAPP, db)
-        conversation_service.add_message(conv.id, "assistant", text, db)
-    except Exception as e:
-        print(f"[proactive] reach-out transcript record failed: {e}")
+    # The transcript row (a real assistant turn on the WhatsApp thread, so the
+    # log shows what Gooni said and a reply lands in the right conversation) is
+    # written by `outbound.notify` above, only once Meta accepted.
 
     row = _store(db, text, ctx=ctx, now=now, channel=CHANNEL_WHATSAPP)
     print(

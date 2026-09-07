@@ -581,6 +581,80 @@ def test_pure_classify():
     )
 
 
+def test_congratulates_only_on_a_finished_task(db):
+    """The WhatsApp congratulation fires on KEPT, not on stop.
+
+    Sessions end for every reason — switching tasks, lunch, giving up — so a
+    message on every stop is a message on none of them. It also must never be
+    able to break a stop: the minutes are already written by the time it runs.
+    """
+    print("\ncongratulation on a finished focus task")
+    reset(db)
+    sent = []
+
+    class FakeOutbound:
+        @staticmethod
+        def notify(db_, text, **kw):
+            sent.append(text)
+            return True
+
+        @staticmethod
+        def recipient(channel=None):
+            return "15550001111"
+
+    import app.services.messaging as messaging_pkg
+
+    real = getattr(messaging_pkg, "outbound", None)
+    messaging_pkg.outbound = FakeOutbound
+    try:
+        # A session STOPPED without the task being finished says nothing.
+        p1 = make_promise(db, "read the RL chapter")
+        s1 = focus_session_service.start(db, title=p1.summary, promise_id=p1.id, now=at(DAY, 9, 0))
+        focus_session_service.stop(db, s1, now=at(DAY, 9, 20))
+        check(sent == [], "a stop with no completion is silent")
+
+        # Finish one: mark kept, then stop.
+        p2 = make_promise(db, "CliffWalker RL with no assistance")
+        s2 = focus_session_service.start(db, title=p2.summary, promise_id=p2.id, now=at(DAY, 10, 0))
+        focus_session_service.set_kept(db, s2, True)
+        focus_session_service.stop(db, s2, now=at(DAY, 10, 42))
+        check(len(sent) == 1, "a finished task is congratulated exactly once")
+        check(p2.summary in sent[0], "the message names the task")
+        check("m" in sent[0], "the message carries the time spent")
+
+        # Stopping again is a no-op and must not congratulate twice — the same
+        # idempotency the trackable write already relies on.
+        focus_session_service.stop(db, s2, now=at(DAY, 10, 43))
+        check(len(sent) == 1, "a second stop does not congratulate again")
+
+        # A send that BLOWS UP must still leave a correctly stopped session.
+        class Exploding:
+            @staticmethod
+            def notify(db_, text, **kw):
+                raise RuntimeError("meta is down")
+
+            @staticmethod
+            def recipient(channel=None):
+                return "15550001111"
+
+        messaging_pkg.outbound = Exploding
+        p3 = make_promise(db, "union find")
+        s3 = focus_session_service.start(db, title=p3.summary, promise_id=p3.id, now=at(DAY, 12, 0))
+        focus_session_service.set_kept(db, s3, True)
+        stopped = focus_session_service.stop(db, s3, now=at(DAY, 12, 15))
+        check(stopped.state == "stopped", "a failed congratulation still stops the session")
+        check(
+            any(
+                json.loads(e.value_json or "{}").get("session_id") == s3.id
+                for e in focus_entries(db)
+            ),
+            "and its minutes are still written",
+        )
+    finally:
+        if real is not None:
+            messaging_pkg.outbound = real
+
+
 def main():
     print("focus session lifecycle + merged-signal score\n" + "=" * 46)
     Base.metadata.create_all(bind=engine)
@@ -598,6 +672,7 @@ def main():
     test_no_classifier(db)
     test_no_new_storage(db)
     test_rename_wins_over_promise(db)
+    test_congratulates_only_on_a_finished_task(db)
 
     db.close()
     print()

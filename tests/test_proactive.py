@@ -182,6 +182,12 @@ class FakeWhatsApp:
         self._allowed = set(allowed)
         self.sent = []
 
+    @property
+    def default_recipient(self):
+        # The public seam `outbound.recipient` reads. A double that only sets
+        # `_allowed` resolves to no recipient and silently sends nothing.
+        return next(iter(self._allowed), None)
+
     def format_outbound(self, text):
         return text
 
