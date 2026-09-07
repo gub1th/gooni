@@ -166,6 +166,8 @@ export function QuickFind({
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const [q, setQ] = useState("");
+  /** A stop the server refused — shown on the notch, since silence reads as a dead button. */
+  const [stopFailed, setStopFailed] = useState(false);
   const [open, setOpen] = useState(false);
   const [activeIdx, setActiveIdx] = useState(0);
   const [titleNotes, setTitleNotes] = useState<ApiNote[]>([]);
@@ -456,7 +458,11 @@ export function QuickFind({
     try {
       await endFocusSession();
     } catch {
-      /* the session survives a failed write by design — /focus explains it */
+      // A failed stop leaves the session PAUSED and retryable by design — but
+      // saying NOTHING makes that indistinguishable from a dead button, which
+      // is what makes someone press it again and start a second session.
+      setStopFailed(true);
+      window.setTimeout(() => setStopFailed(false), 4000);
     } finally {
       endingRef.current = false;
     }
@@ -616,8 +622,16 @@ export function QuickFind({
               </NotchButton>
               {/* A SQUARE, not an ✕ — an ✕ reads as dismiss, and this stops a
                   session and writes its entry. */}
-              <NotchButton label="Stop the session" onClick={() => void endSession()}>
-                <Square size={10} fill="currentColor" strokeWidth={0} />
+              <NotchButton
+                label={stopFailed ? "Couldn't save it — still paused, press to retry" : "Stop the session"}
+                onClick={() => void endSession()}
+              >
+                <Square
+                  size={10}
+                  fill="currentColor"
+                  strokeWidth={0}
+                  style={stopFailed ? { color: frostInk.warn } : undefined}
+                />
               </NotchButton>
             </span>
           </>
