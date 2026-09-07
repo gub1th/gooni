@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.259.2 — 2026-09-07 (patch)
+
+- fix(focus): stop a stale poll from resurrecting a session you just stopped (#548)
+
 ## 0.259.1 — 2026-09-07 (patch)
 
 - fix(desktop): spawn the sidecar attached so it can hold a camera grant (#547)
