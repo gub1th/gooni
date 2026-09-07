@@ -221,6 +221,17 @@ interface FocusSessionState {
   session: FocusSession | null;
   /** true while a lifecycle call is in flight — the UI stays live, not blocked */
   syncing: boolean;
+  /**
+   * Bumped by every LOCAL lifecycle change (start · pause · resume · clear).
+   *
+   * `syncing` cannot carry this on its own: it is only raised while a call
+   * this store issues is in flight, so a poll that was ALREADY travelling
+   * when you pressed stop sails past it and lands afterwards, carrying the
+   * pre-stop answer. Adopting that resurrects a session you just ended —
+   * which reads as "the stop button did nothing", and the next click starts
+   * a second session on top of the first.
+   */
+  mutationSeq: number;
   start: (promiseId: number | null, title: string) => Promise<FocusSession | null>;
   pause: () => Promise<void>;
   resume: () => Promise<void>;
@@ -237,6 +248,7 @@ interface FocusSessionState {
 export const useFocusSessionStore = create<FocusSessionState>((set, get) => ({
   session: read(),
   syncing: false,
+  mutationSeq: 0,
 
   start: async (promiseId, title) => {
     // Re-starting the task already running would throw its segments away and
@@ -261,7 +273,7 @@ export const useFocusSessionStore = create<FocusSessionState>((set, get) => ({
       kept: false,
     };
     write(optimistic);
-    set({ session: optimistic, syncing: true });
+    set((st) => ({ session: optimistic, syncing: true, mutationSeq: st.mutationSeq + 1 }));
     try {
       const server = fromServer(await createFocusSession({ title, promise_id: promiseId }));
       write(server);
@@ -284,7 +296,7 @@ export const useFocusSessionStore = create<FocusSessionState>((set, get) => ({
     if (!s || !s.running) return;
     const next: FocusSession = { ...s, running: false, segments: sealedSegments(s, Date.now()) };
     write(next);
-    set({ session: next });
+    set((st) => ({ session: next, mutationSeq: st.mutationSeq + 1 }));
     if (!s.id) return; // an in-flight start owns its own reconcile
     try {
       const server = fromServer(await pauseFocusSession(s.id));
@@ -304,7 +316,7 @@ export const useFocusSessionStore = create<FocusSessionState>((set, get) => ({
     if (!s || s.running) return;
     const next: FocusSession = { ...s, running: true, startedAt: Date.now() };
     write(next);
-    set({ session: next });
+    set((st) => ({ session: next, mutationSeq: st.mutationSeq + 1 }));
     if (!s.id) return;
     try {
       const server = fromServer(await resumeFocusSession(s.id));
@@ -339,7 +351,7 @@ export const useFocusSessionStore = create<FocusSessionState>((set, get) => ({
 
   clear: () => {
     write(null);
-    set({ session: null });
+    set((st) => ({ session: null, mutationSeq: st.mutationSeq + 1 }));
   },
 
   rename: (title) => {
@@ -375,8 +387,17 @@ export const useFocusSessionStore = create<FocusSessionState>((set, get) => ({
  */
 export async function syncFocusSession(): Promise<void> {
   if (useFocusSessionStore.getState().syncing) return;
+  // Snapshot BEFORE the request. `syncing` only covers a call this store is
+  // making right now; it cannot cover a poll that was already travelling when
+  // the user acted. Comparing the counter afterwards catches both.
+  const seq = useFocusSessionStore.getState().mutationSeq;
   try {
     const server = fromServer(await fetchActiveFocusSession());
+    // The session changed under us while this was in flight, so the answer
+    // describes a state that no longer exists. Adopting it is how a correctly
+    // stopped session comes back to life a second later — the stop looks dead,
+    // and the next click starts a SECOND session on top of the first.
+    if (useFocusSessionStore.getState().mutationSeq !== seq) return;
     const local = useFocusSessionStore.getState().session;
     // An un-addressable optimistic session (a start still in flight, or one
     // whose POST failed) must not be replaced by a stale `null`.
