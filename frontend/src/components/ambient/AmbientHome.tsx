@@ -599,6 +599,14 @@ export function AmbientHome({
   // render of the home — which polls twice a minute.
   const onEditorReady = useCallback((ed: Editor | null) => {
     editorRef.current = ed;
+    // FIRST OPEN focuses HERE, not in `openEditor`. That path fires two
+    // requestAnimationFrames and then focuses, which is a guess about how long
+    // TipTap takes to put its view in the document — and on the first open it
+    // loses, because the editor is still MOUNTING when both frames elapse. The
+    // cost was not a missing caret: Escape is a ProseMirror view prop, so with
+    // no focus the key never reached the handler and the editor could not be
+    // collapsed at all until you clicked in and typed something.
+    if (ed && editorOpenRef.current) ed.commands.focus("end");
   }, []);
 
   // Publish the two HOME functions the sticky header renders buttons for, plus
@@ -742,6 +750,44 @@ export function AmbientHome({
       editorRef.current?.commands.focus("end");
     }));
   }
+
+  // Escape while the editor is open but NOT focused — a click on the dimmed
+  // home, a stray blur, anything that moved focus out. The editor's own handler
+  // is a ProseMirror view prop and only sees keys it has focus for, so without
+  // this the composer is a trap: no way out but typing into it. Guarded on the
+  // target so a focused editor still handles its own Escape once (and a
+  // suggestion popup keeps its first-refusal right, which lives in the editor).
+  useEffect(() => {
+    if (!editorOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.("[data-capture-editor]")) return;
+      e.preventDefault();
+      collapseEditor();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorOpen]);
+
+  // Clicking off the composer collapses it, the same way clicking off the box
+  // dismisses the box. Non-destructive like every other collapse — the draft is
+  // still there when you reopen.
+  useEffect(() => {
+    if (!editorOpen) return;
+    function onDown(e: MouseEvent) {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.("[data-capture-editor]")) return;
+      // The chrome that legitimately sits over the home keeps its clicks: the
+      // header, the rail and the footer are not "the void".
+      if (t?.closest?.("[data-quickfind], header, [data-icon-rail], [data-footer-island]")) return;
+      collapseEditor();
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorOpen]);
 
   // Escape (or a click on the void). NEVER destructive: the editor stays mounted
   // holding whatever was written, and its plain text comes back into the box so
@@ -1129,7 +1175,10 @@ export function AmbientHome({
             aria-label="Open the note editor"
             aria-expanded={editorOpen}
             style={{
-              position: "absolute", right: 12, bottom: 10, zIndex: 1,
+              // BOTTOM-LEFT: the box's own control sits opposite the send
+              // affordance, and the editor's `chat` pill takes the same corner
+              // — so the door between the two sizes never moves.
+              position: "absolute", left: 12, bottom: 10, zIndex: 1,
               display: "inline-flex", alignItems: "center", gap: 5,
               borderRadius: 999, cursor: "pointer",
               border: `1px solid ${editorHasDraft ? frostInk.accent : ink(0.14)}`,
@@ -1165,6 +1214,7 @@ export function AmbientHome({
         radius={editorOpen ? 22 : 20}
         initialContent={editorSeed}
         onReady={onEditorReady}
+        onCollapse={() => collapseEditor()}
         onEscape={collapseEditor}
         onSubmitted={onEditorSubmitted}
       />
