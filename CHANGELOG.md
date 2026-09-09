@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.263.0 — 2026-09-09 (minor)
+
+- feat(sensor): collect the frontmost window title, not just the app (#554)
+
 ## 0.262.0 — 2026-09-09 (minor)
 
 - feat(sensor): surface WHAT was browsed, not just where (#553)
