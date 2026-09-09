@@ -113,6 +113,49 @@ class GooniApi {
     return { reply: assistantReply(payload), conversationId: convId };
   }
 
+  /** The server's live session, or null. The screen-evidence watcher polls
+   *  this to notice a session stop. */
+  async activeSession() {
+    return this._request("/focus/sessions/active");
+  }
+
+  /** One session by id — used to recover the stopped session's window
+   *  (started_at / ended_at) after `active` flips to null. */
+  async session(id) {
+    return this._request(`/focus/sessions/${id}`);
+  }
+
+  /** Post a batch of screen-evidence frames for a session. `final` triggers the
+   *  summary server-side in the same request. */
+  async postScreenEvidence(sessionId, frames, { final = false } = {}) {
+    return this._request(`/focus/sessions/${sessionId}/screen-evidence`, {
+      method: "POST",
+      body: { frames, final },
+    });
+  }
+
+  /** Phase 2: upload one frame's JPEG as multipart. `imageBytes` is a Buffer;
+   *  the caller reads the file (fs is theirs, not this module's). */
+  async uploadScreenFrame(sessionId, clientId, imageBytes, { fetchImpl, filename = "frame.jpg" } = {}) {
+    const base = String(this.getBaseUrl() || "").replace(/\/+$/, "");
+    const token = this.getToken();
+    if (!base) throw new Error("No backend URL configured");
+    if (!token) { const e = new Error("not_authenticated"); e.code = "not_authenticated"; throw e; }
+    // FormData + Blob are Web APIs available in Electron's main (undici). The
+    // fetchImpl is injected so a test drives it without a real network.
+    const form = new FormData();
+    form.append("client_id", clientId);
+    form.append("file", new Blob([imageBytes], { type: "image/jpeg" }), filename);
+    const doFetch = fetchImpl || this.fetchImpl;
+    const res = await doFetch(`${base}/focus/sessions/${sessionId}/screen-frame`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+    if (!res.ok) { const e = new Error(`upload ${res.status}`); e.status = res.status; throw e; }
+    return res.json();
+  }
+
   /** Cheap reachability probe for the tray's "backend" line. */
   async ping() {
     const base = String(this.getBaseUrl() || "").replace(/\/+$/, "");
