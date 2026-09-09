@@ -84,6 +84,22 @@ const DEFAULTS = Object.freeze({
    * walking away is closed BACKDATED by this amount, so a larger value is not
    * "more forgiving", it is more guesswork.
    */
+  screenEvidence: Object.freeze({
+    // Ingest Screenpipe's capture for a focus session's window when the session
+    // stops. Off by default: it only does anything if Screenpipe is installed
+    // and running, and it is a deliberate opt-in to send screen text (Phase 1)
+    // and screenshots (Phase 2) to the backend.
+    enabled: false,
+    // Poll cadence for noticing a session stop (the server owns the lifecycle;
+    // the shell watches `active`).
+    pollMs: 10_000,
+    // Phase 2: also upload each frame's JPEG to R2 for the visual scrubber.
+    // Separate toggle because it is the expensive, more-sensitive half.
+    uploadFrames: false,
+    // Path to Screenpipe's SQLite. Empty → the default under $HOME.
+    dbPath: "",
+  }),
+
   appSensor: Object.freeze({
     enabled: true,
     pollMs: 4000,
@@ -200,6 +216,16 @@ function mergeConfig(fileConfig = {}, env = {}) {
       cwd: file.sidecar?.cwd ?? base.sidecar.cwd,
       env: asStringMap(file.sidecar?.env),
       cameraIndex: asCameraIndex(file.sidecar?.cameraIndex),
+    },
+    screenEvidence: {
+      enabled: file.screenEvidence?.enabled ?? base.screenEvidence.enabled,
+      uploadFrames: file.screenEvidence?.uploadFrames ?? base.screenEvidence.uploadFrames,
+      dbPath: (file.screenEvidence?.dbPath ?? base.screenEvidence.dbPath) || "",
+      pollMs: clampNumber(file.screenEvidence?.pollMs ?? base.screenEvidence.pollMs, {
+        min: 3000,
+        max: 120_000,
+        fallback: base.screenEvidence.pollMs,
+      }),
     },
     appSensor: {
       enabled: file.appSensor?.enabled ?? base.appSensor.enabled,

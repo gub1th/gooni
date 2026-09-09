@@ -25,6 +25,7 @@ const sidecarDetect = require("./sidecarDetect");
 const { listCameras } = require("./cameraList");
 const { buildMenuTemplate, summarize } = require("./traymenu");
 const { GooniApi } = require("./api");
+const { SessionWatcher, ingestSession } = require("./screenevidence");
 const tokenModule = require("./token");
 const { AppFocusTracker } = require("./appfocus");
 const { AppReporter } = require("./appreporter");
@@ -738,6 +739,7 @@ if (!app.requestSingleInstanceLock()) {
     createSidecar();
     registerPowerEvents();
     createAppSensor();
+    createScreenEvidenceWatcher();
     createMainWindow();
     createCaptureWindow();
 
@@ -767,6 +769,65 @@ if (!app.requestSingleInstanceLock()) {
     // Tray states like `backoff` change on a timer with no event to hang off.
     setInterval(refreshTray, 5_000).unref?.();
   });
+
+let screenEvidenceTimer = null;
+
+/**
+ * The Screenpipe → Gooni bridge. Watches the server's active focus session and,
+ * when one stops, reads Screenpipe for its window and posts the evidence.
+ *
+ * Off unless `screenEvidence.enabled`. Everything it does is best-effort — a
+ * missing Screenpipe, a locked DB, a failed post all resolve to "no summary for
+ * that session", never a thrown error into the shell.
+ */
+function createScreenEvidenceWatcher() {
+  if (!config.screenEvidence?.enabled) {
+    console.log("[gooni] screen-evidence: off");
+    return;
+  }
+  const os = require("os");
+  const path = require("path");
+  const dbPath =
+    config.screenEvidence.dbPath ||
+    path.join(os.homedir(), ".screenpipe", "db.sqlite");
+  const tmpPath = path.join(os.tmpdir(), "gooni-screenpipe-copy.db");
+
+  const watcher = new SessionWatcher({
+    getActive: () => api.activeSession(),
+    getSession: (id) => api.session(id),
+    onStop: async (session) => {
+      try {
+        const res = await ingestSession({
+          session,
+          api,
+          dbPath,
+          copyFile: fs.copyFileSync,
+          readFile: fs.readFileSync,
+          exists: fs.existsSync,
+          tmpPath,
+          execFileImpl: execFile,
+          uploadFrames: !!config.screenEvidence.uploadFrames,
+          fetchImpl: globalThis.fetch,
+          log: (m) => console.log(`[gooni] ${m}`),
+        });
+        if (res.frames) {
+          console.log(
+            `[gooni] screen-evidence: session ${session.id} → ${res.frames} frames, ${res.uploaded} images`
+          );
+        }
+      } catch (e) {
+        // The contract is best-effort; belt-and-braces so nothing escapes.
+        console.log(`[gooni] screen-evidence: ingest error: ${e.message}`);
+      }
+    },
+    log: (m) => console.log(`[gooni] ${m}`),
+  });
+
+  const pollMs = config.screenEvidence.pollMs || 10_000;
+  screenEvidenceTimer = setInterval(() => void watcher.tick(), pollMs);
+  screenEvidenceTimer.unref?.();
+  console.log(`[gooni] screen-evidence: watching (${pollMs}ms), db=${dbPath}, uploadFrames=${!!config.screenEvidence.uploadFrames}`);
+}
 
   app.on("window-all-closed", () => {
     // Menu-bar app. Closing every window is not quitting — the sidecar has to
