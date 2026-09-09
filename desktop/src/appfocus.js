@@ -230,10 +230,11 @@ class AppFocusTracker {
     const interval = {
       client_id: this.idFactory(),
       app: open.app,
-      // Window titles are NOT collected (see AppInterval's docstring): the app
-      // name answers the question this sensor exists for, and a window title is
-      // the field most likely to carry something private. The field is carried
-      // through only because the tracker is generic.
+      // The frontmost WINDOW's title, when title capture is on (config
+      // `appSensor.captureTitles`, default true). null when off or when the app
+      // has no window. This is what turns "cursor 3h" into "cursor —
+      // sidecar.py"; it is the field most likely to carry something private,
+      // which is why it has its own switch.
       title: open.title,
       started_at: new Date(open.startedAt).toISOString(),
       ended_at: new Date(endedAt).toISOString(),

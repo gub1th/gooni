@@ -49,6 +49,20 @@ const FRONTMOST_PATH_SCRIPT =
   'tell application "System Events" to get POSIX path of application file of first application process whose frontmost is true';
 
 /**
+ * The frontmost WINDOW's title — "sidecar.py — focus-cam", "Inbox (30,982)".
+ * The app name says which tool; this says what was open in it.
+ *
+ * Best-effort and SEPARATELY fatal from the app read: an app can be frontmost
+ * with no window at all (Finder on the desktop, a menu-bar-only app, a fresh
+ * launch mid-open), in which case System Events throws "can't get window 1".
+ * That is not an error — it is a real "no title", so the caller keeps the app
+ * and drops the title rather than losing the whole observation. Same
+ * Accessibility grant as the app read, so it needs no extra permission.
+ */
+const FRONTMOST_TITLE_SCRIPT =
+  'tell application "System Events" to get name of front window of (first application process whose frontmost is true)';
+
+/**
  * Process names that name a RUNTIME rather than an app. Lowercased for the
  * comparison; the recorded row keeps whatever resolution finds.
  */
@@ -163,7 +177,12 @@ function runScript(script, { execFileImpl, timeoutMs }) {
   });
 }
 
-async function queryFrontmost({ execFileImpl, readFileImpl, timeoutMs = QUERY_TIMEOUT_MS } = {}) {
+async function queryFrontmost({
+  execFileImpl,
+  readFileImpl,
+  timeoutMs = QUERY_TIMEOUT_MS,
+  captureTitles = true,
+} = {}) {
   const opts = { execFileImpl, timeoutMs };
   const res = await runScript(FRONTMOST_SCRIPT, opts);
   if (res.error !== undefined) {
@@ -171,6 +190,22 @@ async function queryFrontmost({ execFileImpl, readFileImpl, timeoutMs = QUERY_TI
   }
   const app = parseFrontmost(res.stdout);
   if (!app) return { app: null, error: "no frontmost app", permission: false };
+
+  // The window title, when asked for. Its failure is swallowed: a missing title
+  // is a normal state (no front window), and a title-read error must NEVER turn
+  // a good app read into a lost observation.
+  let title = null;
+  if (captureTitles) {
+    try {
+      const t = await runScript(FRONTMOST_TITLE_SCRIPT, opts);
+      if (t.error === undefined) {
+        const cleaned = String(t.stdout || "").trim();
+        if (cleaned) title = cleaned;
+      }
+    } catch {
+      /* no title — keep the app */
+    }
+  }
 
   // A generic runtime name is worth one more (bounded) question. Best-effort:
   // any failure keeps the generic name — a late or wrong second answer must
@@ -187,15 +222,16 @@ async function queryFrontmost({ execFileImpl, readFileImpl, timeoutMs = QUERY_TI
         appPath: String(pathRes.stdout || "").trim(),
         readTextFile,
       });
-      if (resolved) return { app: resolved };
+      if (resolved) return { app: resolved, title };
     }
   }
-  return { app };
+  return { app, title };
 }
 
 module.exports = {
   FRONTMOST_SCRIPT,
   FRONTMOST_PATH_SCRIPT,
+  FRONTMOST_TITLE_SCRIPT,
   GENERIC_APP_NAMES,
   QUERY_TIMEOUT_MS,
   isPermissionError,

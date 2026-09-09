@@ -20,6 +20,7 @@ const {
   resolveGenericApp,
   FRONTMOST_SCRIPT,
   FRONTMOST_PATH_SCRIPT,
+  FRONTMOST_TITLE_SCRIPT,
 } = require("../src/frontmost");
 
 const T0 = 1_700_000_000_000;
@@ -679,6 +680,7 @@ test("a generic frontmost name triggers the path query and comes back resolved",
   const scripts = [];
   const result = await queryFrontmost({
     timeoutMs: 100,
+    captureTitles: false,
     execFileImpl: (_bin, args, _opts, cb) => {
       scripts.push(args[1]);
       if (args[1] === FRONTMOST_SCRIPT) cb(null, "Electron\n", "");
@@ -693,13 +695,76 @@ test("a non-generic name never spawns the second query", async () => {
   const scripts = [];
   const result = await queryFrontmost({
     timeoutMs: 100,
+    captureTitles: false,
     execFileImpl: (_bin, args, _opts, cb) => {
       scripts.push(args[1]);
       cb(null, "Google Chrome\n", "");
     },
   });
-  assert.deepEqual(scripts, [FRONTMOST_SCRIPT], "one spawn per poll is the contract for ordinary apps");
+  assert.deepEqual(scripts, [FRONTMOST_SCRIPT], "one app-read spawn per poll with titles off");
   assert.equal(result.app, "Google Chrome");
+});
+
+test("captureTitles fetches the window title and threads it onto the result", async () => {
+  const scripts = [];
+  const result = await queryFrontmost({
+    timeoutMs: 100,
+    execFileImpl: (_bin, args, _opts, cb) => {
+      scripts.push(args[1]);
+      if (args[1] === FRONTMOST_SCRIPT) cb(null, "Cursor\n", "");
+      else if (args[1] === FRONTMOST_TITLE_SCRIPT) cb(null, "sidecar.py — focus-cam\n", "");
+      else cb(new Error("unexpected"), "", "");
+    },
+  });
+  assert.deepEqual(scripts, [FRONTMOST_SCRIPT, FRONTMOST_TITLE_SCRIPT]);
+  assert.equal(result.app, "Cursor");
+  assert.equal(result.title, "sidecar.py — focus-cam");
+});
+
+test("a title-read failure keeps the app and drops the title, never erroring the poll", async () => {
+  // An app can be frontmost with no window (Finder desktop, menu-bar app): the
+  // title query throws "can't get window 1", which is a real "no title", not a
+  // lost observation.
+  const result = await queryFrontmost({
+    timeoutMs: 100,
+    execFileImpl: (_bin, args, _opts, cb) => {
+      if (args[1] === FRONTMOST_SCRIPT) cb(null, "Finder\n", "");
+      else cb(new Error("System Events got an error: can't get window 1"), "", "");
+    },
+  });
+  assert.equal(result.app, "Finder");
+  assert.equal(result.title, null);
+  assert.equal(result.error, undefined, "a missing title is not an error");
+});
+
+test("captureTitles off spawns no title query and leaves title null", async () => {
+  const scripts = [];
+  const result = await queryFrontmost({
+    timeoutMs: 100,
+    captureTitles: false,
+    execFileImpl: (_bin, args, _opts, cb) => {
+      scripts.push(args[1]);
+      cb(null, "Google Chrome\n", "");
+    },
+  });
+  assert.deepEqual(scripts, [FRONTMOST_SCRIPT]);
+  assert.equal(result.title, null);
+});
+
+test("a generic name WITH titles on spawns app, title, then path — and resolves", async () => {
+  const scripts = [];
+  const result = await queryFrontmost({
+    timeoutMs: 100,
+    execFileImpl: (_bin, args, _opts, cb) => {
+      scripts.push(args[1]);
+      if (args[1] === FRONTMOST_SCRIPT) cb(null, "Electron\n", "");
+      else if (args[1] === FRONTMOST_TITLE_SCRIPT) cb(null, "gooni — main.js\n", "");
+      else cb(null, "/Applications/Cursor.app/Contents/MacOS/Cursor\n", "");
+    },
+  });
+  assert.deepEqual(scripts, [FRONTMOST_SCRIPT, FRONTMOST_TITLE_SCRIPT, FRONTMOST_PATH_SCRIPT]);
+  assert.equal(result.app, "Cursor");
+  assert.equal(result.title, "gooni — main.js", "the resolved-app path still carries the title");
 });
 
 test("a failed path query keeps the generic name rather than erroring the poll", async () => {

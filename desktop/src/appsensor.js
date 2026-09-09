@@ -309,7 +309,9 @@ class AppSensor {
       // same-app branch below cannot absorb an unobserved gap as continuity.
       const lapsed = this._closeUnobserved();
 
-      const closed = this.tracker.focus({ app: result.app, at: this.now() });
+      // `title` may be null (title capture off, or an app with no window) —
+      // the tracker takes it as-is, and a null title is a valid app interval.
+      const closed = this.tracker.focus({ app: result.app, title: result.title ?? null, at: this.now() });
       this._emit(closed);
       this.tracker.seen(this.now());
       // Persist the open interval every tick: its `lastSeenAt` is the anchor a
