@@ -40,6 +40,7 @@ ROUTER_MODULES = [
     "focus_sessions",
     "browser_activity",
     "app_activity",
+    "screen_evidence",
     "display",
     "proactive",
     "initiatives",
