@@ -4,7 +4,7 @@ import { FOCUS_PALETTES } from "./focusPalette";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
 import { FocusSessionRecap, type SessionRecapData } from "./FocusSessionRecap";
 import { recapFromSession } from "../../services/sessionRecap";
-import { fetchFocusSession, patchFocusSession } from "../../services/api";
+import { fetchFocusSession, fetchScreenEvidence, patchFocusSession } from "../../services/api";
 
 interface Props {
   sessionId: number;
@@ -33,8 +33,24 @@ export function FocusSessionRecapView({ sessionId, onClose }: Props) {
   const load = useCallback(async () => {
     setFailed(false);
     try {
-      const session = await fetchFocusSession(sessionId, { activity: true });
-      setRecap(recapFromSession(session));
+      // Two reads: the session (score, sensors, timeline) and its Screenpipe
+      // evidence (summary + frames), which is generated async after the shell
+      // posts the window. The evidence fetch never throws — a session with no
+      // Screenpipe simply has none — so a slow or absent evidence read never
+      // blocks the recap from rendering everything else.
+      const [session, screen] = await Promise.all([
+        fetchFocusSession(sessionId, { activity: true }),
+        fetchScreenEvidence(sessionId),
+      ]);
+      const base = recapFromSession(session);
+      setRecap({
+        ...base,
+        screenSummary: screen?.summary ?? null,
+        onTaskPct: screen?.on_task_pct ?? null,
+        screenFrames: (screen?.frames ?? [])
+          .filter((f) => f.image_url)
+          .map((f) => ({ ts: f.ts, app: f.app, title: f.title, url: f.url, imageUrl: f.image_url as string })),
+      });
     } catch {
       setFailed(true);
     }

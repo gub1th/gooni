@@ -64,6 +64,16 @@ describe("recapFromSession", () => {
     expect(recap.completionFrame).toBeNull();
   });
 
+  it("defaults Screenpipe fields to absent — the evidence is a SEPARATE fetch", () => {
+    // The summary is generated async after the shell posts the window, so the
+    // mapper cannot carry it; the recap view merges it in when it lands. A wrong
+    // default here would make a real summary invisible or a crash on absence.
+    const recap = recapFromSession(makeSession());
+    expect(recap.screenSummary).toBeNull();
+    expect(recap.onTaskPct).toBeNull();
+    expect(recap.screenFrames).toEqual([]);
+  });
+
   it("keeps a present completion_frame (the fresh-stop case)", () => {
     const recap = recapFromSession(makeSession({ completion_frame: "data:image/jpeg;base64,AAAA" }));
     expect(recap.completionFrame).toBe("data:image/jpeg;base64,AAAA");

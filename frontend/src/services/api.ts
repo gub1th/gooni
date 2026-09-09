@@ -2359,6 +2359,41 @@ export async function fetchFocusSession(
   return focusSessionCall(`/focus/sessions/${id}${q}`);
 }
 
+export interface ScreenEvidenceFrame {
+  id: number;
+  ts: string;
+  app: string | null;
+  window_name: string | null;
+  url: string | null;
+  title: string | null;
+  text: string | null;
+  image_url: string | null;
+}
+
+export interface ScreenEvidence {
+  session_id: number;
+  summary: string | null;
+  on_task_pct: number | null;
+  summary_at: string | null;
+  frames: ScreenEvidenceFrame[];
+}
+
+/**
+ * A session's Screenpipe evidence: the narrated summary, on-task %, and the
+ * per-frame timeline (with image URLs where Phase 2 uploaded them). Returns null
+ * on any failure OR a 404 — a session with no Screenpipe running simply has no
+ * evidence, which the recap renders as absence, never an error.
+ */
+export async function fetchScreenEvidence(id: number): Promise<ScreenEvidence | null> {
+  try {
+    const res = await apiFetch(`${BASE}/focus/sessions/${id}/screen-evidence`);
+    if (!res.ok) return null;
+    return (await res.json()) as ScreenEvidence;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Recent sessions, newest first — the `/focus` idle screen's history list.
  * `activity: true` folds each row's sensor breakdown (score included) into
