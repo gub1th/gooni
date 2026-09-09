@@ -46,14 +46,16 @@ from app.services import browser_activity_service as bas  # noqa: E402
 TZ = "America/Los_Angeles"
 
 
-def _row(db, client_id, *, host, start_utc, seconds, truncated=False):
+def _row(db, client_id, *, host, start_utc, seconds, truncated=False, title=None):
     db.add(
         BrowserInterval(
             client_id=client_id,
             host=host,
+            # Defaults to the host so pre-existing rows in this file behave as
+            # they always did; the pages checks pass a real one.
+            title=title if title is not None else host,
             path="/",
             url=f"https://{host}/",
-            title=host,
             started_at=start_utc,
             ended_at=start_utc + timedelta(seconds=seconds),
             duration_sec=float(seconds),
@@ -192,6 +194,42 @@ def main() -> int:
     rev = bas.summarize(db, start=day, end=prev)
     check(rev["start"] == prev.isoformat() and rev["end"] == day.isoformat(),
           f"reversed range: {rev['start']}..{rev['end']}")
+
+    # ── PAGES: the same fold one level finer ────────────────────────────────
+    # The title has always been stored; every read surface rolled it up to the
+    # host and dropped it. These pin that the finer fold exists, agrees with the
+    # coarser one, and announces what it cut.
+    pday = date(2026, 8, 20)
+    base = datetime(2026, 8, 20, 18, 0, 0)   # 11:00 PDT, safely mid-day
+    _row(db, "pg-1", host="www.youtube.com", start_utc=base, seconds=600,
+         title="3Blue1Brown - Backpropagation")
+    _row(db, "pg-2", host="www.youtube.com", start_utc=base + timedelta(minutes=20), seconds=300,
+         title="lofi beats")
+    # Same title, same host, two visits — one page, folded.
+    _row(db, "pg-3", host="www.youtube.com", start_utc=base + timedelta(minutes=40), seconds=120,
+         title="3Blue1Brown - Backpropagation")
+    # No title: a real row that must keep its seconds rather than vanish.
+    _row(db, "pg-4", host="example.com", start_utc=base + timedelta(minutes=50), seconds=60,
+         title="")
+    db.commit()
+
+    ps = bas.summarize(db, start=pday, end=pday)
+    pages = {p["title"]: p for p in ps["pages"]}
+    check("3Blue1Brown - Backpropagation" in pages, "the page is named, not just its host")
+    check(
+        pages.get("3Blue1Brown - Backpropagation", {}).get("total_sec") == 720.0,
+        "two visits to one page fold into one row (600 + 120)",
+    )
+    check(pages.get("lofi beats", {}).get("total_sec") == 300.0,
+          "two pages on one host stay separate")
+    check(any(p["title"] == "" and p["host"] == "example.com" for p in ps["pages"]),
+          "an untitled row survives with its host, rather than being dropped")
+
+    host_total = sum(h["total_sec"] for h in ps["hosts"])
+    page_total = sum(p["total_sec"] for p in ps["pages"]) + ps["other_pages_sec"]
+    check(host_total == page_total,
+          f"pages and hosts describe the same seconds ({host_total} vs {page_total})")
+    check(ps["other_pages"] == 0, "nothing cut at this size, and it says so")
 
     db.close()
     if fails:

@@ -71,6 +71,8 @@ export interface SessionRecapData {
   evidence: SessionEvidence[];
   /** Ranked hosts / apps / phone events for the window. */
   browser: SessionNameRow[];
+  /** the browser fold keyed by PAGE TITLE — what the time on those hosts was actually spent on */
+  pages: SessionNameRow[];
   apps: SessionNameRow[];
   device: SessionCountRow[];
   /** Seconds the ranked heads above are NOT showing, per layer. Kept apart
@@ -255,6 +257,11 @@ export function FocusSessionRecap({ recap, onClose, onRename }: Props) {
     .filter((m): m is { at: number; kind: string } => m != null);
 
   const siteBars = recap.browser.map((r) => ({ key: r.name, label: r.label, value: r.seconds }));
+  // Pages, not hosts. "34m on youtube" is a fact about a domain; this is the
+  // fact about the session. Rendered as its own panel rather than replacing the
+  // host bars, because the host ranking is what makes the shape of the sitting
+  // legible at a glance and the titles are what make it specific.
+  const pageBars = recap.pages.map((r) => ({ key: r.name, label: r.label, value: r.seconds }));
   const appBars = recap.apps.map((r) => ({ key: r.name, label: r.label, value: r.seconds }));
   const deviceBars = recap.device.map((r) => ({ key: r.name, label: r.label, value: r.count }));
   const eventBars = eventEntries.map(([kind, n]) => ({ key: kind, label: kindLabel(kind), value: n }));
@@ -458,6 +465,16 @@ export function FocusSessionRecap({ recap, onClose, onRename }: Props) {
                   + {fmtDuration(recap.browserOtherSec)} across other sites
                 </div>
               )}
+            </Panel>
+          )}
+
+          {/* WHAT those sites actually were. The SITES panel above answers
+              "where"; this answers "what", which is the question the whole
+              sensor exists for. Empty for an older session whose read carried
+              no page fold — it renders nothing rather than an empty panel. */}
+          {pageBars.length > 0 && (
+            <Panel pal={pal} title="PAGES">
+              <RecapBarChart rows={pageBars} pal={pal} formatValue={fmtDuration} />
             </Panel>
           )}
 

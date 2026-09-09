@@ -82,12 +82,13 @@ def iso(dt):
 _cid = [0]
 
 
-def browse(db, host, start, end):
+def browse(db, host, start, end, title=None):
     _cid[0] += 1
     db.add(
         BrowserInterval(
             client_id=f"b-{_cid[0]}",
             host=host,
+            title=title,
             path="/",
             url=f"https://{host}/",
             started_at=start,
@@ -311,6 +312,43 @@ def test_quiet_window(db2):
     check(r["warnings"] == [], "a quiet window is not a warning")
 
 
+def test_pages_carry_the_title(db2):
+    """The point of the whole layer: "34m on youtube" vs "34m on WHAT".
+
+    The title has been stored on every row since the sensor shipped; every read
+    surface rolled it up to the host and dropped it. These assert the finer fold
+    exists, agrees with the host fold, and does not reopen the self-host hole.
+    """
+    print("\ntest_pages_carry_the_title")
+    since, until = T0 + m(600), T0 + m(660)
+    browse(db2, "www.youtube.com", since, since + m(20), title="3Blue1Brown - Backpropagation")
+    browse(db2, "www.youtube.com", since + m(20), since + m(25), title="lofi beats")
+    # No title at all — a real row (a page that never set one). It must keep its
+    # seconds under its HOST rather than vanish or share an empty bucket.
+    browse(db2, "example.com", since + m(25), since + m(30), title=None)
+    # Gooni's own tab, WITH a title. The host-keyed query filters on the host;
+    # this one's name column is the title, so a naive copy of that filter would
+    # silently stop excluding anything.
+    browse(db2, "gooni-bot.fly.dev", since + m(30), since + m(40), title="Gooni: what the data says")
+
+    r = focus_session_activity.session_activity(db2, since=since, until=until)
+    pages = {p["name"]: p["seconds"] for p in r["browser"]["pages"]}
+
+    check("3Blue1Brown - Backpropagation" in pages, f"the page is named ({list(pages)})")
+    check(pages.get("3Blue1Brown - Backpropagation") == 1200.0, "and carries its own seconds")
+    check(pages.get("lofi beats") == 300.0, "two pages on one host stay separate")
+    check("example.com" in pages, "an untitled row falls back to its host, not an empty key")
+    check(
+        not any("Gooni" in n for n in pages),
+        f"self-host stays out of PAGES too, title or no title ({list(pages)})",
+    )
+
+    # The two folds describe the same seconds at different grain.
+    host_total = sum(x["seconds"] for x in r["browser"]["top"]) + r["browser"]["other_sec"]
+    page_total = sum(p["seconds"] for p in r["browser"]["pages"]) + r["browser"]["other_pages_sec"]
+    check(host_total == page_total, f"pages and hosts agree ({host_total} vs {page_total})")
+
+
 def main():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
@@ -318,6 +356,7 @@ def main():
     test_scope_is_the_window(db)
     test_overlap_not_containment(db)
     test_self_host_excluded(db)
+    test_pages_carry_the_title(db)
     test_coverage_is_the_union(db)
     test_bounds(db)
     test_no_new_storage(db)

@@ -198,11 +198,55 @@ function hostRow(h, total) {
   return row;
 }
 
+/**
+ * The pages under one host, newest fold first.
+ *
+ * This is the whole point of the pages layer: "3.7h on youtube" is a fact about
+ * a domain, not about what you were doing. The title has always been on the
+ * row; the summary just never asked for it.
+ *
+ * A page whose title EQUALS its host is skipped — that is the untitled
+ * fallback, and repeating the host underneath itself says nothing.
+ */
+function pageRows(host, pages, total) {
+  return pages
+    .filter((p) => p.host === host && p.title && p.title !== host)
+    .map((p) => {
+      const row = el("tr", "page");
+      row.appendChild(el("td"));
+      const name = el("td", "name");
+      name.appendChild(el("span", "ptitle", p.title));
+      name.title = p.title;
+      row.appendChild(name);
+      const time = el("td", "time");
+      time.appendChild(el("div", "dur", formatDuration(p.total_sec)));
+      row.appendChild(time);
+      return row;
+    });
+}
+
 function renderHosts(summary) {
   const total = summary.totals.total_sec;
   const table = el("table");
-  table.replaceChildren(...summary.hosts.map((h) => hostRow(h, total)));
+  const pages = summary.pages || [];
+  const rows = [];
+  for (const h of summary.hosts) {
+    rows.push(hostRow(h, total));
+    rows.push(...pageRows(h.host, pages, total));
+  }
+  table.replaceChildren(...rows);
   $("body").replaceChildren(table);
+
+  // No silent cap: the server ranks pages and counts what it cut, so say so
+  // rather than letting a truncated list read as the whole list.
+  if (summary.other_pages > 0) {
+    const note = el(
+      "div",
+      "note",
+      `+${summary.other_pages} more pages (${formatDuration(summary.other_pages_sec)}) not shown`,
+    );
+    $("body").appendChild(note);
+  }
 }
 
 async function render() {

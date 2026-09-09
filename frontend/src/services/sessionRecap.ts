@@ -117,6 +117,10 @@ export function recapFromSession(session: ServerFocusSession): SessionRecapData 
     eventsByKind,
     evidence: act?.camera_evidence ?? [],
     browser: act?.browser.top ?? [],
+    // The finer fold, when the read carried one. Empty is a legitimate answer
+    // (an older session, or a window read) and renders as no panel rather than
+    // an empty one.
+    pages: act?.browser.pages ?? [],
     apps: act?.app.top ?? [],
     device: act?.device.top ?? [],
     browserOtherSec: act?.browser.other_sec ?? 0,

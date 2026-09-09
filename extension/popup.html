@@ -85,6 +85,15 @@
       td.name { padding-left: 8px; min-width: 0; }
       .host { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .meta { font-size: 10px; color: var(--dim); }
+      /* A page sits UNDER its host: indented, dimmer, no favicon, no bar. The
+         host row owns the magnitude; these say what the magnitude was spent on. */
+      tr.page td { padding-top: 1px; padding-bottom: 1px; border: 0; }
+      tr.page .name { padding-left: 10px; }
+      .ptitle {
+        display: block; font-size: 11px; color: var(--dim);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      tr.page .time .dur { font-size: 10px; color: var(--dim); }
       .track { height: 3px; background: var(--line); border-radius: 2px; margin-top: 4px; }
       .track > i { display: block; height: 100%; background: var(--bar); border-radius: 2px; }
       td.time { text-align: right; white-space: nowrap; padding-left: 10px; }

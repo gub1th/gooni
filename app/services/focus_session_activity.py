@@ -101,6 +101,7 @@ import json
 from datetime import date as _date
 from datetime import datetime, timedelta
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from .activity_context import union_seconds
@@ -116,7 +117,7 @@ from .focus_attribution import (
 from .focus_cam_service import EVIDENCE_TRACKABLE, VALID_EVENT_KINDS
 from .focus_cam_service import SOURCE as _CAM_SOURCE
 from .interval_ingest import MAX_INTERVAL_SEC, parse_dt
-from .self_hosts import is_self_host
+from .self_hosts import SELF_HOSTS, is_self_host
 
 # The widest window one read will answer for.
 #
@@ -228,7 +229,9 @@ def _json_at_rows(
     return out, capped
 
 
-def _intervals(db: Session, model, name_col, since: datetime, until: datetime, *, layer: str):
+def _intervals(
+    db: Session, model, name_col, since: datetime, until: datetime, *, layer: str, where=None
+):
     """One interval table's rows OVERLAPPING `[since, until)`, capped.
 
     The exact predicate is `started_at < until AND ended_at > since`, but only
@@ -246,6 +249,7 @@ def _intervals(db: Session, model, name_col, since: datetime, until: datetime, *
                 model.started_at > since - reach,
                 model.started_at < until,
                 model.ended_at > since,
+                *( [where] if where is not None else [] ),
             )
             .order_by(model.started_at.desc())
             .limit(MAX_SCAN_INTERVALS + 1)
@@ -577,6 +581,38 @@ def session_activity(
         top, other = rank(names, label_fn=label_fn)
         layers[key] = {"top": top, "other_sec": other}
         all_spans.extend(_clipped_spans(rows, since, until))
+
+        if key == "browser":
+            # PAGES — the same overlap fold keyed by the page's TITLE instead of
+            # its host, which is the difference between "34m on youtube" and
+            # "34m on 3Blue1Brown — Backpropagation". No new capture: `title`
+            # has been stored on every row since the sensor shipped and every
+            # read surface simply rolled it up to the host and dropped it.
+            #
+            # A SECOND query rather than a wider first one, on purpose. The
+            # spans, the coverage union and the existing host ranking all read
+            # `rows`, and widening its shape would thread a fifth element
+            # through `attribute_intervals` and `_clipped_spans` to serve one
+            # additional ranking. This is a bounded read of an indexed range.
+            #
+            # The key is COALESCE(title, host): a row with no title is real (a
+            # page that never set one, a redirect caught mid-flight) and keeps
+            # its seconds under its host rather than being dropped or collapsed
+            # into a shared "" bucket with every other untitled page.
+            # Self-hosts are excluded IN SQL here, not by a python pass over the
+            # result. The host-keyed query above can filter on `r[1]` because
+            # that IS the host; this query's `r[1]` is the TITLE, so the same
+            # line would have silently stopped excluding anything and let
+            # Gooni's own tabs into the ranking under their page titles.
+            page_col = func.coalesce(func.nullif(BrowserInterval.title, ""), BrowserInterval.host)
+            page_rows, _ = _intervals(
+                db, BrowserInterval, page_col, since, until, layer="pages",
+                where=func.lower(func.trim(BrowserInterval.host)).notin_(sorted(SELF_HOSTS)),
+            )
+            page_names = attribute_intervals([window], page_rows).get(bucket_key, {})
+            page_top, page_other = rank(page_names)
+            layers[key]["pages"] = page_top
+            layers[key]["other_pages_sec"] = page_other
 
     # The UNION, not the sum: Chrome frontmost while a tab is focused is ONE
     # observed second reported by two sensors.
