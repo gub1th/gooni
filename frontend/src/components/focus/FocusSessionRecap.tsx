@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { FONT } from "../../ui";
-import { FOCUS_PALETTES } from "./focusPalette";
+import { FOCUS_PALETTES, type FocusPalette } from "./focusPalette";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
 import { fmtDuration, fmtMinutes } from "../../services/focusTime";
 import { scoreTier, focusFractionSeries } from "../../services/focusScore";
@@ -87,6 +87,12 @@ export interface SessionRecapData {
   /** Caps that bit on the activity read — shown rather than silently applied. */
   warnings: string[];
   completionFrame: string | null;
+  /** Screenpipe narration — what you ACTUALLY did this session, from the screen.
+   *  All null when Screenpipe wasn't running: rendered as absence, not an error. */
+  screenSummary: string | null;
+  onTaskPct: number | null;
+  /** Frames that carry an uploaded image (Phase 2), oldest first — the scrubber. */
+  screenFrames: { ts: string; app: string | null; title: string | null; url: string | null; imageUrl: string }[];
 
   // ── the score (2026-08-16) ───────────────────────────────────────────────
   /**
@@ -193,6 +199,77 @@ interface Props {
    *  read-only, but a future embed (a share view, say) can opt out by simply
    *  not passing it, rather than the component guessing from context. */
   onRename?: (title: string) => void;
+}
+
+/**
+ * The visual scrubber (Phase 2). A horizontal strip of the session's uploaded
+ * frames; click one to enlarge. Deliberately NOT Screenpipe's full playback
+ * timeline — Gooni holds a session's frames, not the whole day, so this is a
+ * thumbnail row over the sitting, not a scrubbable video. A frame with no image
+ * never reaches here (the view filters those out), so an empty strip means a
+ * text-only session and renders nothing.
+ */
+function ScreenScrubber({
+  pal,
+  frames,
+}: {
+  pal: FocusPalette;
+  frames: { ts: string; app: string | null; title: string | null; url: string | null; imageUrl: string }[];
+}) {
+  const [open, setOpen] = useState<number | null>(null);
+  return (
+    <div
+      style={{
+        marginTop: 16, padding: "14px 16px", borderRadius: 14,
+        border: `1px solid ${pal.rule}`, background: pal.card,
+      }}
+    >
+      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.14em", color: pal.ink3, marginBottom: 10 }}>
+        WHAT WAS ON SCREEN · {frames.length}
+      </div>
+      <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
+        {frames.map((f, i) => (
+          <button
+            key={i}
+            onClick={() => setOpen(i)}
+            title={f.title || f.app || ""}
+            style={{
+              flex: "none", width: 132, height: 82, borderRadius: 8, overflow: "hidden",
+              border: `1px solid ${pal.rule}`, padding: 0, cursor: "pointer", background: pal.paper,
+            }}
+          >
+            <img
+              src={f.imageUrl}
+              alt={f.title || ""}
+              loading="lazy"
+              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+            />
+          </button>
+        ))}
+      </div>
+      {open != null && frames[open] && (
+        <div
+          onClick={() => setOpen(null)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.82)",
+            display: "flex", alignItems: "center", justifyContent: "center", padding: 32, cursor: "zoom-out",
+          }}
+        >
+          <div style={{ maxWidth: "92vw", maxHeight: "92vh", display: "flex", flexDirection: "column", gap: 10 }}>
+            <img
+              src={frames[open].imageUrl}
+              alt=""
+              style={{ maxWidth: "92vw", maxHeight: "84vh", objectFit: "contain", borderRadius: 10 }}
+            />
+            <div style={{ fontFamily: FONT, fontSize: 12, color: "#ddd", textAlign: "center" }}>
+              {frames[open].app}
+              {frames[open].url ? ` · ${frames[open].url}` : frames[open].title ? ` · ${frames[open].title}` : ""}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function FocusSessionRecap({ recap, onClose, onRename }: Props) {
@@ -343,6 +420,50 @@ export function FocusSessionRecap({ recap, onClose, onRename }: Props) {
             close
           </button>
         </div>
+
+        {/* WHAT YOU DID — the Screenpipe narration. The headline answer the
+            whole dashboard is evidence FOR, so it sits above the grid. Rendered
+            ONLY when it exists: no Screenpipe running means no summary, which is
+            absence (nothing drawn), never an error or an invented paragraph. */}
+        {recap.screenSummary && (
+          <div
+            style={{
+              marginTop: 24, padding: "18px 20px", borderRadius: 14,
+              border: `1px solid ${pal.rule}`, background: pal.card,
+              display: "flex", flexDirection: "column", gap: 10,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.14em", color: pal.ink3 }}>
+                WHAT YOU DID
+              </span>
+              {recap.onTaskPct != null && (
+                <span
+                  title="the model's estimate of how much of the session served the stated task"
+                  style={{
+                    fontSize: 11, fontWeight: 600, letterSpacing: "0.04em",
+                    padding: "2px 9px", borderRadius: 999,
+                    color: recap.onTaskPct >= 60 ? pal.accent : pal.warn,
+                    border: `1px solid ${recap.onTaskPct >= 60 ? pal.accent : pal.warn}`,
+                  }}
+                >
+                  {recap.onTaskPct}% on task
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: 14, lineHeight: 1.55, color: pal.ink }}>
+              {recap.screenSummary}
+            </div>
+          </div>
+        )}
+
+        {/* WHAT WAS ON SCREEN — the visual scrubber (Phase 2). A horizontal
+            strip of the session's uploaded frames, click to enlarge. Only the
+            frames that carry an image (Phase 2 uploaded) are here; a text-only
+            session shows nothing rather than an empty strip. */}
+        {recap.screenFrames.length > 0 && (
+          <ScreenScrubber pal={pal} frames={recap.screenFrames} />
+        )}
 
         {/* dashboard grid */}
         <div

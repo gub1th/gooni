@@ -134,6 +134,12 @@ export function recapFromSession(session: ServerFocusSession): SessionRecapData 
     // See the header comment — this is the one field with no server-side
     // per-session storage. Present only on a just-stopped session's response.
     completionFrame: session.completion_frame ?? null,
+    // Screenpipe evidence arrives from a SEPARATE fetch (the summary is generated
+    // async after the shell posts the window), so it defaults to absent here and
+    // the recap view merges it in when it lands.
+    screenSummary: null,
+    onTaskPct: null,
+    screenFrames: [],
     // The score. `undefined` (no `activity` object at all — this read wasn't
     // scored) and `null` (scored, but nothing was observed) are DIFFERENT
     // answers and must stay different through this mapper — see
