@@ -2022,7 +2022,14 @@ export interface SessionActivity {
   camera_events: SessionCameraEvent[];
   camera_evidence: SessionEvidence[];
   /** `other_sec` is the ranked tail — a head shown as the whole is a lie. */
-  browser: { top: SessionNameRow[]; other_sec: number };
+  browser: {
+    top: SessionNameRow[];
+    other_sec: number;
+    /** Page-level fold (title, falling back to host) — present only when the
+     *  read was given a session's runs. Additive: the window-only read omits it. */
+    pages?: SessionNameRow[];
+    other_pages_sec?: number;
+  };
   app: { top: SessionNameRow[]; other_sec: number };
   device: { top: SessionCountRow[]; other_count: number };
   /** Union of both interval layers. A claim about the SENSORS, not the human. */

@@ -398,6 +398,11 @@ def serialize(r: BrowserInterval) -> dict:
 # Longest period the popup may ask for in one go. Bounds the CASE ladder.
 MAX_SUMMARY_DAYS = 31
 
+#: How many ranked PAGES a summary returns before the rest becomes a counted
+#: tail. Deliberately generous — the popup groups them under their host, so the
+#: budget is spent across every host rather than on one.
+MAX_SUMMARY_PAGES = 60
+
 
 def _day_bounds(tz, day) -> tuple[datetime, datetime]:
     """One local calendar day → its [start, end) in naive UTC."""
@@ -482,6 +487,45 @@ def summarize(db: Session, *, start=None, end=None) -> dict:
         for r in host_rows
     ]
 
+    # PAGES — the same fold one level finer, and the whole reason this exists:
+    # every read surface rolled up to the HOST and threw away the title the
+    # sensor had already stored, so "3.7h on youtube" could never become "3.7h
+    # on WHAT". No new capture — `title` has been on the row since the sensor
+    # shipped; it was simply never asked for.
+    #
+    # Grouped by (host, title) rather than by URL: a title is what a human
+    # recognises, and one page legitimately has many URLs (query strings, a
+    # video's `t=` seek, a doc's anchor) that are all the same THING. Grouping
+    # by URL would shatter one page into twenty rows of ninety seconds each.
+    #
+    # CAPPED, and the cap is announced. A tab-focus sensor produces thousands of
+    # distinct titles a week, and the caller wants a ranked head — so the tail
+    # is COUNTED into `other_sec`/`other_pages` rather than silently cut, the
+    # same rule the rest of this codebase's rankers follow.
+    page_rows = (
+        db.query(BrowserInterval.host, BrowserInterval.title, *aggregates)
+        .filter(in_window)
+        .group_by(BrowserInterval.host, BrowserInterval.title)
+        .order_by(_sum(duration).desc())
+        .all()
+    )
+    pages_all = [
+        {
+            "host": r[0],
+            # A row with no title is real (a page that never set one, a redirect
+            # caught mid-flight). It keeps its seconds and shows as its host
+            # rather than being dropped or labelled "unknown".
+            "title": (r[1] or "").strip(),
+            "total_sec": float(r[2] or 0),
+            "sessions": int(r[3] or 0),
+            "truncated_sec": float(r[4] or 0),
+            "truncated_sessions": int(r[5] or 0),
+        }
+        for r in page_rows
+    ]
+    pages = pages_all[:MAX_SUMMARY_PAGES]
+    tail = pages_all[MAX_SUMMARY_PAGES:]
+
     # One CASE branch per local day, boundaries computed per-day so a DST
     # switch inside the window lands on the right side of midnight.
     day_expr = case(
@@ -543,5 +587,8 @@ def summarize(db: Session, *, start=None, end=None) -> dict:
         "end": end.isoformat(),
         "days": day_series,
         "hosts": hosts,
+        "pages": pages,
+        "other_pages": len(tail),
+        "other_pages_sec": sum(p["total_sec"] for p in tail),
         "totals": totals,
     }
