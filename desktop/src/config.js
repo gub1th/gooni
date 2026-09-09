@@ -89,6 +89,14 @@ const DEFAULTS = Object.freeze({
     pollMs: 4000,
     idleSec: 90,
     flushMs: 60_000,
+    // Capture the frontmost WINDOW's title alongside the app name. This is the
+    // difference between "Cursor 3h" and "Cursor — sidecar.py". Default ON
+    // because the whole point of the sensor is to answer "what was I doing",
+    // and the app name barely does. It is the field most likely to carry
+    // something private (a client name, a doc title), so it is its own switch
+    // — flip it off and the sensor falls back to app-name-only with no other
+    // change.
+    captureTitles: true,
   }),
 });
 
@@ -195,6 +203,7 @@ function mergeConfig(fileConfig = {}, env = {}) {
     },
     appSensor: {
       enabled: file.appSensor?.enabled ?? base.appSensor.enabled,
+      captureTitles: file.appSensor?.captureTitles ?? base.appSensor.captureTitles,
       pollMs: clampNumber(file.appSensor?.pollMs ?? base.appSensor.pollMs, {
         min: 1000,
         max: 60_000,
