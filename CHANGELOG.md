@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.265.0 — 2026-09-09 (minor)
+
+- feat(desktop): the Screenpipe → Gooni bridge (shell reader + stop watcher) (#556)
+
 ## 0.264.0 — 2026-09-09 (minor)
 
 - feat(focus): backend for Screenpipe screen-evidence per session (#555)
