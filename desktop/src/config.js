@@ -86,16 +86,22 @@ const DEFAULTS = Object.freeze({
    */
   screenEvidence: Object.freeze({
     // Ingest Screenpipe's capture for a focus session's window when the session
-    // stops. Off by default: it only does anything if Screenpipe is installed
-    // and running, and it is a deliberate opt-in to send screen text (Phase 1)
-    // and screenshots (Phase 2) to the backend.
-    enabled: false,
+    // stops. ON by default: this is a single-user tool whose whole point is
+    // "what did I actually do", and a capture layer that does nothing until you
+    // find a config file is the lost-data trap `appSensor.enabled` and the
+    // extension's default both avoid. It is a NO-OP unless Screenpipe is
+    // installed and running (the reader checks the DB exists), so default-on
+    // costs nothing on a machine without it. The toggle STAYS — it's the fast
+    // off-switch if the summaries ever go wrong — it just defaults the useful way.
+    enabled: true,
     // Poll cadence for noticing a session stop (the server owns the lifecycle;
     // the shell watches `active`).
     pollMs: 10_000,
-    // Phase 2: also upload each frame's JPEG to R2 for the visual scrubber.
-    // Separate toggle because it is the expensive, more-sensitive half.
-    uploadFrames: false,
+    // Phase 2: also upload each frame's JPEG to R2 for the visual scrubber. ON
+    // by default too — the scrubber is most of the value, it degrades cleanly to
+    // text-only if R2 isn't configured (the upload 503s, the summary still
+    // lands), and the captain's call was frames-to-cloud for sessions.
+    uploadFrames: true,
     // Path to Screenpipe's SQLite. Empty → the default under $HOME.
     dbPath: "",
   }),
