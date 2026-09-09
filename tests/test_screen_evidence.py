@@ -177,6 +177,26 @@ def test_image_is_additive(db):
     check(missing is False, "an image with no text row is False, not an error")
 
 
+def test_parser_handles_real_model_formatting(db):
+    """The exact shape the live model produced, which the first parser missed.
+
+    gpt-4o-mini numbered its two answers and wrote "2. ON_TASK: 85" — a
+    start-anchored match dropped the 85 to None on the very first real run.
+    Also covers bold and a trailing %.
+    """
+    print("\nparser tolerates real model formatting")
+    for raw, want_pct, want_prose_starts in [
+        ("1. You worked in Cursor.\n2. ON_TASK: 85", 85, "You worked"),
+        ("You read docs.\n**ON_TASK:** 40%", 40, "You read docs."),
+        ("Mostly Slack.\nON_TASK: unknown", None, "Mostly Slack."),
+        ("Did stuff. ON_TASK: 55", 55, "Did stuff"),
+    ]:
+        prose, pct = se._parse_summary(raw)
+        check(pct == want_pct, f"pct {pct} == {want_pct} for {raw!r}")
+        check(prose.startswith(want_prose_starts), f"prose {prose!r} starts {want_prose_starts!r}")
+        check("ON_TASK" not in prose, "marker stripped from prose")
+
+
 def main():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
@@ -189,6 +209,7 @@ def main():
     test_on_task_unknown_is_none_not_zero(db)
     test_failed_model_keeps_prior_summary(db)
     test_image_is_additive(db)
+    test_parser_handles_real_model_formatting(db)
     db.close()
     print()
     if _failures:

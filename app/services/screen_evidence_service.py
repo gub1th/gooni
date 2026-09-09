@@ -22,6 +22,7 @@ complete row — see the model docstring).
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 
 from sqlalchemy.orm import Session
@@ -256,25 +257,42 @@ def summarize(db: Session, session_id: int) -> dict:
     return {"summary": summary, "on_task_pct": on_task}
 
 
+#: `ON_TASK: 85`, but tolerant of what the model actually does: a leading list
+#: marker ("2. ON_TASK:"), bold ("**ON_TASK:**"), a trailing "%", or the word
+#: "unknown". The real first run wrote "2. ON_TASK: 85" and a start-anchored
+#: match dropped the 85 to None — so this matches the label ANYWHERE in a line.
+_ON_TASK_RE = re.compile(r"on[_ ]?task\s*:?\s*\**\s*([0-9]{1,3}|unknown)", re.IGNORECASE)
+
+
 def _parse_summary(raw: str) -> tuple[str, int | None]:
     """Split the model's output into the prose and the on-task number.
 
-    The `ON_TASK:` line is pulled off the end; anything else is the summary. A
-    missing or non-numeric value is None (unmeasured), never 0 — the same
-    None-not-zero rule the focus score follows, since 0 reads as "did nothing".
+    The `ON_TASK:` line is pulled out wherever it sits; everything else is the
+    summary. A missing, "unknown", or out-of-range value is None (unmeasured),
+    never 0 — the same None-not-zero rule the focus score follows, since 0 reads
+    as "did nothing".
     """
     on_task: int | None = None
     kept_lines: list[str] = []
     for line in raw.splitlines():
-        stripped = line.strip()
-        upper = stripped.upper()
-        if upper.startswith("ON_TASK:"):
-            val = stripped.split(":", 1)[1].strip().rstrip("%").strip()
-            try:
-                on_task = max(0, min(100, int(round(float(val)))))
-            except (ValueError, TypeError):
-                on_task = None
+        m = _ON_TASK_RE.search(line)
+        if m:
+            val = m.group(1)
+            if val.isdigit():
+                on_task = max(0, min(100, int(val)))
+            # else "unknown" → stays None.
+            # Keep any prose BEFORE the marker (the model sometimes folds the
+            # number onto the end of a sentence instead of its own line); drop
+            # from the marker onward. A leading list bullet on that prefix is
+            # trimmed so "2. " doesn't survive as a stray fragment.
+            prefix = line[: m.start()].strip()
+            prefix = re.sub(r"^\d+\.\s*", "", prefix).strip(" .")
+            if prefix:
+                kept_lines.append(prefix)
             continue
         kept_lines.append(line)
+    # Strip a leftover leading "1." list marker on the prose (the model numbers
+    # the two asks; only the first survives once ON_TASK's line is removed).
     summary = "\n".join(kept_lines).strip()
+    summary = re.sub(r"^\s*1\.\s*", "", summary)
     return summary, on_task
