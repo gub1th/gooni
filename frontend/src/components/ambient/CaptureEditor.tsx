@@ -1,5 +1,6 @@
+import { MessageSquare } from "lucide-react";
 import type { Editor } from "@tiptap/react";
-import { FONT } from "../../ui";
+import { FONT, frostInk } from "../../ui";
 import { NoteEditor } from "../notes/NoteEditor";
 import { ink, surf } from "./ambientInk";
 import type { ApiNote } from "../../services/api";
@@ -34,6 +35,7 @@ export function CaptureEditor({
   initialContent,
   onReady,
   onEscape,
+  onCollapse,
   onSubmitted,
 }: {
   open: boolean;
@@ -48,6 +50,8 @@ export function CaptureEditor({
   initialContent: string;
   onReady: (editor: Editor | null) => void;
   onEscape: () => void;
+  /** the `chat` pill — the way back to the collapsed box. */
+  onCollapse: () => void;
   onSubmitted: (note: ApiNote | null) => void;
 }) {
   if (!mounted) return null;
@@ -97,16 +101,34 @@ export function CaptureEditor({
         onSubmitted={(note) => onSubmitted(note)}
       />
 
-      {/* The two exits, stated once. Quiet enough to ignore, present enough to
-          learn — the box's own `⌘↵ note` hint was the same bargain. */}
-      <div
+      {/* The way BACK, in the corner the `note` pill leaves from — so the door
+          between the two sizes is one place, not two. It replaced a
+          `⌘↵ save · esc collapse` caption, which was the same mistake the box's
+          own `⌘↵ note` hint made: a label for a shortcut is the least useful
+          thing a corner can hold. Both shortcuts still work. */}
+      <button
+        onClick={onCollapse}
+        title="Back to the chat box — nothing is lost, the draft comes with you"
+        aria-label="Back to the chat box"
         style={{
-          position: "absolute", left: 26, bottom: 18, pointerEvents: "none",
-          fontFamily: FONT, fontSize: 10.5, letterSpacing: 0.3, color: ink(0.3),
+          position: "absolute", left: 22, bottom: 16, zIndex: 1,
+          display: "inline-flex", alignItems: "center", gap: 5,
+          borderRadius: 999, cursor: "pointer",
+          // The `note` pill's treatment exactly: tint only, hairline, no fill,
+          // no shadow. They are the same control pointing opposite ways.
+          border: `1px solid ${ink(0.14)}`,
+          background: ink(0.05),
+          padding: "3px 9px",
+          fontFamily: FONT, fontSize: 10.5, letterSpacing: 0.2,
+          color: ink(0.42),
+          transition: "color 160ms ease, border-color 160ms ease, background 160ms ease",
         }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = frostInk.accent; }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = ink(0.42); }}
       >
-        ⌘↵ save · esc collapse
-      </div>
+        <MessageSquare size={11} strokeWidth={1.8} />
+        chat
+      </button>
     </div>
   );
 }
