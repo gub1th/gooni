@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import pkg from "../../../package.json";
 import { GOONI_THEMES, GOONI_THEME_LABELS, THEME_PALETTES, useGooniThemeStore, type GooniTheme } from "../../stores/useGooniThemeStore";
+import { useHomeWaveStore } from "../../stores/useHomeWaveStore";
 import { useProfileStore } from "../../stores/useProfileStore";
 import { BASE as API_BASE, apiFetch, uploadAvatarImage, updatePublicAvatar } from "../../services/api";
 import { SettingsPanel } from "../SettingsPanel";
@@ -109,6 +110,8 @@ export function SettingsView() {
 function AppearanceTab() {
   const selectedTheme = useGooniThemeStore((s) => s.theme);
   const setTheme = useGooniThemeStore((s) => s.setTheme);
+  const waveEnabled = useHomeWaveStore((s) => s.waveEnabled);
+  const setWaveEnabled = useHomeWaveStore((s) => s.setWaveEnabled);
 
   return (
     <>
@@ -159,6 +162,27 @@ function AppearanceTab() {
             );
           })}
         </div>
+      </section>
+
+      <section style={{ marginBottom: 22 }}>
+        <SectionLabel>home centre</SectionLabel>
+        <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={waveEnabled}
+            onChange={(e) => setWaveEnabled(e.target.checked)}
+            style={{ marginTop: 2, accentColor: "#4ADE80", cursor: "pointer" }}
+          />
+          <span>
+            <span style={{ fontSize: 13, color: ctok.text }}>Rest as the waveform</span>
+            <span style={{ display: "block", fontSize: 11.5, color: ctok.muted, marginTop: 3, maxWidth: 380 }}>
+              Off (default), the capture box sits at the centre ready to type in.
+              On, the breathing wave rests there and the box appears when you
+              reach for it. Either way it is the same stroke, so the focus glow
+              and the pending tint look identical.
+            </span>
+          </span>
+        </label>
       </section>
     </>
   );

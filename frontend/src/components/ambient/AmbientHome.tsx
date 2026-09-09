@@ -18,6 +18,7 @@ import { CornerButton } from "../shell/CornerChrome";
 import { ProactiveLine } from "./ProactiveLine";
 import { CaptureEditor } from "./CaptureEditor";
 import { captureState, homeInteractive, homeOpacity } from "./captureStates";
+import { useHomeWaveStore } from "../../stores/useHomeWaveStore";
 import { hasRichContent, textToParagraphs } from "../notes/quickNote";
 import { ink } from "./ambientInk";
 import { emptyRetained, mergeTodayRows, retainTicked } from "./todayRows";
@@ -171,6 +172,7 @@ export function AmbientHome({
   const [limbo, setLimbo] = useState<LogMessage[]>([]);
   const [limboTotal, setLimboTotal] = useState(0);
   const [boxMode, setBoxMode] = useState(false);
+  const waveEnabled = useHomeWaveStore((st) => st.waveEnabled);
   const [logSheet, setLogSheet] = useState(false);
   // The daily fill, offered in TODAY until it is put away for the day. The
   // matrix (the RECORD) is a different door — the rail's — and the two share one
@@ -968,6 +970,14 @@ export function AmbientHome({
 
   // Capturing DIMS the home, it no longer deletes it. The ladder (and the reason
   // a covering surface is the only zero) lives in captureStates.ts.
+  // THE BOX IS THE RESTING STATE unless the wave is switched back on.
+  //
+  // `boxMode` still means what it always did — "the box was SUMMONED" (hover,
+  // `/`, a click) — and that is deliberately NOT the same question as "is the
+  // stroke drawn as a rect". Keeping them apart is what stops the resting box
+  // from dimming the home: `captureState` below still reads `boxMode`, so the
+  // day stays at full brightness until you actually reach for the composer.
+  const boxShown = boxMode || !waveEnabled;
   const captureMode = captureState({ boxOpen: boxMode, editorOpen });
   // Keep the polling gate in step with `covered`, and REFRESH on the way
   // back: a home that paused for ten minutes behind a panel would otherwise
@@ -989,6 +999,8 @@ export function AmbientHome({
   const stageLive = homeInteractive(captureMode, covered);
 
   function onRootDoubleClick(e: React.MouseEvent) {
+    // `boxMode`, not `boxShown`: with the box at rest it is always on screen,
+    // and a permanently-blocked double-click would take the sticky note away.
     if (boxMode || editorOpen || covered || logSheet) return;
     if ((e.target as HTMLElement).closest("button, textarea, input, a, [data-sticky], [data-chat-ribbon], [data-quickfind], [data-log-sheet]")) return;
     stickyRef.current?.createAt(e.clientX, e.clientY);
@@ -1013,7 +1025,7 @@ export function AmbientHome({
         // The editor is the box at another size, so the stroke stays a rect for
         // it — it eases out to the bigger outline instead of snapping back to a
         // wave under a panel.
-        boxMode={boxMode || editorOpen}
+        boxMode={boxShown || editorOpen}
         rect={rect}
         thinking={thinking}
         dimmed={fillOpen}
@@ -1092,14 +1104,14 @@ export function AmbientHome({
             resize: "none", outline: "none", border: "none", overflow: "hidden",
             fontFamily: FONT, fontSize: 16, lineHeight: 1.5, padding: "16px 22px",
             borderRadius: 20, color: "rgb(var(--gooni-ink, 244 245 244))", caretColor: frostInk.accent,
-            background: boxMode ? "color-mix(in srgb, rgb(var(--gooni-surf, 11 15 13)) 52%, transparent)" : "transparent",
-            backdropFilter: boxMode ? "blur(16px)" : "none",
-            WebkitBackdropFilter: boxMode ? "blur(16px)" : "none",
+            background: boxShown ? "color-mix(in srgb, rgb(var(--gooni-surf, 11 15 13)) 52%, transparent)" : "transparent",
+            backdropFilter: boxShown ? "blur(16px)" : "none",
+            WebkitBackdropFilter: boxShown ? "blur(16px)" : "none",
             // Hands the centre over during the morph: the box fades out as the
             // editor fades in, which is also what hides the two frost tints
             // differing.
-            opacity: boxMode && !editorOpen ? 1 : 0,
-            pointerEvents: boxMode && !editorOpen ? "auto" : "none",
+            opacity: boxShown && !editorOpen ? 1 : 0,
+            pointerEvents: boxShown && !editorOpen ? "auto" : "none",
             transition: "opacity 200ms ease, background 220ms ease",
           }}
         />
@@ -1108,7 +1120,7 @@ export function AmbientHome({
             told you about the fast path and offered nothing to anyone who
             wanted room to write. The shortcut is unchanged (⌘↵ in the box still
             writes the note straight off), and the pill now buys the editor. */}
-        {boxMode && !editorOpen && (
+        {boxShown && !editorOpen && (
           <button
             onClick={openEditor}
             title={editorHasDraft
